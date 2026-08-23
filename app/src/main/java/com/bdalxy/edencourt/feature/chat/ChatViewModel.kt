@@ -120,6 +120,14 @@ class ChatViewModel(
     /** 当前流式生成任务（用于停止） */
     private var generatingJob: Job? = null
 
+    /**
+     * 生成请求代际序号（P1 竞态修复）。
+     * 每次发送消息自增：后发消息代际更大，覆盖先发。
+     * streamReply 闸门据此判断「本请求是否已过期」，避免快速连发时
+     * 两条消息都卡在挂起点、后一条被先发任务的活跃状态拦截而不触发 AI 回复。
+     */
+    private var generationCounter = 0L
+
     init {
         viewModelScope.launch {
             // 空会话时插入欢迎语：绑定角色卡且有开场白则用角色开场白，否则用默认助手欢迎语（T4.6）
@@ -146,6 +154,8 @@ class ChatViewModel(
         if (content.isEmpty()) return
         // 打断当前 AI 回复（T5.10：真人式双向可打断，已生成内容保留）
         interruptCurrentGeneration()
+        // 递增代际：本次发送为最新请求，旧请求若尚未真正启动则直接作废（P1 竞态修复）
+        val generation = ++generationCounter
         viewModelScope.launch {
             // 1. 取当前历史（不含本次输入）用于 Prompt 构建
             val history = repository.observeMessages(conversationId).first()
@@ -161,7 +171,7 @@ class ChatViewModel(
             // 3. 更新会话摘要（标题/预览/时间）
             updateConversationSummary(content)
             // 4. 组装 Prompt（system 用会话绑定的角色卡 + T5.4 注入相关长期记忆）并开始流式生成
-            streamReply(buildPrompt(history, content))
+            streamReply(buildPrompt(history, content), generation)
         }
     }
 
@@ -196,17 +206,19 @@ class ChatViewModel(
             _errorMessages.update { it - failedAiId }
             repository.deleteMessage(failed)
             val newHistory = history.filter { it.id != failedAiId && it.id != userMsg.id }
-            streamReply(buildPrompt(newHistory, userMsg.content))
+            streamReply(buildPrompt(newHistory, userMsg.content), generationCounter)
         }
     }
 
     /**
      * 流式生成：插入 AI 占位消息，逐段追加内容到 Room（驱动逐字显示）；含 429 退避重试。
-     * 并发控制（T5.10）：闸门判断「是否已有活跃生成任务」，而非 _isGenerating 标志——
-     * 打断场景下旧任务可能尚未走完 finally，用标志判断会误拦新回复；打断已 cancel 旧任务故 isActive=false 不拦截。
+     * 并发控制（T5.10 + P1 竞态修复）：以「代际序号」为闸门判断本请求是否已过期——
+     * 快速连发时，后发消息代际更大，先发请求即便尚未走完挂起点也视为过期直接作废，
+     * 后发请求总能启动；彻底避免「旧请求已启动、新请求被活跃任务拦截而永不回复」的竞态。
      */
-    private suspend fun streamReply(promptMessages: List<ChatMessage>) {
-        if (generatingJob?.isActive == true) return
+    private suspend fun streamReply(promptMessages: List<ChatMessage>, generation: Long) {
+        // 代际闸门：本请求已被更新的发送覆盖（generation != 当前最新）则直接作废，不启动生成
+        if (generation != generationCounter) return
         _isGenerating.value = true
         // AI 占位消息（空内容 + 生成中状态，UI 显示「对方正在输入…」）
         val aiId = repository.insertMessage(
