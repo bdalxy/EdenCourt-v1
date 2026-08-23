@@ -165,7 +165,7 @@ app/src/main/
 ### T1.8 编译并安装到真机/模拟器
 - 依赖：T1.7、T0.0（环境已确认）
 - 参考：开发准备手册「四、环境配置要点」
-- 操作：`./gradlew assembleDebug` 编译（已执行）→ 用 Android Studio 安装到红米 K60 / 荣耀 Win RT（真机 USB 调试）
+- 操作：`.\gradlew assembleDebug` 编译（已执行）→ 用 Android Studio 安装到红米 K60 / 荣耀 Win RT（真机 USB 调试）
 - 文件：无（验证步骤）
 - 验收：[x] `BUILD SUCCESSFUL`（2026-08-23 实测 2m3s，35 任务 0 错误）· [x] debug APK 已生成（app-debug.apk 24.06MB）· [x] APK 安装成功（adb install Success，真机 K60）· [x] 启动无崩溃（PID 存活，无 FATAL）· [x] 可切换 6 个页面（uiautomator 逐页验证 + 截图见 `.trae/screenshots/`）
 
@@ -509,7 +509,7 @@ app/src/main/
 - 参考：企划书 5.3.1/5.3.2/5.8.1（聊天页顶部=返回+角色名+更多）
 - 操作：绑定角色卡的会话，列表项头像+名称显示角色卡头像/角色名；聊天页顶部显示角色名；未绑定显示「默认助手」
 - 文件：ConversationListScreen · ChatScreen · ConversationListViewModel · ChatViewModel
-- 验收：[x] 绑定角色卡的会话列表项显示角色头像+角色名 · [x] 聊天页顶部显示角色名 · [x] 未绑定显示默认助手 · [x] 编译+真机通过
+- 验收：[ ] 绑定角色卡的会话列表项显示角色头像+角色名 · [ ] 聊天页顶部显示角色名 · [ ] 未绑定显示默认助手 · [ ] 编译+真机通过
 
 ### T6.3 性能（冷启动/内存）
 - 依赖：T6.2A
