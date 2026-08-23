@@ -180,21 +180,21 @@ app/src/main/
 - 参考：企划书 4.1.1 会话表
 - 操作：创建 `Conversation` 实体（id 自增、title、characterCardId 可空、createdAt/updatedAt、isPinned、lastMessagePreview、lastMessageTime）
 - 文件：`data/local/entity/Conversation.kt`
-- 验收：[ ] 字段与 4.1.1 一致 · [ ] `@Entity` + 主键自增 · [ ] updatedAt 降序索引
+- 验收：[x] 字段与 4.1.1 一致（id/title/characterCardId/createdAt/updatedAt/isPinned/lastMessagePreview/lastMessageTime）· [x] `@Entity` + 主键自增 · [x] updatedAt 降序索引 · [x] 编译通过（BUILD SUCCESSFUL 1m30s，引入 KSP+Room 依赖）
 
 ### T2.2 Room 实体 Message
 - 依赖：T2.1
 - 参考：企划书 4.1.2 消息表
 - 操作：创建 `Message` 实体（conversationId、role、content、createdAt、status、tokenCount、modelUsed）
 - 文件：`data/local/entity/Message.kt`
-- 验收：[ ] 外键 conversationId ON DELETE CASCADE · [ ] 复合索引 conversationId+createdAt
+- 验收：[x] 外键 conversationId ON DELETE CASCADE · [x] 复合索引 conversationId+createdAt · [x] 角色/状态枚举（Role/MessageStatus）随实体定义 · [x] 编译通过（BUILD SUCCESSFUL 17s）
 
 ### T2.3 DAO（ConversationDao + MessageDao）
 - 依赖：T2.1、T2.2
 - 参考：企划书 4.1 索引说明
 - 操作：写查询/插入/更新/删除接口，会话按 updatedAt 降序，消息按 createdAt 正序
 - 文件：`data/local/dao/ConversationDao.kt` · `data/local/dao/MessageDao.kt`
-- 验收：[ ] 增删改查 + Flow 响应式查询齐备
+- 验收：[x] 增删改查 + Flow 响应式查询齐备（observeAll/observeById/observeByConversation）· [x] 编译通过（BUILD SUCCESSFUL 17s，KSP 校验 SQL 通过）
 
 ### T2.4 AppDatabase
 - 依赖：T2.3
@@ -486,9 +486,9 @@ app/src/main/
 
 ## 11. 当前状态与下一步
 
-- 当前进度：**阶段 1 骨架全部完成并通过真机验证（M1 里程碑达成）**。真机 K60：安装成功、启动无崩溃、6 页导航全部可切换（uiautomator + 截图实证）。
-- 下一步：**进入阶段 2（T2.1 起：Room 会话/消息实体 → 会话列表 + 聊天 UI + 本地存储）**。按原子任务逐个执行，每完成一个标记一个。
+- 当前进度：**阶段 2 进行中：T2.1（Conversation）、T2.2（Message）、T2.3（DAO）已完成 ✅**。下一步 T2.4（AppDatabase）。
 - 更新记录：
   - 2026-08-23 创建 PLAN.md；确认包名 `com.bdalxy.edencourt`。
   - 2026-08-23 依据开发准备手册「四、本机已装环境路径清单」修正：环境实际已装齐（AS/SDK/JDK17），版本组合对齐 v0.5 已验证的 AGP 8.7.0 / Kotlin 2.0.20 / Gradle 8.9 / compileSdk 36；创建 local.properties、复制 gradlew wrapper；首次编译 `BUILD SUCCESSFUL`（2m3s）。
-  - 2026-08-23 真机验证（K60，USB 调试）：安装 Success、启动无崩溃、6 页全通过。**阶段 1 / M1 完成 ✅**。后续开发切换为 flash 模型，按本看板逐任务推进。
+  - 2026-08-23 真机验证（K60，USB 调试）：安装 Success、启动无崩溃、6 页全通过。**阶段 1 / M1 完成 ✅**。
+  - 2026-08-23 flash 模型接手，执行阶段 2：T2.1 Conversation 实体完成（Room/KSP 引入，编译通过）；推送 GitHub（EdenCourt-v1 私有仓库）。
