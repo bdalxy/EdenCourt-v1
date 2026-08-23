@@ -42,6 +42,11 @@ android {
     }
 }
 
+ksp {
+    // Room schema 导出路径：数据库版本升级/迁移的基础（企划书 4.1.5）
+    arg("room.schemaLocation", "$projectDir/schemas")
+}
+
 dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)

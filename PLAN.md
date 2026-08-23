@@ -201,14 +201,14 @@ app/src/main/
 - 参考：企划书 3.3.2
 - 操作：创建 Room 数据库单例，挂载两个 DAO
 - 文件：`data/local/AppDatabase.kt`
-- 验收：[ ] 单例获取 · [ ] entity/dao 全部注册
+- 验收：[x] 单例获取（双重检查锁）· [x] entity/dao 全部注册（Conversation+Message / ConversationDao+MessageDao）· [x] schema 导出已配置（app/schemas/1.json，迁移基础）· [x] 编译通过（BUILD SUCCESSFUL 28s）
 
 ### T2.5 ChatRepository
 - 依赖：T2.4
 - 参考：企划书 3.2.3 数据流
 - 操作：封装 DAO 调用，对上层暴露 Flow / suspend 方法
 - 文件：`data/repository/ChatRepository.kt`
-- 验收：[ ] UI 不直接碰 DAO，统一经 Repository
+- 验收：[x] UI 不直接碰 DAO，统一经 Repository（会话/消息全部走 ChatRepository）· [x] 编译通过（BUILD SUCCESSFUL 17s）
 
 ### T2.6 会话列表页 UI
 - 依赖：T2.5
@@ -486,7 +486,7 @@ app/src/main/
 
 ## 11. 当前状态与下一步
 
-- 当前进度：**阶段 2 进行中：T2.1（Conversation）、T2.2（Message）、T2.3（DAO）已完成 ✅**。下一步 T2.4（AppDatabase）。
+- 当前进度：**阶段 2 进行中：T2.1~T2.5（实体/DAO/AppDatabase/ChatRepository）已完成 ✅**。下一步 T2.6（会话列表页 UI）。
 - 更新记录：
   - 2026-08-23 创建 PLAN.md；确认包名 `com.bdalxy.edencourt`。
   - 2026-08-23 依据开发准备手册「四、本机已装环境路径清单」修正：环境实际已装齐（AS/SDK/JDK17），版本组合对齐 v0.5 已验证的 AGP 8.7.0 / Kotlin 2.0.20 / Gradle 8.9 / compileSdk 36；创建 local.properties、复制 gradlew wrapper；首次编译 `BUILD SUCCESSFUL`（2m3s）。
