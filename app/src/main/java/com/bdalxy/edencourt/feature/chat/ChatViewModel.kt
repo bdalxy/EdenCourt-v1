@@ -9,6 +9,7 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.bdalxy.edencourt.EdenCourtApp
 import com.bdalxy.edencourt.data.local.dao.CharacterCardDao
+import com.bdalxy.edencourt.data.local.entity.CharacterCardEntity
 import com.bdalxy.edencourt.data.local.entity.Message
 import com.bdalxy.edencourt.data.local.entity.MessageStatus
 import com.bdalxy.edencourt.data.local.entity.Role
@@ -23,6 +24,7 @@ import com.bdalxy.edencourt.domain.CharacterCard
 import com.bdalxy.edencourt.domain.CharacterCardParser
 import com.bdalxy.edencourt.domain.PromptBuilder
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
@@ -31,6 +33,8 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
@@ -56,6 +60,7 @@ data class ChatError(
  * - T5.10 起：生成/连发中可发新消息打断（双向可打断）；取消原语为远期设备操作仲裁层预留
  * - T6.1 起：错误提示可关闭（dismissError）；AUTH 错误携带类型供 UI 跳设置
  */
+@OptIn(ExperimentalCoroutinesApi::class)
 class ChatViewModel(
     private val conversationId: Long,
     private val repository: ChatRepository,
@@ -74,14 +79,34 @@ class ChatViewModel(
                 initialValue = emptyList(),
             )
 
-    /** 会话标题（顶部栏显示） */
-    val conversationTitle: StateFlow<String?> =
+    /**
+     * 会话绑定角色卡实体（T6.2A，聊天页顶部显示头像+角色名用）。
+     * 绑定角色卡 → 返回卡片（含 avatar/name）；未绑定或卡片被删 → null（顶部显示默认助手）。
+     */
+    val roleCard: StateFlow<CharacterCardEntity?> =
         repository.observeConversation(conversationId)
-            .map { it?.title }
+            .flatMapLatest { conv ->
+                val cardId = conv?.characterCardId
+                if (cardId == null) {
+                    flowOf(null)
+                } else {
+                    // 观察角色卡：名称/头像变化（编辑）或删除后自动更新
+                    characterCardDao.observeById(cardId)
+                }
+            }
             .stateIn(
                 scope = viewModelScope,
                 started = SharingStarted.WhileSubscribed(5_000),
                 initialValue = null,
+            )
+
+    /** 会话绑定角色名（T6.2A，企划书 5.3.2「顶部=返回+角色名+更多」）。由 roleCard 派生 */
+    val roleName: StateFlow<String> =
+        roleCard.map { it?.name ?: "默认助手" }
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(5_000),
+                initialValue = "默认助手",
             )
 
     /** 是否正在生成 AI 回复（UI 据此切换 停止/发送 按钮） */
