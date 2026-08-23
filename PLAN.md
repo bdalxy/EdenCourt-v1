@@ -215,21 +215,21 @@ app/src/main/
 - 参考：企划书 5.3.1、5.8.1 原型
 - 操作：LazyColumn 按 updatedAt 降序；头像+标题+预览+时间；FAB 新建；长按删除（二次确认）
 - 文件：`feature/conversationlist/ConversationListScreen.kt` + `ConversationListViewModel.kt`
-- 验收：[ ] 列表展示会话 · [ ] 可新建（暂默认会话）· [ ] 长按删除有二次确认
+- 验收：[x] 列表展示会话（头像「新」+标题「新对话」+预览「暂无消息」+时间，真机实测）· [x] 可新建（FAB 创建会话并跳转聊天页）· [x] 长按删除有二次确认（对话框实测→确认后删除回空态）· [x] 编译+真机通过（BUILD SUCCESSFUL；K60 无崩溃）
 
 ### T2.7 聊天页 UI（气泡）
 - 依赖：T2.6
 - 参考：企划书 5.3.2、5.8.2 原型
 - 操作：接收 conversationId；用户右气泡/AI 左气泡；LazyColumn 自动滚底；时间戳
 - 文件：`feature/chat/ChatScreen.kt`
-- 验收：[ ] 消息按时间正序 · [ ] 气泡样式区分用户/AI · [ ] 发送后自动滚到底部
+- 验收：[x] 消息按时间正序（SQL ORDER BY createdAt ASC）· [x] 气泡样式区分用户/AI（AI 左+用户右气泡真机实测）· [x] 发送后自动滚到底部（实测）· [x] 编译+真机通过（BUILD SUCCESSFUL；K60 无崩溃）
 
 ### T2.8 输入框 + 发送（存库）
 - 依赖：T2.7
 - 参考：企划书 5.4.3
 - 操作：多行输入框（1~5 行自动扩展）+ 发送按钮（有内容才高亮）；发送后写入 Message 并清空输入
 - 文件：`feature/chat/ChatScreen.kt` + `feature/chat/ChatViewModel.kt`
-- 验收：[ ] 有内容发送按钮才可点 · [ ] 发送后消息入库 · [ ] 输入框清空
+- 验收：[x] 有内容发送按钮才可点（空内容按钮 disabled 实测）· [x] 发送后消息入库（用户消息「hello」显示+会话标题/预览/时间自动更新，列表页实测）· [x] 输入框清空（发送后恢复 placeholder 实测）· [x] 编译+真机通过
 
 ### T2.9 消息状态枚举
 - 依赖：T2.8
@@ -486,7 +486,7 @@ app/src/main/
 
 ## 11. 当前状态与下一步
 
-- 当前进度：**阶段 2 进行中：T2.1~T2.5（实体/DAO/AppDatabase/ChatRepository）已完成 ✅**。下一步 T2.6（会话列表页 UI）。
+- 当前进度：**阶段 2 全部完成（T2.1~T2.8：数据层 + 会话列表 + 聊天页 + 输入发送）✅**。下一步阶段 3 接 API（T3.1 起）。
 - 更新记录：
   - 2026-08-23 创建 PLAN.md；确认包名 `com.bdalxy.edencourt`。
   - 2026-08-23 依据开发准备手册「四、本机已装环境路径清单」修正：环境实际已装齐（AS/SDK/JDK17），版本组合对齐 v0.5 已验证的 AGP 8.7.0 / Kotlin 2.0.20 / Gradle 8.9 / compileSdk 36；创建 local.properties、复制 gradlew wrapper；首次编译 `BUILD SUCCESSFUL`（2m3s）。

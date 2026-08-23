@@ -1,30 +1,90 @@
 package com.bdalxy.edencourt.feature.chat
 
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.bdalxy.edencourt.EdenCourtApp
+import com.bdalxy.edencourt.data.local.entity.Message
+import com.bdalxy.edencourt.data.local.entity.Role
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 
+/**
+ * 聊天页（T2.7，参考企划书 5.3.2/5.8.2 原型）。
+ * - 用户消息右气泡、AI 消息左气泡（样式区分）
+ * - LazyColumn 消息按时间正序，新消息自动滚到底部
+ * - 每条消息带时间戳
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatScreen(
     conversationId: Long,
     onBack: () -> Unit,
 ) {
+    val app = LocalContext.current.applicationContext as EdenCourtApp
+    val viewModel: ChatViewModel = viewModel(
+        key = "chat_$conversationId",
+        factory = ChatViewModel.factory(conversationId, app),
+    )
+    val messages by viewModel.messages.collectAsStateWithLifecycle()
+    val title by viewModel.conversationTitle.collectAsStateWithLifecycle()
+
+    // 输入框内容状态（旋转/重建后保留）
+    var input by rememberSaveable { mutableStateOf("") }
+
+    // 滚动状态：消息变化时自动滚到底部（发送后即生效）
+    val listState = rememberLazyListState()
+    LaunchedEffect(messages.size) {
+        if (messages.isNotEmpty()) {
+            listState.animateScrollToItem(messages.size - 1)
+        }
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("对话 #$conversationId") },
+                title = { Text(title ?: "对话") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
@@ -32,12 +92,140 @@ fun ChatScreen(
                 },
             )
         },
+        bottomBar = {
+            // 底部输入栏：多行输入 + 发送
+            ChatInputBar(
+                value = input,
+                onValueChange = { input = it },
+                onSend = {
+                    viewModel.sendMessage(input)
+                    input = ""
+                },
+            )
+        },
     ) { innerPadding ->
-        Box(
-            modifier = Modifier.fillMaxSize().padding(innerPadding),
-            contentAlignment = Alignment.Center,
+        if (messages.isEmpty()) {
+            // 空状态：无消息提示
+            Box(
+                modifier = Modifier.fillMaxSize().padding(innerPadding),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text("还没有消息，开始对话吧")
+            }
+        } else {
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.fillMaxSize().padding(innerPadding),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+            ) {
+                items(items = messages, key = { it.id }) { message ->
+                    MessageBubble(message)
+                }
+            }
+        }
+    }
+}
+
+/** 单条消息气泡：AI 靠左、用户靠右，带头像（AI）与时间戳 */
+@Composable
+private fun MessageBubble(message: Message) {
+    val isUser = message.role == Role.USER
+
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+        horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start,
+    ) {
+        // AI 消息左侧显示圆形头像（后续角色卡阶段替换为角色头像）
+        if (!isUser) {
+            Surface(
+                modifier = Modifier.size(36.dp).align(Alignment.Top),
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.secondaryContainer,
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Text(
+                        text = "永",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.width(8.dp))
+        }
+
+        // 气泡内容（文字 + 时间戳）
+        Column(
+            modifier = Modifier.widthIn(max = 280.dp),
+            horizontalAlignment = if (isUser) Alignment.End else Alignment.Start,
         ) {
-            Text("聊天页（骨架占位）")
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                color = if (isUser) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.surfaceVariant
+                },
+            ) {
+                Text(
+                    text = message.content,
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = if (isUser) {
+                        MaterialTheme.colorScheme.onPrimary
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                )
+            }
+            Spacer(modifier = Modifier.size(2.dp))
+            Text(
+                text = formatTime(message.createdAt),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.outline,
+            )
+        }
+    }
+}
+
+/** 时间显示：HH:mm */
+private fun formatTime(timestamp: Long): String =
+    Instant.ofEpochMilli(timestamp)
+        .atZone(ZoneId.systemDefault())
+        .format(DateTimeFormatter.ofPattern("HH:mm"))
+
+/** 底部输入栏：多行输入框（1~5 行自动扩展）+ 发送按钮（有内容才可点） */
+@Composable
+private fun ChatInputBar(
+    value: String,
+    onValueChange: (String) -> Unit,
+    onSend: () -> Unit,
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth().imePadding(),
+        color = MaterialTheme.colorScheme.surfaceContainer,
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.Bottom,
+        ) {
+            // 多行输入框：内容变多自动扩展，最多 5 行
+            OutlinedTextField(
+                value = value,
+                onValueChange = onValueChange,
+                modifier = Modifier.weight(1f),
+                placeholder = { Text("输入消息…") },
+                minLines = 1,
+                maxLines = 5,
+                shape = RoundedCornerShape(24.dp),
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            // 发送按钮：有内容才可点（disabled 置灰，enabled 高亮为主题色）
+            FilledIconButton(
+                onClick = onSend,
+                enabled = value.isNotBlank(),
+            ) {
+                Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "发送")
+            }
         }
     }
 }
