@@ -18,12 +18,12 @@ import com.bdalxy.edencourt.data.local.entity.Message
 /**
  * 本地数据库单例（企划书 3.3.2 / T2.4）。
  * - 挂载：Conversation、Message、CharacterCardEntity、MemoryItem 四个实体与对应 DAO
- * - version=5：v3→v4 新增 memory_items 表（记忆系统，T5.1）；v4→v5 messages 表加 type 列（T5.7 富类型协议预留）
+ * - version=6：v5→v6 character_cards 表加 avatar 列（自定义头像，T6.2B）
  * - schema 已导出到 app/schemas（企划书 4.1.5）
  */
 @Database(
     entities = [Conversation::class, Message::class, CharacterCardEntity::class, MemoryItem::class],
-    version = 5,
+    version = 6,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -103,6 +103,13 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /** v5→v6：character_cards 表新增 avatar 列，可空（自定义头像，T6.2B） */
+        private val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE character_cards ADD COLUMN avatar TEXT")
+            }
+        }
+
         /** 获取单例（双重检查锁，避免并发重复建库） */
         fun getInstance(context: Context): AppDatabase =
             INSTANCE ?: synchronized(this) {
@@ -111,7 +118,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "edencourt.db",
                 ).addMigrations(
-                    MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5,
+                    MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6,
                 ).build().also { INSTANCE = it }
             }
     }

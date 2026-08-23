@@ -23,6 +23,8 @@ data class CharacterCardEntity(
     val description: String = "",
     /** 角色卡完整 JSON（CharacterCard 序列化结果） */
     val jsonContent: String,
+    /** 自定义头像本地文件路径（T6.2B；null=使用默认首字头像） */
+    val avatar: String? = null,
     /** 是否内置卡（内置卡不可删除） */
     val isBuiltIn: Boolean = false,
     /** 创建时间（毫秒时间戳） */
