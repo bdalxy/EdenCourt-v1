@@ -37,6 +37,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -145,6 +146,8 @@ private fun MessageBubble(
     onRetry: () -> Unit,
 ) {
     val isUser = message.role == Role.USER
+    // 思考过程折叠开关：AI 消息且存在思考过程时显示，默认折叠（T3.4 修正）
+    var showReasoning by remember(message.id) { mutableStateOf(false) }
 
     Row(
         modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
@@ -196,6 +199,27 @@ private fun MessageBubble(
                     },
                     modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
                 )
+            }
+            // 思考过程折叠区：AI 消息且存在思考过程时展示（默认折叠，点击展开/收起）
+            if (!isUser && message.reasoning.isNotBlank()) {
+                TextButton(
+                    onClick = { showReasoning = !showReasoning },
+                    contentPadding = PaddingValues(0.dp),
+                ) {
+                    Text(
+                        text = if (showReasoning) "收起思考过程" else "思考过程",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.outline,
+                    )
+                }
+                if (showReasoning) {
+                    Text(
+                        text = message.reasoning,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                        modifier = Modifier.padding(bottom = 4.dp),
+                    )
+                }
             }
             // 失败消息：错误提示 + 重试按钮（T3.8）
             if (message.status == MessageStatus.FAILED) {

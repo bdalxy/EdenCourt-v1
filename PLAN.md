@@ -343,51 +343,51 @@ app/src/main/
 - 参考：企划书 3.4.1
 - 操作：定义 `CharacterCard`（name/personality/background/speaking_style/example_dialogue/constraints/tags）
 - 文件：`domain/CharacterCard.kt`
-- 验收：[ ] 字段与 3.4.1 JSON 一致 · [ ] name/personality 必填校验
+- 验收：[x] 字段与 3.4.1 JSON 一致（另加 firstMessage 开场白字段，用于 Tavern first_mes 映射）· [x] name/personality 必填校验（isValid()）
 
 ### T4.2 角色卡 Room 实体 + DAO
 - 依赖：T4.1
 - 参考：企划书 4.1.3
 - 操作：建 CharacterCard 实体（id/name/description/jsonContent/isBuiltIn/createdAt/updatedAt）+ DAO
 - 文件：`data/local/entity/CharacterCardEntity.kt` · `data/local/dao/CharacterCardDao.kt`
-- 验收：[ ] 与 4.1.3 字段一致 · [ ] 增删改查齐备
+- 验收：[x] 与 4.1.3 字段一致 · [x] 增删改查齐备（observeAll/countBuiltIn/getById/insert/update/delete）+ 数据库 v3 迁移 · [x] 编译通过
 
 ### T4.3 角色卡管理页 UI
 - 依赖：T4.2
 - 参考：企划书 5.3.3、5.8.3
 - 操作：列表（头像/名字/描述/内置或导入标）+ FAB 导入 + 详情页（可编辑名称描述、JSON 只读）+ 长按删除（内置不可删）
 - 文件：`feature/character/CharacterScreen.kt` + `CharacterViewModel.kt`
-- 验收：[ ] 列表/导入/详情/删除齐备 · [ ] 内置卡不可删
+- 验收：[x] 列表/导入/详情/删除齐备 · [x] 内置卡不可删（真机实测）· [x] 编译通过
 
 ### T4.4 内置角色卡（2~3 个）
 - 依赖：T4.3
 - 参考：企划书 11.4「先内置 2~3 个调试过的示例」
 - 操作：内置温柔学姐、毒舌助手等 2~3 个 JSON 角色卡（`isBuiltIn=true`）
-- 文件：`feature/character/`（JSON 资源或硬编码常量）
-- 验收：[ ] 2~3 个内置卡可选中用于对话
+- 文件：`feature/character/`（JSON 资源或硬编码常量）→ 实际落 `domain/BuiltInCards.kt`
+- 验收：[x] 3 个内置卡（小夏/阿杰/羽）启动 seed，可在新建会话弹窗选中用于对话（真机实测）· [x] 编译通过
 
 ### T4.5 JSON 导入（含 Tavern 兼容映射）
 - 依赖：T4.4
 - 参考：企划书 3.4.1 兼容层
 - 操作：导入 JSON 解析为 CharacterCard；Tavern CCv3 字段映射（description→background、first_mes→开场白、mes_example→example_dialogue）；导入失败提示「JSON 格式错误」
 - 文件：`feature/character/` + `domain/CharacterCardParser.kt`
-- 验收：[ ] 标准 JSON 可导入 · [ ] Tavern 字段正确映射 · [ ] 非法 JSON 有明确报错
+- 验收：[x] 标准 JSON 可导入（真机实测导入成功）· [x] Tavern 字段正确映射（CharacterCardParser 实现 description→background、first_mes→firstMessage、mes_example→exampleDialogue）· [x] 非法 JSON 有明确报错 · [x] 编译通过
 
 ### T4.6 system prompt 构建接入真实角色卡
 - 依赖：T4.5、T3.6
 - 参考：企划书 3.4.2
 - 操作：把 T3.6 的占位替换为真实角色卡 → 转 system prompt（「你是{name}…请始终以该角色身份回复」）
-- 文件：`domain/PromptBuilder.kt`
-- 验收：[ ] 选不同卡 → 回复风格明显不同
+- 文件：`domain/PromptBuilder.kt` + `feature/chat/ChatViewModel.kt`
+- 验收：[x] 选不同卡 → 回复风格明显不同（真机端到端实测：小夏温柔学姐/阿杰毒舌程序员/羽空灵天使，同一句 Hello 三种风格差异鲜明）· [x] 编译通过
 
 ### T4.7 新建会话选角色卡
 - 依赖：T4.6
 - 参考：企划书 5.4.1、2.2.2 绑定规则
 - 操作：FAB 新建 → 角色卡底部弹窗选卡（或「默认助手」）→ 建会话绑 characterCardId → 跳聊天
 - 文件：`feature/conversationlist/` + `feature/chat/`
-- 验收：[ ] 选卡即绑定 · [ ] 同一卡再新建是独立对话 · [ ] 不同卡上下文互不串
+- 验收：[x] 选卡即绑定（小夏/阿杰/羽 新建会话各自动注入对应开场白，真机实测）· [x] 同一卡再新建是独立对话（列表出现多条独立会话）· [x] 不同卡上下文互不串 · [x] 编译通过
 
-> **阶段 4 人工审核门槛**：导入 + 内置卡均能改变 AI 说话风格。
+> **阶段 4 人工审核门槛**：导入 + 内置卡均能改变 AI 说话风格——**已通过（K60 真机端到端实测：DeepSeek Key 有效，小夏/阿杰/羽 三种角色回复风格差异鲜明）**，交用户确认后进入阶段 5。
 
 ---
 
@@ -493,9 +493,10 @@ app/src/main/
 
 ## 11. 当前状态与下一步
 
-- 当前进度：**阶段 2 全部完成（T2.1~T2.8：数据层 + 会话列表 + 聊天页 + 输入发送）✅**。下一步阶段 3 接 API（T3.1 起）。
+- 当前进度：**阶段 4 全部完成（T4.1~T4.7：角色卡数据类/实体+DAO/管理页/内置卡/JSON导入+Tavern兼容/system prompt接入/新建会话选卡）✅，M4 端到端真机验证通过**。下一步阶段 5 记忆系统（T5.1 起）。
 - 更新记录：
   - 2026-08-23 创建 PLAN.md；确认包名 `com.bdalxy.edencourt`。
   - 2026-08-23 依据开发准备手册「四、本机已装环境路径清单」修正：环境实际已装齐（AS/SDK/JDK17），版本组合对齐 v0.5 已验证的 AGP 8.7.0 / Kotlin 2.0.20 / Gradle 8.9 / compileSdk 36；创建 local.properties、复制 gradlew wrapper；首次编译 `BUILD SUCCESSFUL`（2m3s）。
   - 2026-08-23 真机验证（K60，USB 调试）：安装 Success、启动无崩溃、6 页全通过。**阶段 1 / M1 完成 ✅**。
   - 2026-08-23 flash 模型接手，执行阶段 2：T2.1 Conversation 实体完成（Room/KSP 引入，编译通过）；推送 GitHub（EdenCourt-v1 私有仓库）。
+  - 2026-08-23 阶段 4 完成（T4.1~T4.7 编译通过）；用户手动填入 DeepSeek Key 后，K60 真机端到端验证通过：测试连接「连接成功」，小夏/阿杰/羽 三种角色对同一句 Hello 回复风格差异鲜明，**阶段 4 / M4 完成 ✅**（待用户确认后推送 GitHub 并进入阶段 5）。

@@ -10,11 +10,11 @@ import kotlinx.coroutines.flow.Flow
 interface AiChatService {
 
     /**
-     * 流式对话：逐段吐出回复文本。
+     * 流式对话：逐段吐出回复增量（区分正式答案与思考过程）。
      * @param messages 完整消息列表（system + 历史 + 当前用户输入）
      * @param config   本次请求的 API 配置（每次调用传入，实时反映设置变更）
      */
-    fun streamChat(messages: List<ChatMessage>, config: ApiConfig): Flow<String>
+    fun streamChat(messages: List<ChatMessage>, config: ApiConfig): Flow<ChatDelta>
 
     /**
      * 测试连接（T3.9，参考企划书 5.3.5）：发最小 stream=false 请求。

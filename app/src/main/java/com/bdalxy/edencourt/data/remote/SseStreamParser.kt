@@ -16,9 +16,14 @@ object SseStreamParser {
     /** SSE 数据行前缀 */
     private const val DATA_PREFIX = "data:"
 
-    /** 共享 Json 实例：忽略未知字段，兼容不同服务端返回 */
+    /**
+     * 共享 Json 实例：忽略未知字段，兼容不同服务端返回。
+     * encodeDefaults=true：必须序列化等于默认值的字段（如 stream=true、max_tokens=2048），
+     * 否则服务端收到缺省字段的请求会把流式请求当成非流式处理（T3.4 修正）。
+     */
     val json: Json = Json {
         ignoreUnknownKeys = true
+        encodeDefaults = true
     }
 
     /** 判断该行是否为结束标志（trim 后正好等于 [DONE]） */
@@ -31,12 +36,29 @@ object SseStreamParser {
      * - JSON 解析失败（如热更新等非标准行）→ 返回 null（容忍，不崩溃）
      */
     fun parseDataContent(line: String): String? {
+        val payload = dataPayload(line) ?: return null
+        return runCatching {
+            json.decodeFromString<ChatChunkResponse>(payload).deltaContent
+        }.getOrNull()
+    }
+
+    /**
+     * 解析单行 SSE：返回该行携带的增量思考过程（推理模型 reasoning_content）。
+     * 与 parseDataContent 相同的行规则；无思考过程或解析失败返回 null。
+     */
+    fun parseDataReasoning(line: String): String? {
+        val payload = dataPayload(line) ?: return null
+        return runCatching {
+            json.decodeFromString<ChatChunkResponse>(payload).deltaReasoning
+        }.getOrNull()
+    }
+
+    /** 提取 data: 行中的 JSON 载荷；非 data 行/空载荷/结束行返回 null */
+    private fun dataPayload(line: String): String? {
         val trimmed = line.trim()
         if (!trimmed.startsWith(DATA_PREFIX)) return null
         val payload = trimmed.removePrefix(DATA_PREFIX).trim()
         if (payload.isEmpty() || payload == DONE_MARKER) return null
-        return runCatching {
-            json.decodeFromString<ChatChunkResponse>(payload).deltaContent
-        }.getOrNull()
+        return payload
     }
 }

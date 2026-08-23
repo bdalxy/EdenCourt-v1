@@ -27,9 +27,12 @@ class ChatRepository(
     /** 按 id 取单个会话（一次性） */
     suspend fun getConversation(id: Long): Conversation? = conversationDao.getById(id)
 
-    /** 新建会话，返回生成的会话 id */
-    suspend fun createConversation(title: String = "新对话"): Long =
-        conversationDao.insert(Conversation(title = title))
+    /**
+     * 新建会话，返回生成的会话 id（T4.7：支持绑定角色卡）。
+     * @param characterCardId 绑定的角色卡 id（可空 = 默认助手；绑定规则见企划书 2.2.2）
+     */
+    suspend fun createConversation(characterCardId: Long? = null): Long =
+        conversationDao.insert(Conversation(characterCardId = characterCardId))
 
     /** 更新会话 */
     suspend fun updateConversation(conversation: Conversation) = conversationDao.update(conversation)

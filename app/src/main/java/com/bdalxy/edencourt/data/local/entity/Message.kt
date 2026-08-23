@@ -41,6 +41,11 @@ data class Message(
     val role: Role = Role.USER,
     /** 消息正文 */
     val content: String = "",
+    /**
+     * 思考过程（推理模型 reasoning_content；T3.4 修正，v2 新增列）。
+     * 仅 AI 消息使用，普通模型/无思考时为空串；UI 层默认折叠展示。
+     */
+    val reasoning: String = "",
     /** 创建时间（毫秒时间戳） */
     val createdAt: Long = System.currentTimeMillis(),
     /** 发送状态（默认 done，发送时由调用方显式设置） */

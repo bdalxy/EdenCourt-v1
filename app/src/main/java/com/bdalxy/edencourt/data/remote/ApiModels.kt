@@ -56,11 +56,16 @@ data class ChatCompletionResponse(
     val firstContent: String get() = choices.firstOrNull()?.message?.content.orEmpty()
 }
 
-/** 流式响应中的增量 delta */
+/**
+ * 流式响应中的增量 delta。
+ * reasoning_content：推理模型（如 deepseek-v4-flash）先输出思考过程，content 为空；
+ * 思考结束后才输出正式答案（content 非空）。两字段互斥出现，需兼容处理（T3.4 修正）。
+ */
 @Serializable
 data class Delta(
     @SerialName("role") val role: String? = null,
     @SerialName("content") val content: String? = null,
+    @SerialName("reasoning_content") val reasoningContent: String? = null,
 )
 
 /** 流式响应中的单个 choice（含 delta） */
@@ -69,6 +74,18 @@ data class ChunkChoice(
     @SerialName("index") val index: Int = 0,
     @SerialName("delta") val delta: Delta = Delta(),
     @SerialName("finish_reason") val finishReason: String? = null,
+)
+
+/**
+ * 流式增量（T3.4 修正）：区分正式答案与推理模型思考过程。
+ * 推理模型（如 deepseek-v4-flash）思考阶段 content 为空、reasoning 有值；
+ * 思考结束后反之。非推理模型 reasoning 恒为空。
+ */
+data class ChatDelta(
+    /** 正式答案增量（可能为空串） */
+    val content: String = "",
+    /** 思考过程增量（可能为空串） */
+    val reasoning: String = "",
 )
 
 /** 流式 Chat Completion chunk（SSE data: 行内容） */
@@ -80,6 +97,9 @@ data class ChatChunkResponse(
     @SerialName("model") val model: String = "",
     @SerialName("choices") val choices: List<ChunkChoice> = emptyList(),
 ) {
-    /** 本 chunk 的增量文本（可能为空串） */
+    /** 本 chunk 的正式答案增量（无则空串） */
     val deltaContent: String get() = choices.firstOrNull()?.delta?.content.orEmpty()
+
+    /** 本 chunk 的思考过程增量（无则空串） */
+    val deltaReasoning: String get() = choices.firstOrNull()?.delta?.reasoningContent.orEmpty()
 }

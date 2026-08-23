@@ -7,6 +7,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.bdalxy.edencourt.EdenCourtApp
+import com.bdalxy.edencourt.data.local.dao.CharacterCardDao
 import com.bdalxy.edencourt.data.local.entity.Message
 import com.bdalxy.edencourt.data.local.entity.MessageStatus
 import com.bdalxy.edencourt.data.local.entity.Role
@@ -16,6 +17,8 @@ import com.bdalxy.edencourt.data.remote.ApiException
 import com.bdalxy.edencourt.data.remote.ChatMessage
 import com.bdalxy.edencourt.data.repository.ChatRepository
 import com.bdalxy.edencourt.data.setting.ApiConfigStore
+import com.bdalxy.edencourt.domain.CharacterCard
+import com.bdalxy.edencourt.domain.CharacterCardParser
 import com.bdalxy.edencourt.domain.PromptBuilder
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -32,14 +35,15 @@ import kotlinx.coroutines.launch
 import java.io.IOException
 
 /**
- * 聊天页 ViewModel（T2.7 + T3.7）。
+ * 聊天页 ViewModel（T2.7 + T3.7 + T4.6）。
  * - 按 conversationId 观察该会话消息流与标题
  * - T3.7 起：发送消息后调用远程 API 流式生成，逐段写入 Room 实现「逐字显示」
- * - 管理 生成中/完成/失败 状态，支持停止生成
+ * - T4.6 起：system prompt 由会话绑定的真实角色卡生成；空会话欢迎语用角色开场白
  */
 class ChatViewModel(
     private val conversationId: Long,
     private val repository: ChatRepository,
+    private val characterCardDao: CharacterCardDao,
     private val apiConfigStore: ApiConfigStore,
     private val aiChatService: AiChatService,
 ) : ViewModel() {
@@ -76,21 +80,22 @@ class ChatViewModel(
 
     init {
         viewModelScope.launch {
-            // 空会话时插入 AI 欢迎语，让新会话有开场（后续角色卡阶段会替换为角色开场白）
+            // 空会话时插入欢迎语：绑定角色卡且有开场白则用角色开场白，否则用默认助手欢迎语（T4.6）
             val existing = repository.observeMessages(conversationId).first()
             if (existing.isEmpty()) {
                 repository.insertMessage(
                     Message(
                         conversationId = conversationId,
                         role = Role.ASSISTANT,
-                        content = "你好呀，我是永恒庭院。今天想聊些什么呢？",
+                        content = boundCard()?.firstMessage?.takeIf { it.isNotBlank() }
+                            ?: "你好呀，我是永恒庭院。今天想聊些什么呢？",
                     ),
                 )
             }
         }
     }
 
-    /** 发送用户消息：入库 + 流式请求 AI 回复（T2.8 基础上扩展 T3.7） */
+    /** 发送用户消息：入库 + 流式请求 AI 回复（T2.8 基础上扩展 T3.7/T4.6） */
     fun sendMessage(text: String) {
         val content = text.trim()
         if (content.isEmpty() || _isGenerating.value) return
@@ -108,8 +113,8 @@ class ChatViewModel(
             )
             // 3. 更新会话摘要（标题/预览/时间）
             updateConversationSummary(content)
-            // 4. 组装 Prompt 并开始流式生成
-            streamReply(PromptBuilder.build(history, content))
+            // 4. 组装 Prompt（system 用会话绑定的角色卡）并开始流式生成
+            streamReply(PromptBuilder.build(history, content, systemPrompt = currentSystemPrompt()))
         }
     }
 
@@ -134,7 +139,7 @@ class ChatViewModel(
             _errorMessages.update { it - failedAiId }
             repository.deleteMessage(failed)
             val newHistory = history.filter { it.id != failedAiId && it.id != userMsg.id }
-            streamReply(PromptBuilder.build(newHistory, userMsg.content))
+            streamReply(PromptBuilder.build(newHistory, userMsg.content, systemPrompt = currentSystemPrompt()))
         }
     }
 
@@ -152,17 +157,24 @@ class ChatViewModel(
             ),
         )
         val accumulated = StringBuilder()
+        val accumulatedReasoning = StringBuilder()
         generatingJob = viewModelScope.launch {
             try {
                 val config = apiConfigStore.config.first()
                 var attempt = 0
                 while (true) {
                     try {
-                        // 收集增量并逐段写入 Room（驱动逐字显示）
+                        // 收集增量并逐段写入 Room：正式答案与思考过程分开累积（T3.4 修正）
                         aiChatService.streamChat(promptMessages, config).collect { delta ->
-                            accumulated.append(delta)
+                            if (delta.reasoning.isNotEmpty()) accumulatedReasoning.append(delta.reasoning)
+                            if (delta.content.isNotEmpty()) accumulated.append(delta.content)
                             val current = repository.getMessage(aiId) ?: return@collect
-                            repository.updateMessage(current.copy(content = accumulated.toString()))
+                            repository.updateMessage(
+                                current.copy(
+                                    content = accumulated.toString(),
+                                    reasoning = accumulatedReasoning.toString(),
+                                ),
+                            )
                         }
                         // 正常完成：空输出兜底（企划书 3.6.4）
                         finishReply(aiId, accumulated.toString().ifBlank { "（对方没有回应）" })
@@ -231,8 +243,28 @@ class ChatViewModel(
         )
     }
 
+    /**
+     * 取会话绑定的角色卡（T4.6）。
+     * 未绑定（characterCardId 为空）或卡片被删/解析失败时返回 null（回退默认助手）。
+     */
+    private suspend fun boundCard(): CharacterCard? {
+        val conv = repository.getConversation(conversationId) ?: return null
+        val cardId = conv.characterCardId ?: return null
+        val entity = characterCardDao.getById(cardId) ?: return null
+        return runCatching { CharacterCardParser.parse(entity.jsonContent) }.getOrNull()
+    }
+
+    /**
+     * 构建当前 system 提示词（T4.6）。
+     * 会话绑定角色卡 → 用角色卡构建；否则用默认助手提示词。
+     */
+    private suspend fun currentSystemPrompt(): String {
+        val card = boundCard() ?: return PromptBuilder.DEFAULT_SYSTEM_PROMPT
+        return PromptBuilder.buildCardSystemPrompt(card)
+    }
+
     companion object {
-        /** 工厂：传入路由参数 conversationId，从 Application 取仓库/配置/网络服务单例 */
+        /** 工厂：传入路由参数 conversationId，从 Application 取仓库/角色卡 DAO/配置/网络服务单例 */
         fun factory(conversationId: Long, application: Application): ViewModelProvider.Factory =
             viewModelFactory {
                 initializer {
@@ -240,6 +272,7 @@ class ChatViewModel(
                     ChatViewModel(
                         conversationId = conversationId,
                         repository = app.chatRepository,
+                        characterCardDao = app.characterCardDao,
                         apiConfigStore = app.apiConfigStore,
                         aiChatService = app.aiChatService,
                     )

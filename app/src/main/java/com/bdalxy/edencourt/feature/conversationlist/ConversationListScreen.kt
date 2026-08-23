@@ -1,6 +1,7 @@
 package com.bdalxy.edencourt.feature.conversationlist
 
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -9,6 +10,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -27,11 +29,13 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -46,6 +50,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.bdalxy.edencourt.EdenCourtApp
+import com.bdalxy.edencourt.data.local.entity.CharacterCardEntity
 import com.bdalxy.edencourt.data.local.entity.Conversation
 import java.time.Instant
 import java.time.LocalDate
@@ -53,9 +58,9 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
 /**
- * 会话列表页（T2.6，参考企划书 5.3.1/5.8.1 原型）。
+ * 会话列表页（T2.6 + T4.7，参考企划书 5.3.1/5.8.1 原型）。
  * - LazyColumn 按 updatedAt 降序展示会话（头像+标题+预览+时间）
- * - FAB 新建会话后自动跳转聊天页
+ * - FAB 新建：弹出底部选卡窗（默认助手 + 角色卡），选中后建会话并跳转（T4.7）
  * - 长按弹出二次确认删除（消息级联删除）
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
@@ -71,9 +76,12 @@ fun ConversationListScreen(
     val app = LocalContext.current.applicationContext as EdenCourtApp
     val viewModel: ConversationListViewModel = viewModel(factory = ConversationListViewModel.factory(app))
     val conversations by viewModel.conversations.collectAsStateWithLifecycle()
+    val characterCards by viewModel.characterCards.collectAsStateWithLifecycle()
 
     var menuExpanded by remember { mutableStateOf(false) }
     var pendingDelete by remember { mutableStateOf<Conversation?>(null) }
+    // 新建会话选卡弹窗开关（T4.7）
+    var showCardPicker by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -109,10 +117,7 @@ fun ConversationListScreen(
         },
         floatingActionButton = {
             FloatingActionButton(
-                onClick = {
-                    // 新建会话并跳转到新会话聊天页
-                    viewModel.createConversation(onCreated = onNavigateToChat)
-                },
+                onClick = { showCardPicker = true },
             ) {
                 Icon(Icons.Filled.Add, contentDescription = "新建对话")
             }
@@ -139,6 +144,48 @@ fun ConversationListScreen(
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
                 }
             }
+        }
+    }
+
+    // 新建会话选卡弹窗（T4.7）：默认助手 + 全部角色卡
+    if (showCardPicker) {
+        val sheetState = rememberModalBottomSheetState()
+        ModalBottomSheet(
+            onDismissRequest = { showCardPicker = false },
+            sheetState = sheetState,
+        ) {
+            Text(
+                text = "选择角色",
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+            )
+            LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 480.dp)) {
+                // 默认助手：不绑定角色卡
+                item {
+                    CardPickerItem(
+                        avatarText = "默",
+                        name = "默认助手",
+                        description = "永恒庭院 AI 助手",
+                        onClick = {
+                            viewModel.createConversation(cardId = null, onCreated = onNavigateToChat)
+                            showCardPicker = false
+                        },
+                    )
+                }
+                items(items = characterCards, key = { it.id }) { card ->
+                    CardPickerItem(
+                        avatarText = card.name.take(1),
+                        name = card.name,
+                        description = card.description.ifEmpty { "暂无简介" },
+                        onClick = {
+                            // 同一角色卡每次新建都是独立会话（绑定规则见企划书 2.2.2）
+                            viewModel.createConversation(cardId = card.id, onCreated = onNavigateToChat)
+                            showCardPicker = false
+                        },
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(16.dp))
         }
     }
 
@@ -239,5 +286,57 @@ private fun formatTime(timestamp: Long): String {
         today -> zoned.format(DateTimeFormatter.ofPattern("HH:mm"))
         today.minusDays(1) -> "昨天"
         else -> zoned.format(DateTimeFormatter.ofPattern("yyyy-MM-dd"))
+    }
+}
+
+/** 角色卡选择项（T4.7）：圆形头像（首字）+ 名称 + 简介，点击回调 */
+@Composable
+private fun CardPickerItem(
+    avatarText: String,
+    name: String,
+    description: String,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        // 头像：圆形色块 + 首字
+        Surface(
+            modifier = Modifier.size(44.dp),
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.primaryContainer,
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Text(
+                    text = avatarText,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.width(12.dp))
+
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = name,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = description,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
     }
 }

@@ -48,7 +48,7 @@ class RemoteApiChatService(
     private val okHttpClient: OkHttpClient,
 ) : AiChatService {
 
-    override fun streamChat(messages: List<ChatMessage>, config: ApiConfig): Flow<String> = flow {
+    override fun streamChat(messages: List<ChatMessage>, config: ApiConfig): Flow<ChatDelta> = flow {
         // 1. 构造请求体：OpenAI 兼容 JSON（stream 开启）
         val requestBody = SseStreamParser.json.encodeToString(
             ChatCompletionRequest(
@@ -85,8 +85,11 @@ class RemoteApiChatService(
                 while (true) {
                     val line = source?.readUtf8Line() ?: break
                     if (SseStreamParser.isDone(line)) break
-                    val content = SseStreamParser.parseDataContent(line) ?: continue
-                    emit(content)
+                    // 分别解析思考过程与正式答案增量（T3.4 修正：推理模型两字段互斥出现）
+                    val reasoning = SseStreamParser.parseDataReasoning(line)
+                    val content = SseStreamParser.parseDataContent(line)
+                    if (reasoning == null && content == null) continue
+                    emit(ChatDelta(content = content ?: "", reasoning = reasoning ?: ""))
                 }
             }
         } catch (e: SocketTimeoutException) {
