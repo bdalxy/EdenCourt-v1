@@ -45,10 +45,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.bdalxy.edencourt.EdenCourtApp
+import com.bdalxy.edencourt.core.ui.CharacterAvatar
 import com.bdalxy.edencourt.data.local.entity.Message
 import com.bdalxy.edencourt.data.local.entity.MessageStatus
 import com.bdalxy.edencourt.data.local.entity.MessageType
@@ -77,7 +80,9 @@ fun ChatScreen(
         factory = ChatViewModel.factory(conversationId, app),
     )
     val messages by viewModel.messages.collectAsStateWithLifecycle()
-    val title by viewModel.conversationTitle.collectAsStateWithLifecycle()
+    // T6.2A：顶部显示会话绑定角色卡（头像+角色名，企划书 5.3.2「返回+角色名+更多」）
+    val roleCard by viewModel.roleCard.collectAsStateWithLifecycle()
+    val roleName by viewModel.roleName.collectAsStateWithLifecycle()
     val isGenerating by viewModel.isGenerating.collectAsStateWithLifecycle()
     val errorMessages by viewModel.errorMessages.collectAsStateWithLifecycle()
 
@@ -96,7 +101,19 @@ fun ChatScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(title ?: "对话") },
+                title = {
+                    // T6.2A：顶部左侧显示角色头像 + 角色名（企划书 5.3.2）
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        CharacterAvatar(
+                            avatarPath = roleCard?.avatar,
+                            name = roleName,
+                            modifier = Modifier.size(32.dp),
+                            textSize = 14.sp,
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(roleName, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
