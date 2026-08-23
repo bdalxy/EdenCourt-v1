@@ -1,0 +1,26 @@
+# Gradle
+.gradle/
+build/
+app/build/
+!gradle/wrapper/gradle-wrapper.jar
+
+# 本机配置（含 sdk.dir 路径，勿提交）
+local.properties
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# 验证截图与报告（仅本地保留，不推送）
+.trae/
+
+# 历史设计文档/调研报告（思路库，仅本地保留，不推送）
+.planning/
+
+# 日志
+*.log
+
+# 系统
+.DS_Store
+Thumbs.db
