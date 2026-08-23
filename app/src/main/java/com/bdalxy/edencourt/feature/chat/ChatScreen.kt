@@ -21,6 +21,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
@@ -30,6 +31,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -45,6 +47,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.bdalxy.edencourt.EdenCourtApp
 import com.bdalxy.edencourt.data.local.entity.Message
+import com.bdalxy.edencourt.data.local.entity.MessageStatus
 import com.bdalxy.edencourt.data.local.entity.Role
 import java.time.Instant
 import java.time.ZoneId
@@ -69,6 +72,8 @@ fun ChatScreen(
     )
     val messages by viewModel.messages.collectAsStateWithLifecycle()
     val title by viewModel.conversationTitle.collectAsStateWithLifecycle()
+    val isGenerating by viewModel.isGenerating.collectAsStateWithLifecycle()
+    val errorMessages by viewModel.errorMessages.collectAsStateWithLifecycle()
 
     // 输入框内容状态（旋转/重建后保留）
     var input by rememberSaveable { mutableStateOf("") }
@@ -93,14 +98,16 @@ fun ChatScreen(
             )
         },
         bottomBar = {
-            // 底部输入栏：多行输入 + 发送
+            // 底部输入栏：多行输入 + 发送（生成中切换为停止）
             ChatInputBar(
                 value = input,
                 onValueChange = { input = it },
+                isGenerating = isGenerating,
                 onSend = {
                     viewModel.sendMessage(input)
                     input = ""
                 },
+                onStop = { viewModel.stopGenerating() },
             )
         },
     ) { innerPadding ->
@@ -119,16 +126,24 @@ fun ChatScreen(
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
             ) {
                 items(items = messages, key = { it.id }) { message ->
-                    MessageBubble(message)
+                    MessageBubble(
+                        message = message,
+                        errorText = errorMessages[message.id],
+                        onRetry = { viewModel.retry(message.id) },
+                    )
                 }
             }
         }
     }
 }
 
-/** 单条消息气泡：AI 靠左、用户靠右，带头像（AI）与时间戳 */
+/** 单条消息气泡：AI 靠左、用户靠右，带头像（AI）与时间戳；失败消息带错误提示与重试 */
 @Composable
-private fun MessageBubble(message: Message) {
+private fun MessageBubble(
+    message: Message,
+    errorText: String?,
+    onRetry: () -> Unit,
+) {
     val isUser = message.role == Role.USER
 
     Row(
@@ -153,7 +168,7 @@ private fun MessageBubble(message: Message) {
             Spacer(modifier = Modifier.width(8.dp))
         }
 
-        // 气泡内容（文字 + 时间戳）
+        // 气泡内容（文字 + 时间戳 + 失败提示/重试）
         Column(
             modifier = Modifier.widthIn(max = 280.dp),
             horizontalAlignment = if (isUser) Alignment.End else Alignment.Start,
@@ -167,7 +182,12 @@ private fun MessageBubble(message: Message) {
                 },
             ) {
                 Text(
-                    text = message.content,
+                    // 生成中且尚无内容时显示占位提示（T3.7 流式前一刻）
+                    text = if (message.status == MessageStatus.GENERATING && message.content.isBlank()) {
+                        "正在思考…"
+                    } else {
+                        message.content
+                    },
                     style = MaterialTheme.typography.bodyLarge,
                     color = if (isUser) {
                         MaterialTheme.colorScheme.onPrimary
@@ -176,6 +196,18 @@ private fun MessageBubble(message: Message) {
                     },
                     modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
                 )
+            }
+            // 失败消息：错误提示 + 重试按钮（T3.8）
+            if (message.status == MessageStatus.FAILED) {
+                Text(
+                    text = errorText ?: "生成失败",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+                TextButton(onClick = onRetry) {
+                    Text("重试")
+                }
             }
             Spacer(modifier = Modifier.size(2.dp))
             Text(
@@ -193,12 +225,14 @@ private fun formatTime(timestamp: Long): String =
         .atZone(ZoneId.systemDefault())
         .format(DateTimeFormatter.ofPattern("HH:mm"))
 
-/** 底部输入栏：多行输入框（1~5 行自动扩展）+ 发送按钮（有内容才可点） */
+/** 底部输入栏：多行输入框（1~5 行自动扩展）+ 发送/停止按钮（生成中切换为停止） */
 @Composable
 private fun ChatInputBar(
     value: String,
     onValueChange: (String) -> Unit,
+    isGenerating: Boolean,
     onSend: () -> Unit,
+    onStop: () -> Unit,
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth().imePadding(),
@@ -219,12 +253,18 @@ private fun ChatInputBar(
                 shape = RoundedCornerShape(24.dp),
             )
             Spacer(modifier = Modifier.width(8.dp))
-            // 发送按钮：有内容才可点（disabled 置灰，enabled 高亮为主题色）
-            FilledIconButton(
-                onClick = onSend,
-                enabled = value.isNotBlank(),
-            ) {
-                Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "发送")
+            // 生成中显示停止按钮，否则显示发送按钮（有内容才可点）
+            if (isGenerating) {
+                FilledIconButton(onClick = onStop) {
+                    Icon(Icons.Filled.Close, contentDescription = "停止生成")
+                }
+            } else {
+                FilledIconButton(
+                    onClick = onSend,
+                    enabled = value.isNotBlank(),
+                ) {
+                    Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "发送")
+                }
             }
         }
     }

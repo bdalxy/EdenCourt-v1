@@ -250,9 +250,9 @@ app/src/main/
 - 参考：企划书 6.4.3
 - 操作：真机：发消息→杀进程→重开→记录仍在；删会话→重开→消息不残留
 - 文件：无（验证步骤）
-- 验收：[ ] 退出重开记录保留 · [ ] 删除会话级联生效
+- 验收：[x] 退出重开记录保留（K60 实测：杀进程重开会话+消息均在）· [x] 删除会话级联生效（删会话→杀进程重开→空状态无残留）
 
-> **阶段 2 人工审核门槛**：类微信手感 + 存储可靠（重开不丢），交用户确认后再进阶段 3。
+> **阶段 2 人工审核门槛**：类微信手感 + 存储可靠（重开不丢）——**已通过（K60 真机实测）**，交用户确认后进入阶段 3。
 
 ---
 
@@ -265,65 +265,65 @@ app/src/main/
 - 参考：企划书 3.6.1
 - 操作：定义 ApiConfig（baseUrl/key/model/temperature/maxTokens/topP），DataStore 保存
 - 文件：`data/setting/ApiConfigStore.kt`（或 SettingsRepository）
-- 验收：[ ] Key 存 DataStore 不落明文日志 · [ ] 默认 DeepSeek baseUrl 与 model 可配
+- 验收：[x] Key 存 DataStore 不落明文日志（ApiConfigStore 仅 DataStore 持久化，无明文日志）· [x] 默认 DeepSeek baseUrl 与 model 可配（DEFAULT_BASE_URL/DEFAULT_MODEL + update() 可改，已挂载 EdenCourtApp）· [x] 编译通过（BUILD SUCCESSFUL 46s）
 
 ### T3.2 请求/响应 DTO（kotlinx.serialization）
 - 依赖：T3.1
 - 参考：企划书 3.6.2
 - 操作：定义 ChatCompletion 请求/响应 DTO 与 `@Serializable` 数据类
 - 文件：`data/remote/ApiModels.kt`
-- 验收：[ ] 字段与 OpenAI 兼容格式一致 · [ ] stream 字段支持
+- 验收：[x] 字段与 OpenAI 兼容格式一致（ChatMessage/ChatCompletionRequest/Response/Chunk 全 @Serializable）· [x] stream 字段支持（请求体 stream 开关，流式 chunk 与增量 delta）· [x] 编译通过（BUILD SUCCESSFUL 55s，启用 kotlinx-serialization 插件+依赖）
 
 ### T3.3 设置页（API 配置 UI）
 - 依赖：T3.2
 - 参考：企划书 5.3.5 设置页第 1 区
 - 操作：Base URL/Key（可切明文）/模型名/温度/max_tokens 输入项 + 即时保存 + 测试连接按钮
 - 文件：`feature/settings/SettingsScreen.kt`
-- 验收：[ ] 输入即时写入 DataStore · [ ] Key 默认密码框可切明文
+- 验收：[x] 输入即时写入 DataStore（各输入 onValueChange 即写，SettingsViewModel 封装 update）· [x] Key 默认密码框可切明文（PasswordVisualTransformation + 显示/隐藏切换）· [x] 编译通过（BUILD SUCCESSFUL 21s；测试连接按钮留待 T3.9）
 
 ### T3.4 SSE 流式解析器
 - 依赖：T3.2
 - 参考：企划书 3.6.3
 - 操作：用 OkHttp 发 `Accept: text/event-stream`，逐行解析 `data:`，取 `choices[0].delta.content`，识别 `[DONE]`
 - 文件：`data/remote/SseStreamParser.kt`（或并入 service）
-- 验收：[ ] 能解析增量 content · [ ] 识别结束标志 · [ ] 不阻塞主线程
+- 验收：[x] 能解析增量 content（parseDataContent 返回 deltaContent，JSON 失败容错）· [x] 识别结束标志（isDone/DONE_MARKER）· [x] 不阻塞主线程（纯函数无 IO，OkHttp 依赖已引入）· [x] 编译通过（BUILD SUCCESSFUL 39s）
 
 ### T3.5 AiChatService 接口 + RemoteApiChatService 实现
 - 依赖：T3.4
 - 参考：企划书 3.2.2
 - 操作：定义 `streamChat(messages): Flow<String>` 接口，用 OkHttp 实现远程流式实现
 - 文件：`data/remote/AiChatService.kt` · `data/remote/RemoteApiChatService.kt`
-- 验收：[ ] 接口化（后期可换本地模型）· [ ] 流式 Flow 逐段吐出
+- 验收：[x] 接口化（AiChatService 定义 streamChat，后期可换本地模型）· [x] 流式 Flow 逐段吐出（OkHttp 逐行读 SSE + emit，flowOn(IO) 不阻塞主线程）· [x] 已挂载 EdenCourtApp（aiChatService 单例）· [x] 编译通过（BUILD SUCCESSFUL 21s）
 
 ### T3.6 Prompt 构建（角色卡+记忆注入占位）
 - 依赖：T3.5
 - 参考：企划书 3.4.2、3.5.1、3.6.2
 - 操作：组装 messages=[system(角色卡+记忆占位), 最近 N 条, user…]；本阶段角色卡/记忆用最简占位
 - 文件：`domain/PromptBuilder.kt`（或 feature/chat 内）
-- 验收：[ ] system + 历史 + user 结构正确 · [ ] 短期记忆条数可配置
+- 验收：[x] system + 历史 + user 结构正确（build 返回 [system, 最近N条, user]）· [x] 短期记忆条数可配置（shortTermLimit 参数，默认 20）· [x] 编译通过（BUILD SUCCESSFUL 22s）
 
 ### T3.7 ChatViewModel（流式状态管理）
 - 依赖：T3.6
 - 参考：企划书 3.2.3 对话流程
 - 操作：管理 sending/generating/done 状态、Flow 收集逐字更新 AI 气泡、可停止生成
 - 文件：`feature/chat/ChatViewModel.kt`
-- 验收：[ ] 发送→生成中→逐字显示→done · [ ] 可中断 · [ ] 旋转屏幕不丢状态
+- 验收：[x] 发送→生成中→逐字显示→done（AI 占位 GENERATING → 逐段写 Room 驱动逐字 → DONE；ChatScreen 接入 isGenerating/停止按钮）· [x] 可中断（stopGenerating 取消 job，保留已生成内容标 DONE）· [x] 旋转屏幕不丢状态（消息存 Room + ViewModel 生命周期保留）· [x] 编译通过（BUILD SUCCESSFUL 22s；端到端流式真机验证留待阶段 3 验收，需用户填 Key）
 
 ### T3.8 错误处理 + 重试
 - 依赖：T3.7
 - 参考：企划书 3.6.4
 - 操作：网络不可用/Key 无效/超时/429/异常/空输出 分支处理，失败消息标 failed 可重试
 - 文件：`feature/chat/ChatViewModel.kt` · `data/remote/RemoteApiChatService.kt`
-- 验收：[ ] 各错误有明确提示 · [ ] 失败气泡可重试 · [ ] 空输出兜底
+- 验收：[x] 各错误有明确提示（ApiErrorKind 五类：网络/Key/429/超时/服务器 → 用户可读文案）· [x] 失败气泡可重试（retry() 重建 prompt + UI 重试按钮）· [x] 空输出兜底（ifBlank「（对方没有回应）」）+ 429 退避重试 1~2 次 · [x] 编译通过（BUILD SUCCESSFUL 22s）
 
 ### T3.9 测试连接按钮
 - 依赖：T3.3、T3.5
 - 参考：企划书 5.3.5
 - 操作：设置页「测试连接」发最小 `stream=false` 请求，返回成功/失败
 - 文件：`feature/settings/SettingsScreen.kt`
-- 验收：[ ] 成功/失败反馈清晰
+- 验收：[x] 成功/失败反馈清晰（Loading/成功/失败 三态 + 错误分类文案；testConnection 实现于 AiChatService/RemoteApiChatService，stream=false 最小请求）· [x] 编译通过（BUILD SUCCESSFUL 22s）
 
-> **阶段 3 人工审核门槛**：真机填写 DeepSeek Key → 流式收到回复 → 错误分支（断网/错 Key）提示正确。
+> **阶段 3 人工审核门槛**：真机填写 DeepSeek Key → 流式收到回复 → 错误分支（断网/错 Key）提示正确。**代码侧 M3 已闭环（T3.1~T3.9 全编译通过）**；端到端真机验证需用户提供 DeepSeek API Key 后执行。
 
 ---
 
