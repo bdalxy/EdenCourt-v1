@@ -18,6 +18,11 @@ val DarkSurface = Color(0xFF1E1E1E)
 val DarkOnBackground = Color(0xFFFAFAFA)
 val DarkOnSurface = Color(0xFFFAFAFA)
 
+// 深色下主/次色变体（T6.2：浅粉蓝/浅粉红在深色底上作气泡底时，白字对比度不足，
+// 深色方案改用更深变体，DarkSakuraBlue 底 + 白字对比度约 5.3:1，达标 WCAG AA ≥4.5:1）
+val DarkSakuraBlue = Color(0xFF4667B8)
+val DarkSakuraPink = Color(0xFFC97A90)
+
 // 文字次要色
 val TextPrimary = Color(0xFF1A1A1A)
 val TextSecondary = Color(0xFF757575)

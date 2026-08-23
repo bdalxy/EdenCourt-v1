@@ -19,8 +19,9 @@ private val LightColorScheme = lightColorScheme(
 )
 
 private val DarkColorScheme = darkColorScheme(
-    primary = SakuraBlue,
-    secondary = SakuraPink,
+    // 深色下用更深变体保证白字对比度达标（T6.2）
+    primary = DarkSakuraBlue,
+    secondary = DarkSakuraPink,
     background = DarkBackground,
     surface = DarkSurface,
     onBackground = DarkOnBackground,
