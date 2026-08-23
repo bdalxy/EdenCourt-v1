@@ -409,7 +409,7 @@ class ChatViewModel(
         return buildString {
             append("[关于用户的长期记忆]\n")
             memories.forEach { m ->
-                append("-").append(" ").append(m.content).append("\n")
+                append("- ").append(m.content).append("\n")
             }
         }.trim()
     }
