@@ -51,6 +51,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.bdalxy.edencourt.EdenCourtApp
+import com.bdalxy.edencourt.core.ui.CharacterAvatar
 import com.bdalxy.edencourt.data.local.entity.CharacterCardEntity
 import com.bdalxy.edencourt.data.local.entity.Conversation
 import java.time.Instant
@@ -148,6 +149,8 @@ fun ConversationListScreen(
                 items(items = conversations, key = { it.id }) { conversation ->
                     ConversationListItem(
                         conversation = conversation,
+                        // 取会话绑定的角色卡（未绑定为 null → 显示默认助手，T6.2A）
+                        card = characterCards.firstOrNull { it.id == conversation.characterCardId },
                         onClick = { onNavigateToChat(conversation.id) },
                         onLongClick = { pendingDelete = conversation },
                     )
@@ -224,14 +227,20 @@ fun ConversationListScreen(
     }
 }
 
-/** 单个会话列表项：圆形头像（标题首字）+ 标题 + 预览 + 时间 */
+/**
+ * 单个会话列表项（T6.2A 角色化展示）：圆形头像 + 名称 + 预览 + 时间。
+ * 绑定角色卡的会话显示角色头像/角色名；未绑定显示「默认助手」（企划书 5.8.1）。
+ */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ConversationListItem(
     conversation: Conversation,
+    card: CharacterCardEntity?,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
 ) {
+    // 展示名：绑定角色卡用角色名，否则默认助手（企划书 5.8.1）
+    val displayName = card?.name ?: "默认助手"
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -239,28 +248,20 @@ private fun ConversationListItem(
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        // 头像：圆形色块 + 标题首字符（后续阶段接角色卡头像）
-        Surface(
+        // 头像：角色卡自定义头像/默认首字；未绑定用默认助手头像（T6.2A）
+        CharacterAvatar(
+            avatarPath = card?.avatar,
+            name = displayName,
             modifier = Modifier.size(48.dp),
-            shape = CircleShape,
-            color = MaterialTheme.colorScheme.primaryContainer,
-        ) {
-            Box(contentAlignment = Alignment.Center) {
-                Text(
-                    text = conversation.title.take(1),
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer,
-                )
-            }
-        }
+        )
 
         Spacer(modifier = Modifier.width(12.dp))
 
-        // 右侧：标题 + 预览（纵向），时间（右侧对齐）
+        // 右侧：名称 + 预览（纵向），时间（右侧对齐）
         Column(modifier = Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    text = conversation.title,
+                    text = displayName,
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Medium,
                     maxLines = 1,

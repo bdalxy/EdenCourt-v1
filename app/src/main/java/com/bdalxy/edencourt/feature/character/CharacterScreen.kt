@@ -1,6 +1,7 @@
 package com.bdalxy.edencourt.feature.character
 
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
@@ -18,7 +19,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -51,9 +51,12 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.bdalxy.edencourt.EdenCourtApp
+import com.bdalxy.edencourt.core.ui.CharacterAvatar
+import com.bdalxy.edencourt.core.ui.saveAvatarFromUri
 import com.bdalxy.edencourt.data.local.entity.CharacterCardEntity
 import kotlinx.coroutines.launch
 
@@ -95,6 +98,23 @@ fun CharacterScreen(onBack: () -> Unit) {
                     val msg = error ?: "导入成功"
                     scope.launch { snackbarHostState.showSnackbar(msg) }
                 }
+            }
+        }
+    }
+
+    // 头像选择器（T6.2B）：系统 Photo Picker 免权限选图，选中后自动圆形裁剪保存到私有目录
+    val avatarPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia(),
+    ) { uri ->
+        if (uri == null || editingCard == null) return@rememberLauncherForActivityResult
+        val card = editingCard!!
+        scope.launch {
+            val path = saveAvatarFromUri(context, uri)
+            if (path != null) {
+                viewModel.updateAvatar(card, path)
+                snackbarHostState.showSnackbar("头像已更新")
+            } else {
+                snackbarHostState.showSnackbar("头像处理失败，请重试")
             }
         }
     }
@@ -175,14 +195,23 @@ fun CharacterScreen(onBack: () -> Unit) {
         )
     }
 
-    // 详情编辑对话框：名称/简介可编辑 + JSON 只读
+    // 详情编辑对话框：头像（可更换/恢复默认）+ 名称/简介可编辑 + JSON 只读
     editingCard?.let { card ->
+        // 用列表里的实时卡片数据渲染详情（头像更新后对话框内即时生效，T6.2B）
+        val liveCard = cards.firstOrNull { it.id == card.id } ?: card
         CharacterDetailDialog(
-            card = card,
+            card = liveCard,
             onSave = { name, description ->
-                viewModel.updateCardInfo(card, name, description)
+                viewModel.updateCardInfo(liveCard, name, description)
                 editingCard = null
             },
+            onPickAvatar = {
+                // 系统图片选择器（仅图片）
+                avatarPicker.launch(
+                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
+                )
+            },
+            onClearAvatar = { viewModel.updateAvatar(liveCard, null) },
             onDismiss = { editingCard = null },
         )
     }
@@ -203,20 +232,12 @@ private fun CharacterCardListItem(
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        // 头像：圆形色块 + 角色名首字符
-        Surface(
+        // 头像：有自定义头像显示图片，否则默认主题色圆形色块 + 角色名首字（T6.2B）
+        CharacterAvatar(
+            avatarPath = card.avatar,
+            name = card.name,
             modifier = Modifier.size(48.dp),
-            shape = CircleShape,
-            color = MaterialTheme.colorScheme.primaryContainer,
-        ) {
-            Box(contentAlignment = Alignment.Center) {
-                Text(
-                    text = card.name.take(1),
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer,
-                )
-            }
-        }
+        )
 
         Spacer(modifier = Modifier.width(12.dp))
 
@@ -267,12 +288,14 @@ private fun CharacterCardListItem(
 
 /**
  * 详情编辑对话框（企划书 5.3.3）：
- * 名称/简介可编辑并保存；JSON 内容只读滚动展示。
+ * 头像（可更换/恢复默认，T6.2B）+ 名称/简介可编辑并保存；JSON 内容只读滚动展示。
  */
 @Composable
 private fun CharacterDetailDialog(
     card: CharacterCardEntity,
     onSave: (name: String, description: String) -> Unit,
+    onPickAvatar: () -> Unit,
+    onClearAvatar: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     var name by remember(card.id) { mutableStateOf(card.name) }
@@ -287,6 +310,27 @@ private fun CharacterDetailDialog(
                     .fillMaxWidth()
                     .verticalScroll(rememberScrollState()),
             ) {
+                // 头像区域：当前头像 + 更换/恢复默认（T6.2B）
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CharacterAvatar(
+                        avatarPath = card.avatar,
+                        name = card.name,
+                        modifier = Modifier.size(64.dp),
+                        textSize = 24.sp,
+                    )
+                    Spacer(modifier = Modifier.width(16.dp))
+                    Column {
+                        TextButton(onClick = onPickAvatar) {
+                            Text(if (card.avatar != null) "更换头像" else "设置头像")
+                        }
+                        if (card.avatar != null) {
+                            TextButton(onClick = onClearAvatar) {
+                                Text("恢复默认头像")
+                            }
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(8.dp))
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },

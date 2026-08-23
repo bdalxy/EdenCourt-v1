@@ -99,6 +99,22 @@ class CharacterViewModel(
         }
     }
 
+    /**
+     * 更新角色卡自定义头像（T6.2B）。
+     * @param card 当前角色卡
+     * @param avatarPath 新头像本地路径；传 null 表示清除自定义头像恢复默认
+     */
+    fun updateAvatar(card: CharacterCardEntity, avatarPath: String?) {
+        viewModelScope.launch {
+            dao.update(
+                card.copy(
+                    avatar = avatarPath,
+                    updatedAt = System.currentTimeMillis(),
+                ),
+            )
+        }
+    }
+
     companion object {
         /** 工厂：从 Application 中取 CharacterCardDao 单例 */
         fun factory(application: Application): ViewModelProvider.Factory = viewModelFactory {
