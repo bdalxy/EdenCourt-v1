@@ -33,6 +33,8 @@ fun AppRoot() {
             ChatScreen(
                 conversationId = entry.arguments?.getLong("conversationId") ?: 0L,
                 onBack = { navController.popBackStack() },
+                // T6.1：聊天页错误提示「Key 无效」可跳转设置页
+                onOpenSettings = { navController.navigate(NavRoutes.SETTINGS) },
             )
         }
         composable(NavRoutes.CHARACTER_CARDS) {

@@ -39,11 +39,22 @@ import kotlinx.coroutines.withContext
 import java.io.IOException
 
 /**
- * 聊天页 ViewModel（T2.7 + T3.7 + T4.6 + T5.10）。
+ * 单条消息的错误提示（T6.1）。
+ * - text：用户可读文案（企划书 5.5.3）
+ * - kind：错误类型（AUTH 时 UI 提供「去设置」入口）
+ */
+data class ChatError(
+    val text: String,
+    val kind: ApiErrorKind,
+)
+
+/**
+ * 聊天页 ViewModel（T2.7 + T3.7 + T4.6 + T5.10 + T6.1）。
  * - 按 conversationId 观察该会话消息流与标题
  * - T3.7 起：发送消息后调用远程 API 流式生成，逐段写入 Room 实现「逐字显示」
  * - T4.6 起：system prompt 由会话绑定的真实角色卡生成；空会话欢迎语用角色开场白
  * - T5.10 起：生成/连发中可发新消息打断（双向可打断）；取消原语为远期设备操作仲裁层预留
+ * - T6.1 起：错误提示可关闭（dismissError）；AUTH 错误携带类型供 UI 跳设置
  */
 class ChatViewModel(
     private val conversationId: Long,
@@ -77,9 +88,9 @@ class ChatViewModel(
     private val _isGenerating = MutableStateFlow(false)
     val isGenerating: StateFlow<Boolean> = _isGenerating.asStateFlow()
 
-    /** 失败消息错误提示：messageId -> 用户可读文案（UI 显示在失败气泡下方） */
-    private val _errorMessages = MutableStateFlow<Map<Long, String>>(emptyMap())
-    val errorMessages: StateFlow<Map<Long, String>> = _errorMessages.asStateFlow()
+    /** 失败消息错误提示：messageId -> 错误信息（文案+类型，T6.1 支持关闭/跳设置） */
+    private val _errorMessages = MutableStateFlow<Map<Long, ChatError>>(emptyMap())
+    val errorMessages: StateFlow<Map<Long, ChatError>> = _errorMessages.asStateFlow()
 
     /** 当前流式生成任务（用于停止） */
     private var generatingJob: Job? = null
@@ -251,11 +262,16 @@ class ChatViewModel(
             ApiErrorKind.TIMEOUT -> "请求超时，请重试"
             ApiErrorKind.SERVER -> "生成失败（服务器错误）"
         }
-        _errorMessages.update { it + (aiId to text) }
+        _errorMessages.update { it + (aiId to ChatError(text, kind)) }
         val current = repository.getMessage(aiId)
         if (current != null && current.status == MessageStatus.GENERATING) {
             repository.updateMessage(current.copy(status = MessageStatus.FAILED))
         }
+    }
+
+    /** 关闭某条失败消息的错误提示（T6.1：错误可关闭且不影响已发消息） */
+    fun dismissError(messageId: Long) {
+        _errorMessages.update { it - messageId }
     }
 
     /**

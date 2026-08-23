@@ -110,7 +110,7 @@ fun MemoryScreen(onBack: () -> Unit) {
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
-                        text = if (searchQuery.isNotBlank()) "没有匹配的记忆" else "暂无记忆，点击右下角手动添加",
+                        text = if (searchQuery.isNotBlank()) "没有匹配的记忆" else "暂无记忆，AI 会在对话中自动提取",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }

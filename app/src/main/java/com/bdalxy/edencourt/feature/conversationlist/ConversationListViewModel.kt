@@ -11,8 +11,11 @@ import com.bdalxy.edencourt.data.local.dao.CharacterCardDao
 import com.bdalxy.edencourt.data.local.entity.CharacterCardEntity
 import com.bdalxy.edencourt.data.local.entity.Conversation
 import com.bdalxy.edencourt.data.repository.ChatRepository
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -35,6 +38,18 @@ class ConversationListViewModel(
                 started = SharingStarted.WhileSubscribed(5_000),
                 initialValue = emptyList(),
             )
+
+    /** 首次加载是否完成（T6.1：首帧前显示进度圈，避免空状态闪烁，企划书 5.5.1） */
+    private val _isLoading = MutableStateFlow(true)
+    val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
+
+    init {
+        viewModelScope.launch {
+            // 等待首次数据下发后结束加载态
+            repository.observeConversations().first()
+            _isLoading.value = false
+        }
+    }
 
     /** 角色卡列表（新建会话选卡弹窗数据源；内置优先） */
     val characterCards: StateFlow<List<CharacterCardEntity>> =

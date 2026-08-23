@@ -22,6 +22,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
@@ -52,6 +53,7 @@ import com.bdalxy.edencourt.data.local.entity.Message
 import com.bdalxy.edencourt.data.local.entity.MessageStatus
 import com.bdalxy.edencourt.data.local.entity.MessageType
 import com.bdalxy.edencourt.data.local.entity.Role
+import com.bdalxy.edencourt.data.remote.ApiErrorKind
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -67,6 +69,7 @@ import java.time.format.DateTimeFormatter
 fun ChatScreen(
     conversationId: Long,
     onBack: () -> Unit,
+    onOpenSettings: () -> Unit,
 ) {
     val app = LocalContext.current.applicationContext as EdenCourtApp
     val viewModel: ChatViewModel = viewModel(
@@ -81,9 +84,10 @@ fun ChatScreen(
     // 输入框内容状态（旋转/重建后保留）
     var input by rememberSaveable { mutableStateOf("") }
 
-    // 滚动状态：消息变化时自动滚到底部（发送后即生效）
+    // 滚动状态：消息/错误提示变化时自动滚到底部（发送后即生效；
+    // 监听 errorMessages.size 使失败提示出现时重新滚动，避免「重试」被输入栏遮挡，T6.1）
     val listState = rememberLazyListState()
-    LaunchedEffect(messages.size) {
+    LaunchedEffect(messages.size, errorMessages.size) {
         if (messages.isNotEmpty()) {
             listState.animateScrollToItem(messages.size - 1)
         }
@@ -126,13 +130,15 @@ fun ChatScreen(
             LazyColumn(
                 state = listState,
                 modifier = Modifier.fillMaxSize().padding(innerPadding),
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 16.dp),
             ) {
                 items(items = messages, key = { it.id }) { message ->
                     MessageBubble(
                         message = message,
-                        errorText = errorMessages[message.id],
+                        error = errorMessages[message.id],
                         onRetry = { viewModel.retry(message.id) },
+                        onDismissError = { viewModel.dismissError(message.id) },
+                        onOpenSettings = onOpenSettings,
                     )
                 }
             }
@@ -144,8 +150,10 @@ fun ChatScreen(
 @Composable
 private fun MessageBubble(
     message: Message,
-    errorText: String?,
+    error: ChatError?,
     onRetry: () -> Unit,
+    onDismissError: () -> Unit,
+    onOpenSettings: () -> Unit,
 ) {
     val isUser = message.role == Role.USER
     // 思考过程折叠开关：AI 消息且存在思考过程时显示，默认折叠（T3.4 修正）
@@ -286,16 +294,41 @@ private fun MessageBubble(
                     )
                 }
             }
-            // 失败消息：错误提示 + 重试按钮（T3.8）
-            if (message.status == MessageStatus.FAILED) {
-                Text(
-                    text = errorText ?: "生成失败",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error,
+            // 失败消息：错误提示（红叹号 + 文案）+ 关闭/去设置/重试（T6.1 企划书 5.5.3）。
+            // 同时校验 error 非空：用户关闭后整块隐藏，避免残留 fallback 文案
+            if (message.status == MessageStatus.FAILED && error != null) {
+                Row(
                     modifier = Modifier.padding(top = 4.dp),
-                )
-                TextButton(onClick = onRetry) {
-                    Text("重试")
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Warning,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.size(16.dp),
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = error?.text ?: "生成失败",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.weight(1f),
+                    )
+                    // 错误提示可关闭（不影响已发送内容）
+                    TextButton(onClick = onDismissError, contentPadding = PaddingValues(horizontal = 4.dp)) {
+                        Text("关闭")
+                    }
+                }
+                Row {
+                    // Key 无效时提供「去设置」入口（T6.1 企划书 5.5.3）
+                    if (error?.kind == ApiErrorKind.AUTH) {
+                        TextButton(onClick = onOpenSettings) {
+                            Text("去设置")
+                        }
+                    }
+                    TextButton(onClick = onRetry) {
+                        Text("重试")
+                    }
                 }
             }
             Spacer(modifier = Modifier.size(2.dp))
