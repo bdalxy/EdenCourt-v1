@@ -24,6 +24,7 @@ import com.bdalxy.edencourt.domain.CharacterCardParser
 import com.bdalxy.edencourt.domain.PromptBuilder
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -34,13 +35,15 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.IOException
 
 /**
- * 聊天页 ViewModel（T2.7 + T3.7 + T4.6）。
+ * 聊天页 ViewModel（T2.7 + T3.7 + T4.6 + T5.10）。
  * - 按 conversationId 观察该会话消息流与标题
  * - T3.7 起：发送消息后调用远程 API 流式生成，逐段写入 Room 实现「逐字显示」
  * - T4.6 起：system prompt 由会话绑定的真实角色卡生成；空会话欢迎语用角色开场白
+ * - T5.10 起：生成/连发中可发新消息打断（双向可打断）；取消原语为远期设备操作仲裁层预留
  */
 class ChatViewModel(
     private val conversationId: Long,
@@ -98,10 +101,15 @@ class ChatViewModel(
         }
     }
 
-    /** 发送用户消息：入库 + 流式请求 AI 回复（T2.8 基础上扩展 T3.7/T4.6） */
+    /**
+     * 发送用户消息：入库 + 流式请求 AI 回复（T2.8 基础上扩展 T3.7/T4.6）。
+     * T5.10 起：生成/连发过程中发送视为「打断」——先取消当前回复再处理新消息（双向可打断）。
+     */
     fun sendMessage(text: String) {
         val content = text.trim()
-        if (content.isEmpty() || _isGenerating.value) return
+        if (content.isEmpty()) return
+        // 打断当前 AI 回复（T5.10：真人式双向可打断，已生成内容保留）
+        interruptCurrentGeneration()
         viewModelScope.launch {
             // 1. 取当前历史（不含本次输入）用于 Prompt 构建
             val history = repository.observeMessages(conversationId).first()
@@ -127,6 +135,16 @@ class ChatViewModel(
     }
 
     /**
+     * 打断当前 AI 回复（T5.10 双向可打断）。
+     * - 取消生成/拆条连发任务：已生成内容保留并标记完成，不视为失败
+     * - 作为「取消原语」预留：远期 AI 设备操作仲裁层将以本方法为基座，
+     *   把执行队列中待执行的设备操作一并取消（企划书 11.6）
+     */
+    private fun interruptCurrentGeneration() {
+        generatingJob?.cancel()
+    }
+
+    /**
      * 重试失败消息（T3.8）：删除失败 AI 消息与其用户消息，重新构建 prompt 再生成。
      * @param failedAiId 失败 AI 消息的 id
      */
@@ -146,11 +164,15 @@ class ChatViewModel(
         }
     }
 
-    /** 流式生成：插入 AI 占位消息，逐段追加内容到 Room（驱动逐字显示）；含 429 退避重试 */
+    /**
+     * 流式生成：插入 AI 占位消息，逐段追加内容到 Room（驱动逐字显示）；含 429 退避重试。
+     * 并发控制（T5.10）：闸门判断「是否已有活跃生成任务」，而非 _isGenerating 标志——
+     * 打断场景下旧任务可能尚未走完 finally，用标志判断会误拦新回复；打断已 cancel 旧任务故 isActive=false 不拦截。
+     */
     private suspend fun streamReply(promptMessages: List<ChatMessage>) {
-        if (_isGenerating.value) return
+        if (generatingJob?.isActive == true) return
         _isGenerating.value = true
-        // AI 占位消息（空内容 + 生成中状态，UI 显示「正在思考…」）
+        // AI 占位消息（空内容 + 生成中状态，UI 显示「对方正在输入…」）
         val aiId = repository.insertMessage(
             Message(
                 conversationId = conversationId,
@@ -161,7 +183,7 @@ class ChatViewModel(
         )
         val accumulated = StringBuilder()
         val accumulatedReasoning = StringBuilder()
-        generatingJob = viewModelScope.launch {
+        val job = viewModelScope.launch {
             try {
                 val config = apiConfigStore.config.first()
                 var attempt = 0
@@ -197,15 +219,27 @@ class ChatViewModel(
                     }
                 }
             } catch (e: CancellationException) {
-                // 用户主动停止：保留已生成内容，标记完成
-                val current = repository.getMessage(aiId)
-                if (current != null && current.status == MessageStatus.GENERATING) {
-                    repository.updateMessage(current.copy(status = MessageStatus.DONE))
+                // 用户主动停止/打断（T5.10）：协程已取消，需用 NonCancellable 包裹才能执行挂起写库
+                withContext(NonCancellable) {
+                    val current = repository.getMessage(aiId)
+                    if (current != null && current.status == MessageStatus.GENERATING) {
+                        if (current.content.isBlank()) {
+                            // 尚无任何内容：删除空占位，避免残留「对方正在输入…」（打断即作废，T5.10）
+                            repository.deleteMessage(current)
+                        } else {
+                            // 已有部分内容：保留并标记完成（不视为失败）
+                            repository.updateMessage(current.copy(status = MessageStatus.DONE))
+                        }
+                    }
                 }
             } finally {
-                _isGenerating.value = false
+                // 仅当仍是当前最新任务时复位状态（T5.10：避免被取消的旧任务 finally 误关新任务）
+                if (generatingJob == coroutineContext[Job]) {
+                    _isGenerating.value = false
+                }
             }
         }
+        generatingJob = job
     }
 
     /** 失败处理：记录错误提示 + 将 AI 消息标记 FAILED（T3.8） */
@@ -224,12 +258,32 @@ class ChatViewModel(
         }
     }
 
-    /** 正常结束生成：写入最终内容并标记 DONE */
+    /**
+     * 正常结束生成（T5.9 拆条连发）。
+     * 流式阶段把完整内容累积在单条占位消息里（UI 逐字/「对方正在输入…」）；
+     * 完成后按句拆成最多 3 条短消息连发入库，模拟真人打字节奏。
+     */
     private suspend fun finishReply(aiId: Long, finalContent: String) {
         val current = repository.getMessage(aiId) ?: return
-        repository.updateMessage(current.copy(content = finalContent, status = MessageStatus.DONE))
-        // T5.3：回复完成后异步提取长期记忆（独立协程，不阻塞对话、失败静默）
-        extractMemoryAsync(current)
+        // 记忆提取基于完整回复内容（不受拆条影响，T5.3）
+        extractMemoryAsync(current.copy(content = finalContent))
+
+        // 拆条连发：第一条复用占位消息（保持原 id，避免 UI key 突变），后续逐条插入
+        val chunks = MessageSplitter.split(finalContent)
+        if (chunks.isEmpty()) return
+        repository.updateMessage(current.copy(content = chunks.first(), status = MessageStatus.DONE))
+        chunks.drop(1).forEach { chunk ->
+            // 短间隔模拟真人连续打字发送的节奏（T5.9）
+            delay(CHUNK_SEND_DELAY_MS)
+            repository.insertMessage(
+                Message(
+                    conversationId = conversationId,
+                    role = Role.ASSISTANT,
+                    content = chunk,
+                    status = MessageStatus.DONE,
+                ),
+            )
+        }
     }
 
     /** 异步提取长期记忆：取该条 AI 回复对应的用户消息做输入，失败不影响主流程（T5.3） */
@@ -323,6 +377,8 @@ class ChatViewModel(
         private const val TAG = "ChatViewModel"
         /** 检索时最多使用的关键词数量（T5.4：控制检索开销） */
         private const val MAX_MEMORY_SEARCH_TERMS = 5
+        /** 拆条连发间隔（T5.9：模拟真人连续打字发送的节奏） */
+        private const val CHUNK_SEND_DELAY_MS = 500L
 
         /** 工厂：传入路由参数 conversationId，从 Application 取仓库/角色卡 DAO/配置/网络服务单例 */
         fun factory(conversationId: Long, application: Application): ViewModelProvider.Factory =

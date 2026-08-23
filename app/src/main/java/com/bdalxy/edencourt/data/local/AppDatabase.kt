@@ -18,12 +18,12 @@ import com.bdalxy.edencourt.data.local.entity.Message
 /**
  * 本地数据库单例（企划书 3.3.2 / T2.4）。
  * - 挂载：Conversation、Message、CharacterCardEntity、MemoryItem 四个实体与对应 DAO
- * - version=4：v3→v4 新增 memory_items 表（记忆系统，T5.1）
+ * - version=5：v3→v4 新增 memory_items 表（记忆系统，T5.1）；v4→v5 messages 表加 type 列（T5.7 富类型协议预留）
  * - schema 已导出到 app/schemas（企划书 4.1.5）
  */
 @Database(
     entities = [Conversation::class, Message::class, CharacterCardEntity::class, MemoryItem::class],
-    version = 4,
+    version = 5,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -96,6 +96,13 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /** v4→v5：messages 表新增 type 列，默认 TEXT（T5.7 富类型协议预留） */
+        private val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE messages ADD COLUMN type TEXT NOT NULL DEFAULT 'TEXT'")
+            }
+        }
+
         /** 获取单例（双重检查锁，避免并发重复建库） */
         fun getInstance(context: Context): AppDatabase =
             INSTANCE ?: synchronized(this) {
@@ -103,7 +110,9 @@ abstract class AppDatabase : RoomDatabase() {
                     context.applicationContext,
                     AppDatabase::class.java,
                     "edencourt.db",
-                ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4).build().also { INSTANCE = it }
+                ).addMigrations(
+                    MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5,
+                ).build().also { INSTANCE = it }
             }
     }
 }

@@ -43,12 +43,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.bdalxy.edencourt.EdenCourtApp
 import com.bdalxy.edencourt.data.local.entity.Message
 import com.bdalxy.edencourt.data.local.entity.MessageStatus
+import com.bdalxy.edencourt.data.local.entity.MessageType
 import com.bdalxy.edencourt.data.local.entity.Role
 import java.time.Instant
 import java.time.ZoneId
@@ -184,21 +186,84 @@ private fun MessageBubble(
                     MaterialTheme.colorScheme.surfaceVariant
                 },
             ) {
-                Text(
-                    // 生成中且尚无内容时显示占位提示（T3.7 流式前一刻）
-                    text = if (message.status == MessageStatus.GENERATING && message.content.isBlank()) {
-                        "正在思考…"
-                    } else {
-                        message.content
-                    },
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = if (isUser) {
-                        MaterialTheme.colorScheme.onPrimary
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    },
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-                )
+                // 富类型渲染骨架（T5.7）：按消息类型分支渲染，当前仅 TEXT 完整实现，
+                // ACTION/RESULT 预留样式，供远期 AI 设备控制接入
+                when (message.type) {
+                    MessageType.TEXT -> {
+                        // 生成中且尚无内容时显示「对方正在输入…」（T5.9 类微信体验）
+                        if (message.status == MessageStatus.GENERATING && message.content.isBlank()) {
+                            Text(
+                                text = "对方正在输入…",
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = if (isUser) {
+                                    MaterialTheme.colorScheme.onPrimary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                },
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                            )
+                        } else {
+                            // 动作神态与正文分离（T5.8）：动作段用斜体浅色小字独立一行，正文保持纯对话
+                            val parsed = remember(message.content) { ActionSegmentParser.parse(message.content) }
+                            Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+                                parsed.actions.forEach { action ->
+                                    Text(
+                                        text = action,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontStyle = FontStyle.Italic,
+                                        color = if (isUser) {
+                                            MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.7f)
+                                        } else {
+                                            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                                        },
+                                        modifier = Modifier.padding(bottom = 4.dp),
+                                    )
+                                }
+                                if (parsed.body.isNotBlank()) {
+                                    Text(
+                                        text = parsed.body,
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        color = if (isUser) {
+                                            MaterialTheme.colorScheme.onPrimary
+                                        } else {
+                                            MaterialTheme.colorScheme.onSurfaceVariant
+                                        },
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    // 设备操作消息（预留骨架）：带操作图标 + 简短标题，正文为操作说明
+                    MessageType.ACTION -> Column(
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                    ) {
+                        Text(
+                            text = "🔧 ${message.content}",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Text(
+                            text = "操作待执行",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.outline,
+                        )
+                    }
+                    // 操作结果消息（预留骨架）：带状态色点 + 结果内容
+                    MessageType.RESULT -> Column(
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                    ) {
+                        Text(
+                            text = "✅ ${message.content}",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Text(
+                            text = "操作结果",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.outline,
+                        )
+                    }
+                }
             }
             // 思考过程折叠区：AI 消息且存在思考过程时展示（默认折叠，点击展开/收起）
             if (!isUser && message.reasoning.isNotBlank()) {
@@ -249,7 +314,7 @@ private fun formatTime(timestamp: Long): String =
         .atZone(ZoneId.systemDefault())
         .format(DateTimeFormatter.ofPattern("HH:mm"))
 
-/** 底部输入栏：多行输入框（1~5 行自动扩展）+ 发送/停止按钮（生成中切换为停止） */
+/** 底部输入栏：多行输入框（1~5 行自动扩展）+ 发送按钮；生成中额外显示停止按钮（T5.10） */
 @Composable
 private fun ChatInputBar(
     value: String,
@@ -277,18 +342,19 @@ private fun ChatInputBar(
                 shape = RoundedCornerShape(24.dp),
             )
             Spacer(modifier = Modifier.width(8.dp))
-            // 生成中显示停止按钮，否则显示发送按钮（有内容才可点）
+            // 生成中额外显示「停止」按钮（仅停止，不发送）；发送按钮始终存在，
+            // 生成中点发送 = 打断当前回复并发送新消息（T5.10 双向可打断）
             if (isGenerating) {
                 FilledIconButton(onClick = onStop) {
                     Icon(Icons.Filled.Close, contentDescription = "停止生成")
                 }
-            } else {
-                FilledIconButton(
-                    onClick = onSend,
-                    enabled = value.isNotBlank(),
-                ) {
-                    Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "发送")
-                }
+                Spacer(modifier = Modifier.width(8.dp))
+            }
+            FilledIconButton(
+                onClick = onSend,
+                enabled = value.isNotBlank(),
+            ) {
+                Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "发送")
             }
         }
     }

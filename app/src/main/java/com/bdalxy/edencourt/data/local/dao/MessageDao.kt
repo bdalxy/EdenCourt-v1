@@ -28,8 +28,11 @@ interface MessageDao {
     @Delete
     suspend fun delete(message: Message)
 
-    /** 观察某会话的全部消息，按创建时间正序（聊天页消息流数据源） */
-    @Query("SELECT * FROM messages WHERE conversationId = :conversationId ORDER BY createdAt ASC")
+    /**
+     * 观察某会话的全部消息，按创建时间正序（聊天页消息流数据源）。
+     * 同毫秒插入的消息（如打断瞬间用户消息与 AI 占位消息）以 id 作次级排序，保证交错稳定（T5.10）。
+     */
+    @Query("SELECT * FROM messages WHERE conversationId = :conversationId ORDER BY createdAt ASC, id ASC")
     fun observeByConversation(conversationId: Long): Flow<List<Message>>
 
     /** 按 id 取单条消息（一次性查询） */

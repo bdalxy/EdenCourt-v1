@@ -16,6 +16,17 @@ enum class MessageStatus {
 }
 
 /**
+ * 消息类型（T5.7 富类型协议预留，为远期 AI 设备控制铺路）。
+ * - TEXT：普通文本对话（默认，现有消息全兼容）
+ * - ACTION：AI 发起/请求的设备操作（打开App/点按钮/查信息，远期扩展）
+ * - RESULT：设备操作执行结果反馈（成功/失败/数据，远期扩展）
+ * 当前阶段仅 TEXT 正常渲染，ACTION/RESULT 预留渲染骨架。
+ */
+enum class MessageType {
+    TEXT, ACTION, RESULT
+}
+
+/**
  * 消息表（企划书 4.1.2 / 4.2.2）。
  * - 外键：conversationId -> conversations.id，ON DELETE CASCADE（删会话级联删消息）
  * - 索引：conversationId + createdAt 复合，用于按会话按时间取消息
@@ -39,6 +50,8 @@ data class Message(
     val conversationId: Long,
     /** 消息角色（用户/助手/系统） */
     val role: Role = Role.USER,
+    /** 消息类型（T5.7：TEXT/ACTION/RESULT，默认 TEXT 兼容存量） */
+    val type: MessageType = MessageType.TEXT,
     /** 消息正文 */
     val content: String = "",
     /**
