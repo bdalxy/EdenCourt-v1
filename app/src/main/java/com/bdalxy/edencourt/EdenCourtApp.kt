@@ -3,8 +3,10 @@ package com.bdalxy.edencourt
 import android.app.Application
 import com.bdalxy.edencourt.data.local.AppDatabase
 import com.bdalxy.edencourt.data.local.dao.CharacterCardDao
+import com.bdalxy.edencourt.data.local.dao.MemoryDao
 import com.bdalxy.edencourt.data.remote.RemoteApiChatService
 import com.bdalxy.edencourt.data.repository.ChatRepository
+import com.bdalxy.edencourt.data.repository.MemoryRepository
 import com.bdalxy.edencourt.data.setting.ApiConfigStore
 import com.bdalxy.edencourt.domain.BuiltInCards
 import kotlinx.coroutines.CoroutineScope
@@ -38,6 +40,11 @@ class EdenCourtApp : Application() {
         AppDatabase.getInstance(this).characterCardDao()
     }
 
+    /** 记忆条目表数据访问单例（T5.1 起供记忆系统使用） */
+    val memoryDao: MemoryDao by lazy {
+        AppDatabase.getInstance(this).memoryDao()
+    }
+
     /** API 配置存储单例：DataStore 持久化，阶段 3 起供设置页/网络层使用 */
     val apiConfigStore: ApiConfigStore by lazy {
         ApiConfigStore(this)
@@ -46,5 +53,14 @@ class EdenCourtApp : Application() {
     /** AI 对话服务单例：OkHttp 流式实现（T3.5 起供 ChatViewModel 使用） */
     val aiChatService: RemoteApiChatService by lazy {
         RemoteApiChatService(RemoteApiChatService.defaultClient())
+    }
+
+    /** 记忆仓库单例（T5.3 起供对话后台提取/记忆管理页使用） */
+    val memoryRepository: MemoryRepository by lazy {
+        MemoryRepository(
+            dao = memoryDao,
+            apiConfigStore = apiConfigStore,
+            aiChatService = aiChatService,
+        )
     }
 }

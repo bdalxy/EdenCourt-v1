@@ -21,4 +21,10 @@ interface AiChatService {
      * @return true 表示连接成功；失败时抛 ApiException（携带错误类型）
      */
     suspend fun testConnection(config: ApiConfig): Boolean
+
+    /**
+     * 非流式一次完整回复（T5.3 记忆提取用）：stream=false 拿整段文本。
+     * @return 首条助手回复完整文本；失败抛 ApiException
+     */
+    suspend fun completeChat(messages: List<ChatMessage>, config: ApiConfig): String
 }

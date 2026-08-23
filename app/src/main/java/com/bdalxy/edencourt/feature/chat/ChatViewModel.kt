@@ -1,6 +1,7 @@
 package com.bdalxy.edencourt.feature.chat
 
 import android.app.Application
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -16,6 +17,7 @@ import com.bdalxy.edencourt.data.remote.ApiErrorKind
 import com.bdalxy.edencourt.data.remote.ApiException
 import com.bdalxy.edencourt.data.remote.ChatMessage
 import com.bdalxy.edencourt.data.repository.ChatRepository
+import com.bdalxy.edencourt.data.repository.MemoryRepository
 import com.bdalxy.edencourt.data.setting.ApiConfigStore
 import com.bdalxy.edencourt.domain.CharacterCard
 import com.bdalxy.edencourt.domain.CharacterCardParser
@@ -46,6 +48,7 @@ class ChatViewModel(
     private val characterCardDao: CharacterCardDao,
     private val apiConfigStore: ApiConfigStore,
     private val aiChatService: AiChatService,
+    private val memoryRepository: MemoryRepository,
 ) : ViewModel() {
 
     /** 该会话的消息流（按创建时间正序，数据库变化自动刷新） */
@@ -113,8 +116,8 @@ class ChatViewModel(
             )
             // 3. 更新会话摘要（标题/预览/时间）
             updateConversationSummary(content)
-            // 4. 组装 Prompt（system 用会话绑定的角色卡）并开始流式生成
-            streamReply(PromptBuilder.build(history, content, systemPrompt = currentSystemPrompt()))
+            // 4. 组装 Prompt（system 用会话绑定的角色卡 + T5.4 注入相关长期记忆）并开始流式生成
+            streamReply(buildPrompt(history, content))
         }
     }
 
@@ -139,7 +142,7 @@ class ChatViewModel(
             _errorMessages.update { it - failedAiId }
             repository.deleteMessage(failed)
             val newHistory = history.filter { it.id != failedAiId && it.id != userMsg.id }
-            streamReply(PromptBuilder.build(newHistory, userMsg.content, systemPrompt = currentSystemPrompt()))
+            streamReply(buildPrompt(newHistory, userMsg.content))
         }
     }
 
@@ -225,6 +228,24 @@ class ChatViewModel(
     private suspend fun finishReply(aiId: Long, finalContent: String) {
         val current = repository.getMessage(aiId) ?: return
         repository.updateMessage(current.copy(content = finalContent, status = MessageStatus.DONE))
+        // T5.3：回复完成后异步提取长期记忆（独立协程，不阻塞对话、失败静默）
+        extractMemoryAsync(current)
+    }
+
+    /** 异步提取长期记忆：取该条 AI 回复对应的用户消息做输入，失败不影响主流程（T5.3） */
+    private fun extractMemoryAsync(aiMessage: Message) {
+        viewModelScope.launch {
+            val history = repository.observeMessages(conversationId).first()
+            val userMsg = history
+                .takeWhile { it.id != aiMessage.id }
+                .lastOrNull { it.role == Role.USER }
+            if (userMsg == null) {
+                Log.w(TAG, "记忆提取跳过：未找到对应的用户消息")
+                return@launch
+            }
+            Log.d(TAG, "记忆提取触发：user=[${userMsg.content.take(30)}], ai=[${aiMessage.content.take(30)}]")
+            memoryRepository.extractAndStore(userMsg.content, aiMessage.content)
+        }
     }
 
     /** 更新会话摘要：标题取首条用户消息截断，预览与时间跟随 */
@@ -263,7 +284,46 @@ class ChatViewModel(
         return PromptBuilder.buildCardSystemPrompt(card)
     }
 
+    /**
+     * 组装完整 Prompt（T5.4 记忆检索注入）。
+     * 用用户输入里的词做关键词检索长期记忆（top-K=3），拼成
+     * 「[关于用户的长期记忆]- …」片段附加到 system 末尾；检索为空则不影响。
+     */
+    private suspend fun buildPrompt(history: List<Message>, userInput: String): List<ChatMessage> {
+        val memoryFragment = buildLongTermMemoryFragment(userInput)
+        return PromptBuilder.build(
+            history = history,
+            userInput = userInput,
+            systemPrompt = currentSystemPrompt(),
+            longTermMemories = memoryFragment,
+        )
+    }
+
+    /** 检索长期记忆并拼装注入片段（T5.4）：无命中返回空串 */
+    private suspend fun buildLongTermMemoryFragment(userInput: String): String {
+        // 拆词：按空格/标点拆成多个关键词，避免整句 LIKE 匹配永不命中
+        val terms = userInput
+            .split(Regex("[\\s,.;!?，。！？、；：\"'()\\[\\]{}]+"))
+            .map { it.trim() }
+            .filter { it.isNotBlank() && it.length >= 2 }
+            .distinct()
+            .take(MAX_MEMORY_SEARCH_TERMS)
+        val memories = memoryRepository.searchByTerms(terms)
+            .take(PromptBuilder.DEFAULT_MEMORY_LIMIT)
+        if (memories.isEmpty()) return ""
+        return buildString {
+            append("[关于用户的长期记忆]\n")
+            memories.forEach { m ->
+                append("- ").append(m.content).append("\n")
+            }
+        }.trim()
+    }
+
     companion object {
+        private const val TAG = "ChatViewModel"
+        /** 检索时最多使用的关键词数量（T5.4：控制检索开销） */
+        private const val MAX_MEMORY_SEARCH_TERMS = 5
+
         /** 工厂：传入路由参数 conversationId，从 Application 取仓库/角色卡 DAO/配置/网络服务单例 */
         fun factory(conversationId: Long, application: Application): ViewModelProvider.Factory =
             viewModelFactory {
@@ -275,6 +335,7 @@ class ChatViewModel(
                         characterCardDao = app.characterCardDao,
                         apiConfigStore = app.apiConfigStore,
                         aiChatService = app.aiChatService,
+                        memoryRepository = app.memoryRepository,
                     )
                 }
             }

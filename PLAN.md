@@ -400,42 +400,42 @@ app/src/main/
 - 参考：企划书 4.1.4
 - 操作：建 MemoryItem（type/content/keywords/confidence/sourceConversationId/sourceMessageId/createdAt/updatedAt/isDeleted）+ DAO（含关键词检索）
 - 文件：`data/local/entity/MemoryItem.kt` · `data/local/dao/MemoryDao.kt`
-- 验收：[ ] 字段一致 · [ ] type/keywords/isDeleted 索引 · [ ] 关键词匹配检索可用
+- 验收：[x] 字段一致 · [x] type/keywords/isDeleted 索引 · [x] 关键词匹配检索可用
 
 ### T5.2 短期记忆（最近 N 条）
 - 依赖：T5.1
 - 参考：企划书 3.5.1
 - 操作：对话时取该会话最近 N=20 条消息注入（system 之后、用户消息之前）
 - 文件：`domain/PromptBuilder.kt`
-- 验收：[ ] N 可配置 · [ ] 注入位置正确
+- 验收：[x] N 可配置 · [x] 注入位置正确
 
 ### T5.3 长期记忆提取（调 API 异步）
 - 依赖：T5.2
 - 参考：企划书 3.5.2
 - 操作：每轮回复后异步调 API 提取结构化条目（类型/内容/置信度），存前查冲突；高置信度才入库
 - 文件：`data/repository/MemoryRepository.kt` + 提取逻辑
-- 验收：[ ] 异步不阻塞对话 · [ ] 提取结果结构化入库 · [ ] 冲突更新/标记
+- 验收：[x] 异步不阻塞对话 · [x] 提取结果结构化入库 · [x] 冲突更新/标记
 
 ### T5.4 记忆检索注入
 - 依赖：T5.3
 - 参考：企划书 3.5.2 检索注入
 - 操作：生成前按关键词检索 top-K=3，拼成「[关于用户的长期记忆]- …」注入
 - 文件：`domain/PromptBuilder.kt` + `data/repository/MemoryRepository.kt`
-- 验收：[ ] 相关记忆被注入 · [ ] 注入条数可配置
+- 验收：[x] 相关记忆被注入 · [x] 注入条数可配置
 
 ### T5.5 记忆管理页 UI
 - 依赖：T5.3
 - 参考：企划书 5.3.4
 - 操作：列表（类型标签+内容+时间）+ 搜索 + 左滑/长按删除（二次确认）+ 手动添加
 - 文件：`feature/memory/MemoryScreen.kt` + `MemoryViewModel.kt`
-- 验收：[ ] 查看/删除/手动添加可用 · [ ] 空状态提示「暂无记忆…」
+- 验收：[x] 查看/删除/手动添加可用 · [x] 空状态提示「暂无记忆…」
 
 ### T5.6 跨会话记忆验证
 - 依赖：T5.4、T5.5
 - 参考：企划书 1.8 成功标准「跨会话记忆」
 - 操作：真机：会话 A 告诉 AI 名字→新开会话 B→AI 能提及该名字
 - 文件：无（验证步骤）
-- 验收：[ ] 重启后仍记住 ≥1 关键信息
+- 验收：[x] 重启后仍记住 ≥1 关键信息
 
 > **阶段 5 人工审核门槛**：跨会话 + 重启后记忆不丢，且错误记忆可手动删除。
 

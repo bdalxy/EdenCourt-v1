@@ -142,6 +142,51 @@ class RemoteApiChatService(
         }
     }
 
+    override suspend fun completeChat(messages: List<ChatMessage>, config: ApiConfig): String =
+        withContext(Dispatchers.IO) {
+            // 非流式请求：stream=false，期望一次返回完整答案
+            val requestBody = SseStreamParser.json.encodeToString(
+                ChatCompletionRequest(
+                    model = config.model,
+                    messages = messages,
+                    temperature = config.temperature,
+                    maxTokens = config.maxTokens,
+                    topP = config.topP,
+                    stream = false,
+                ),
+            )
+            val request = Request.Builder()
+                .url("${config.baseUrl.trimEnd('/')}/chat/completions")
+                .addHeader("Content-Type", "application/json")
+                .addHeader("Authorization", "Bearer ${config.apiKey}")
+                .addHeader("Accept", "application/json")
+                .post(requestBody.toRequestBody("application/json".toMediaType()))
+                .build()
+
+            try {
+                okHttpClient.newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) {
+                        throw when (response.code) {
+                            401, 403 -> ApiException(ApiErrorKind.AUTH, "HTTP ${response.code}")
+                            429 -> ApiException(ApiErrorKind.RATE_LIMIT, "HTTP ${response.code}")
+                            else -> ApiException(ApiErrorKind.SERVER, "HTTP ${response.code}")
+                        }
+                    }
+                    val body = response.body?.string().orEmpty()
+                    // 解析 JSON 响应取首条助手消息内容；失败返回空串由调用方兜底
+                    runCatching {
+                        SseStreamParser.json.decodeFromString<ChatCompletionResponse>(body).firstContent
+                    }.getOrDefault("")
+                }
+            } catch (e: SocketTimeoutException) {
+                throw ApiException(ApiErrorKind.TIMEOUT, "连接超时")
+            } catch (e: ApiException) {
+                throw e
+            } catch (e: IOException) {
+                throw ApiException(ApiErrorKind.NETWORK, "网络不可用：${e.message}")
+            }
+        }
+
     companion object {
         /**
          * 默认客户端：连接 10s、写入 30s、读取 60s。

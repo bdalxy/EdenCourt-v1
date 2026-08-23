@@ -8,20 +8,22 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.bdalxy.edencourt.data.local.dao.CharacterCardDao
 import com.bdalxy.edencourt.data.local.dao.ConversationDao
+import com.bdalxy.edencourt.data.local.dao.MemoryDao
 import com.bdalxy.edencourt.data.local.dao.MessageDao
 import com.bdalxy.edencourt.data.local.entity.CharacterCardEntity
 import com.bdalxy.edencourt.data.local.entity.Conversation
+import com.bdalxy.edencourt.data.local.entity.MemoryItem
 import com.bdalxy.edencourt.data.local.entity.Message
 
 /**
  * 本地数据库单例（企划书 3.3.2 / T2.4）。
- * - 挂载：Conversation、Message、CharacterCardEntity 三个实体与对应 DAO
- * - version=3：v2→v3 新增 character_cards 表（角色卡系统，T4.2）
+ * - 挂载：Conversation、Message、CharacterCardEntity、MemoryItem 四个实体与对应 DAO
+ * - version=4：v3→v4 新增 memory_items 表（记忆系统，T5.1）
  * - schema 已导出到 app/schemas（企划书 4.1.5）
  */
 @Database(
-    entities = [Conversation::class, Message::class, CharacterCardEntity::class],
-    version = 3,
+    entities = [Conversation::class, Message::class, CharacterCardEntity::class, MemoryItem::class],
+    version = 4,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -34,6 +36,9 @@ abstract class AppDatabase : RoomDatabase() {
 
     /** 角色卡表数据访问 */
     abstract fun characterCardDao(): CharacterCardDao
+
+    /** 记忆条目表数据访问 */
+    abstract fun memoryDao(): MemoryDao
 
     companion object {
         @Volatile
@@ -66,6 +71,31 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /** v3→v4：新增 memory_items 表（记忆系统，T5.1） */
+        private val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `memory_items` (
+                        `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        `type` TEXT NOT NULL,
+                        `content` TEXT NOT NULL,
+                        `keywords` TEXT NOT NULL,
+                        `confidence` REAL NOT NULL,
+                        `sourceConversationId` INTEGER,
+                        `sourceMessageId` INTEGER,
+                        `createdAt` INTEGER NOT NULL,
+                        `updatedAt` INTEGER NOT NULL,
+                        `isDeleted` INTEGER NOT NULL
+                    )
+                    """.trimIndent(),
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_memory_items_type` ON `memory_items` (`type`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_memory_items_keywords` ON `memory_items` (`keywords`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_memory_items_isDeleted` ON `memory_items` (`isDeleted`)")
+            }
+        }
+
         /** 获取单例（双重检查锁，避免并发重复建库） */
         fun getInstance(context: Context): AppDatabase =
             INSTANCE ?: synchronized(this) {
@@ -73,7 +103,7 @@ abstract class AppDatabase : RoomDatabase() {
                     context.applicationContext,
                     AppDatabase::class.java,
                     "edencourt.db",
-                ).addMigrations(MIGRATION_1_2, MIGRATION_2_3).build().also { INSTANCE = it }
+                ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4).build().also { INSTANCE = it }
             }
     }
 }

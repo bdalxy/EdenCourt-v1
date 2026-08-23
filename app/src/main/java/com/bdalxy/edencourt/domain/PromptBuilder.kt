@@ -18,6 +18,9 @@ object PromptBuilder {
     /** 短期记忆条数默认值（企划书 5.3.5 分区 2 默认 20；本阶段常量，后续可配置） */
     const val DEFAULT_SHORT_TERM_LIMIT = 20
 
+    /** 长期记忆注入条数默认值（企划书 3.5.2：取 top-K，默认 3 条） */
+    const val DEFAULT_MEMORY_LIMIT = 3
+
     /**
      * 由角色卡构建 system 提示词（T4.6，参考企划书 3.4.2）。
      * 拼接规则：「你是{name}。你的性格：{personality}…请始终以该角色身份回复」，
@@ -53,15 +56,24 @@ object PromptBuilder {
      * @param userInput 当前用户输入
      * @param shortTermLimit 短期记忆条数：只取最近 N 条历史（默认 20）
      * @param systemPrompt system 提示词（默认助手；绑定角色卡时传 buildCardSystemPrompt 结果）
+     * @param longTermMemories 长期记忆文本（已检索到的「[关于用户的长期记忆]- …」片段，
+     *   拼接到 system 末尾供 AI 自然提及；为空则不影响，默认空串，T5.4）
      */
     fun build(
         history: List<Message>,
         userInput: String,
         shortTermLimit: Int = DEFAULT_SHORT_TERM_LIMIT,
         systemPrompt: String = DEFAULT_SYSTEM_PROMPT,
+        longTermMemories: String = "",
     ): List<ChatMessage> {
-        // 1. system 消息（角色卡或默认助手）
-        val system = ChatMessage(role = "system", content = systemPrompt)
+        // 1. system 消息（角色卡或默认助手）+ 末尾附加长期记忆片段（T5.4）
+        val finalSystem = buildString {
+            append(systemPrompt)
+            if (longTermMemories.isNotBlank()) {
+                append("\n\n").append(longTermMemories)
+            }
+        }
+        val system = ChatMessage(role = "system", content = finalSystem)
 
         // 2. 最近 N 条历史（超长时只保留窗口内消息，控制上下文长度）
         val recent = history.takeLast(shortTermLimit).map { msg ->
