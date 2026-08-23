@@ -28,7 +28,8 @@ data class ApiConfig(
     companion object {
         /** DeepSeek OpenAI 兼容端点 */
         const val DEFAULT_BASE_URL = "https://api.deepseek.com/v1"
-        const val DEFAULT_MODEL = "deepseek-chat"
+        /** 默认模型（用户指定 deepseek-v4-flash） */
+        const val DEFAULT_MODEL = "deepseek-v4-flash"
     }
 }
 

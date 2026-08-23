@@ -325,6 +325,13 @@ app/src/main/
 
 > **阶段 3 人工审核门槛**：真机填写 DeepSeek Key → 流式收到回复 → 错误分支（断网/错 Key）提示正确。**代码侧 M3 已闭环（T3.1~T3.9 全编译通过）**；端到端真机验证需用户提供 DeepSeek API Key 后执行。
 
+### T3.10 模型/平台预设选择（用户新需求 2026-08-24）
+- 依赖：T3.3、T3.1
+- 参考：用户需求（默认 deepseek-v4-flash + 保留多平台/多模型选项）
+- 操作：Base URL 与模型名改为「下拉预设 + 可手输」，默认模型改为 deepseek-v4-flash
+- 文件：`data/setting/ApiConfigStore.kt` · `feature/settings/SettingsScreen.kt`
+- 验收：[x] 默认模型 deepseek-v4-flash（DEFAULT_MODEL 已改）· [x] 平台预设下拉（DeepSeek/OpenAI/Ollama 地址）· [x] 模型预设下拉（deepseek-v4-flash/chat/reasoner）· [x] 可手输任意值 · [x] 真机验证通过（菜单弹出/选中生效/无崩溃；改用 Box+DropdownMenu 规避 ExposedDropdownMenuBox 弹出尺寸异常）
+
 ---
 
 ## 7. 阶段 4：角色卡系统（M4）

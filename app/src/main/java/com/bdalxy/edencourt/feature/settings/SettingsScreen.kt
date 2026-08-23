@@ -2,6 +2,7 @@ package com.bdalxy.edencourt.feature.settings
 
 import android.app.Application
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -10,8 +11,11 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material3.Button
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -25,6 +29,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -36,6 +41,20 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import java.util.Locale
+
+/** 常用 OpenAI 兼容平台地址预设（T3.10，可选其一后仍可手输修改） */
+private val PLATFORM_PRESETS = listOf(
+    "https://api.deepseek.com/v1",  // DeepSeek 官方
+    "https://api.openai.com/v1",    // OpenAI
+    "http://localhost:11434/v1",    // 本地 Ollama
+)
+
+/** 常用模型预设（T3.10，默认 deepseek-v4-flash，可手输任意模型名） */
+private val MODEL_PRESETS = listOf(
+    "deepseek-v4-flash",
+    "deepseek-chat",
+    "deepseek-reasoner",
+)
 
 /** 设置页：第 1 区 AI API 配置（T3.3，参考企划书 5.3.5） */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -103,15 +122,15 @@ private fun ApiSettingsSection(viewModel: SettingsViewModel, modifier: Modifier 
             )
         }
         item {
-            OutlinedTextField(
+            // Base URL：平台预设下拉 + 可手输（T3.10）
+            PresetOutlinedTextField(
                 value = baseUrl,
                 onValueChange = {
                     baseUrl = it
                     viewModel.updateBaseUrl(it)
                 },
-                label = { Text("Base URL") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
+                label = "Base URL",
+                presets = PLATFORM_PRESETS,
             )
         }
         item {
@@ -133,15 +152,15 @@ private fun ApiSettingsSection(viewModel: SettingsViewModel, modifier: Modifier 
             )
         }
         item {
-            OutlinedTextField(
+            // 模型名：模型预设下拉 + 可手输（T3.10）
+            PresetOutlinedTextField(
                 value = model,
                 onValueChange = {
                     model = it
                     viewModel.updateModel(it)
                 },
-                label = { Text("模型名") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
+                label = "模型名",
+                presets = MODEL_PRESETS,
             )
         }
         item {
@@ -206,6 +225,49 @@ private fun ApiSettingsSection(viewModel: SettingsViewModel, modifier: Modifier 
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
             )
+        }
+    }
+}
+
+/**
+ * 带预设下拉的可编辑输入框（T3.10）：点击右侧箭头展开预设菜单，选中即填入；也可自由手输任意值。
+ * 用于 Base URL（平台预设）与模型名（模型预设）。
+ */
+@Composable
+private fun PresetOutlinedTextField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    label: String,
+    presets: List<String>,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Box(modifier = Modifier.fillMaxWidth()) {
+        OutlinedTextField(
+            value = value,
+            onValueChange = onValueChange,
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text(label) },
+            singleLine = true,
+            trailingIcon = {
+                IconButton(onClick = { expanded = true }) {
+                    Icon(Icons.Filled.ArrowDropDown, contentDescription = "选择预设")
+                }
+            },
+        )
+        // 下拉菜单：以输入框区域为锚点弹出
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+        ) {
+            presets.forEach { preset ->
+                DropdownMenuItem(
+                    text = { Text(preset) },
+                    onClick = {
+                        onValueChange(preset)
+                        expanded = false
+                    },
+                )
+            }
         }
     }
 }
