@@ -40,6 +40,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.coroutines.coroutineContext
 import java.io.IOException
 
 /**
@@ -117,8 +118,17 @@ class ChatViewModel(
     private val _errorMessages = MutableStateFlow<Map<Long, ChatError>>(emptyMap())
     val errorMessages: StateFlow<Map<Long, ChatError>> = _errorMessages.asStateFlow()
 
-    /** 当前流式生成任务（用于停止） */
+    /** 当前流式生成任务（用于停止）；T6.9 起指向「回复泵」协程 */
     private var generatingJob: Job? = null
+
+    /**
+     * T6.9 回复泵任务：串行消费攒批的用户消息（生成中连发不打断、不丢消息）。
+     * 泵在 Main 线程同步检查并启动，保证同一时刻只有一个泵在跑（避免连发竞态重复生成）。
+     */
+    private var replyPumpJob: Job? = null
+
+    /** T6.9 已处理到的最后一条用户消息 id（用于计算下一批待回复的新消息） */
+    private var lastProcessedUserMessageId: Long? = null
 
     /**
      * 生成请求代际序号（P1 竞态修复）。
@@ -146,20 +156,15 @@ class ChatViewModel(
     }
 
     /**
-     * 发送用户消息：入库 + 流式请求 AI 回复（T2.8 基础上扩展 T3.7/T4.6）。
-     * T5.10 起：生成/连发过程中发送视为「打断」——先取消当前回复再处理新消息（双向可打断）。
+     * 发送用户消息：入库 + 确保回复泵运行（T2.8 基础上扩展 T3.7/T4.6/T6.9）。
+     * T6.9 起（真人式攒批）：生成中连发不再打断当前回复，消息先入库，
+     * 由回复泵在下轮循环把攒批的消息合并为一次「来信」统一回复——不打断、不丢消息。
      */
     fun sendMessage(text: String) {
         val content = text.trim()
         if (content.isEmpty()) return
-        // 打断当前 AI 回复（T5.10：真人式双向可打断，已生成内容保留）
-        interruptCurrentGeneration()
-        // 递增代际：本次发送为最新请求，旧请求若尚未真正启动则直接作废（P1 竞态修复）
-        val generation = ++generationCounter
         viewModelScope.launch {
-            // 1. 取当前历史（不含本次输入）用于 Prompt 构建
-            val history = repository.observeMessages(conversationId).first()
-            // 2. 用户消息入库（触发 UI 显示右气泡）
+            // 1. 用户消息入库（触发 UI 显示右气泡）
             repository.insertMessage(
                 Message(
                     conversationId = conversationId,
@@ -168,26 +173,48 @@ class ChatViewModel(
                     status = MessageStatus.SENT,
                 ),
             )
-            // 3. 更新会话摘要（标题/预览/时间）
+            // 2. 更新会话摘要（标题/预览/时间）
             updateConversationSummary(content)
-            // 4. 组装 Prompt（system 用会话绑定的角色卡 + T5.4 注入相关长期记忆）并开始流式生成
-            streamReply(buildPrompt(history, content), generation)
+            // 3. 确保回复泵在跑：生成中连发的消息已入库，泵下轮循环自动取到并攒批回复
+            ensureReplyPumpRunning()
         }
     }
 
-    /** 停止生成：取消任务，已生成内容保留并标记完成（不视为失败） */
+    /** 停止生成：取消当前回复泵任务（已生成内容保留并标记完成，不视为失败） */
     fun stopGenerating() {
         generatingJob?.cancel()
     }
 
     /**
-     * 打断当前 AI 回复（T5.10 双向可打断）。
-     * - 取消生成/拆条连发任务：已生成内容保留并标记完成，不视为失败
-     * - 作为「取消原语」预留：远期 AI 设备操作仲裁层将以本方法为基座，
-     *   把执行队列中待执行的设备操作一并取消（企划书 11.6）
+     * 确保「回复泵」在运行（T6.9 攒批综合回复，真人式不秒回）。
+     * - 泵串行消费「上次处理点之后」的全部新用户消息：单发则正常回复一条，
+     *   连发则把多条合并为一次「来信」交 AI，由 AI 按性格决定逐条/综合/分组回应。
+     * - 生成中连发的新消息已入库，泵在下轮循环自动取到，因此不打断、不丢消息。
+     * - 本方法在 Main 线程同步检查并启动泵（无挂起点），保证同一时刻只有一个泵在跑。
      */
-    private fun interruptCurrentGeneration() {
-        generatingJob?.cancel()
+    private fun ensureReplyPumpRunning() {
+        // 泵已在跑：消息已入库，由泵下轮循环统一处理（同步判断，避免连发竞态重复生成）
+        if (replyPumpJob?.isActive == true) return
+        replyPumpJob = viewModelScope.launch {
+            while (true) {
+                // 取当前历史（含刚发送/攒批的用户消息）
+                val history = repository.observeMessages(conversationId).first()
+                // 本轮待回复：位于上次处理点之后的所有用户消息（连发会一次性取到，实现攒批）
+                val newUserMessages = history.filter { msg ->
+                    msg.role == Role.USER &&
+                        (lastProcessedUserMessageId == null || msg.id > lastProcessedUserMessageId!!)
+                }
+                // 没有新消息，泵退出等待下次发送
+                if (newUserMessages.isEmpty()) break
+                lastProcessedUserMessageId = newUserMessages.last().id
+                // 合并为一次「来信」：多条以换行分隔，AI 按性格决定怎么回（T6.9）
+                val mergedInput = newUserMessages.joinToString("\n") { it.content }
+                streamReply(
+                    promptMessages = buildPrompt(history, mergedInput, newUserMessages.size),
+                    generation = ++generationCounter,
+                )
+            }
+        }
     }
 
     /**
@@ -212,15 +239,15 @@ class ChatViewModel(
 
     /**
      * 流式生成：插入 AI 占位消息，逐段追加内容到 Room（驱动逐字显示）；含 429 退避重试。
-     * 并发控制（T5.10 + P1 竞态修复）：以「代际序号」为闸门判断本请求是否已过期——
-     * 快速连发时，后发消息代际更大，先发请求即便尚未走完挂起点也视为过期直接作废，
-     * 后发请求总能启动；彻底避免「旧请求已启动、新请求被活跃任务拦截而永不回复」的竞态。
+     * 并发控制（T6.9 重构）：改为在「回复泵」协程内同步执行（不再另起 job），
+     * 由泵串行消费攒批消息；generatingJob 记录泵协程供「停止」取消。
+     * 保留代际闸门（P1 竞态修复）：本请求已被更新的发送覆盖（generation != 当前最新）则直接作废。
      */
     private suspend fun streamReply(promptMessages: List<ChatMessage>, generation: Long) {
         // 代际闸门：本请求已被更新的发送覆盖（generation != 当前最新）则直接作废，不启动生成
         if (generation != generationCounter) return
         _isGenerating.value = true
-        // AI 占位消息（空内容 + 生成中状态，UI 显示「对方正在输入…」）
+        // AI 占位消息（空内容 + 生成中状态，UI 顶部显示「正在输入…」，T6.8）
         val aiId = repository.insertMessage(
             Message(
                 conversationId = conversationId,
@@ -231,63 +258,63 @@ class ChatViewModel(
         )
         val accumulated = StringBuilder()
         val accumulatedReasoning = StringBuilder()
-        val job = viewModelScope.launch {
-            try {
-                val config = apiConfigStore.config.first()
-                var attempt = 0
-                while (true) {
-                    try {
-                        // 收集增量并逐段写入 Room：正式答案与思考过程分开累积（T3.4 修正）
-                        aiChatService.streamChat(promptMessages, config).collect { delta ->
-                            if (delta.reasoning.isNotEmpty()) accumulatedReasoning.append(delta.reasoning)
-                            if (delta.content.isNotEmpty()) accumulated.append(delta.content)
-                            val current = repository.getMessage(aiId) ?: return@collect
-                            repository.updateMessage(
-                                current.copy(
-                                    content = accumulated.toString(),
-                                    reasoning = accumulatedReasoning.toString(),
-                                ),
-                            )
-                        }
-                        // 正常完成：空输出兜底（企划书 3.6.4）
-                        finishReply(aiId, accumulated.toString().ifBlank { "（对方没有回应）" })
-                        break
-                    } catch (e: ApiException) {
-                        // 429 退避重试 1~2 次（企划书 3.6.4）
-                        if (e.kind == ApiErrorKind.RATE_LIMIT && attempt < 2) {
-                            attempt++
-                            delay(1000L * attempt)
-                            continue
-                        }
-                        markFailed(aiId, e.kind)
-                        break
-                    } catch (e: IOException) {
-                        markFailed(aiId, ApiErrorKind.NETWORK)
-                        break
+        // T6.9：同步在当前协程（回复泵/重试协程）内执行，generatingJob 记录当前协程供「停止」取消
+        val currentJob = coroutineContext[Job]
+        generatingJob = currentJob
+        try {
+            val config = apiConfigStore.config.first()
+            var attempt = 0
+            while (true) {
+                try {
+                    // 收集增量并逐段写入 Room：正式答案与思考过程分开累积（T3.4 修正）
+                    aiChatService.streamChat(promptMessages, config).collect { delta ->
+                        if (delta.reasoning.isNotEmpty()) accumulatedReasoning.append(delta.reasoning)
+                        if (delta.content.isNotEmpty()) accumulated.append(delta.content)
+                        val current = repository.getMessage(aiId) ?: return@collect
+                        repository.updateMessage(
+                            current.copy(
+                                content = accumulated.toString(),
+                                reasoning = accumulatedReasoning.toString(),
+                            ),
+                        )
                     }
-                }
-            } catch (e: CancellationException) {
-                // 用户主动停止/打断（T5.10）：协程已取消，需用 NonCancellable 包裹才能执行挂起写库
-                withContext(NonCancellable) {
-                    val current = repository.getMessage(aiId)
-                    if (current != null && current.status == MessageStatus.GENERATING) {
-                        if (current.content.isBlank()) {
-                            // 尚无任何内容：删除空占位，避免残留「对方正在输入…」（打断即作废，T5.10）
-                            repository.deleteMessage(current)
-                        } else {
-                            // 已有部分内容：保留并标记完成（不视为失败）
-                            repository.updateMessage(current.copy(status = MessageStatus.DONE))
-                        }
+                    // 正常完成：空输出兜底（企划书 3.6.4）
+                    finishReply(aiId, accumulated.toString().ifBlank { "（对方没有回应）" })
+                    break
+                } catch (e: ApiException) {
+                    // 429 退避重试 1~2 次（企划书 3.6.4）
+                    if (e.kind == ApiErrorKind.RATE_LIMIT && attempt < 2) {
+                        attempt++
+                        delay(1000L * attempt)
+                        continue
                     }
-                }
-            } finally {
-                // 仅当仍是当前最新任务时复位状态（T5.10：避免被取消的旧任务 finally 误关新任务）
-                if (generatingJob == coroutineContext[Job]) {
-                    _isGenerating.value = false
+                    markFailed(aiId, e.kind)
+                    break
+                } catch (e: IOException) {
+                    markFailed(aiId, ApiErrorKind.NETWORK)
+                    break
                 }
             }
+        } catch (e: CancellationException) {
+            // 用户主动停止/打断（T5.10）：协程已取消，需用 NonCancellable 包裹才能执行挂起写库
+            withContext(NonCancellable) {
+                val current = repository.getMessage(aiId)
+                if (current != null && current.status == MessageStatus.GENERATING) {
+                    if (current.content.isBlank()) {
+                        // 尚无任何内容：删除空占位，避免残留「正在输入」气泡（打断即作废，T5.10）
+                        repository.deleteMessage(current)
+                    } else {
+                        // 已有部分内容：保留并标记完成（不视为失败）
+                        repository.updateMessage(current.copy(status = MessageStatus.DONE))
+                    }
+                }
+            }
+        } finally {
+            // 仅当仍是当前最新任务时复位状态（T5.10：避免被取消的旧任务 finally 误关新任务）
+            if (generatingJob == coroutineContext[Job]) {
+                _isGenerating.value = false
+            }
         }
-        generatingJob = job
     }
 
     /** 失败处理：记录错误提示 + 将 AI 消息标记 FAILED（T3.8） */
@@ -392,17 +419,19 @@ class ChatViewModel(
     }
 
     /**
-     * 组装完整 Prompt（T5.4 记忆检索注入）。
+     * 组装完整 Prompt（T5.4 记忆检索注入 + T6.9 攒批提示）。
      * 用用户输入里的词做关键词检索长期记忆（top-K=3），拼成
      * 「[关于用户的长期记忆]- …」片段附加到 system 末尾；检索为空则不影响。
+     * @param userBatchCount 本次来信合并的用户消息条数（>1 表示连发攒批，T6.9）
      */
-    private suspend fun buildPrompt(history: List<Message>, userInput: String): List<ChatMessage> {
+    private suspend fun buildPrompt(history: List<Message>, userInput: String, userBatchCount: Int = 1): List<ChatMessage> {
         val memoryFragment = buildLongTermMemoryFragment(userInput)
         return PromptBuilder.build(
             history = history,
             userInput = userInput,
             systemPrompt = currentSystemPrompt(),
             longTermMemories = memoryFragment,
+            userBatchCount = userBatchCount,
         )
     }
 

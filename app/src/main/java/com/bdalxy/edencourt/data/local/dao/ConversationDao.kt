@@ -28,8 +28,8 @@ interface ConversationDao {
     @Delete
     suspend fun delete(conversation: Conversation)
 
-    /** 观察全部会话，按更新时间降序（会话列表数据源） */
-    @Query("SELECT * FROM conversations ORDER BY updatedAt DESC")
+    /** 观察全部会话：置顶排最前，其余按更新时间降序（T6.10 会话置顶） */
+    @Query("SELECT * FROM conversations ORDER BY isPinned DESC, updatedAt DESC")
     fun observeAll(): Flow<List<Conversation>>
 
     /** 观察单个会话（聊天页标题等实时跟随） */

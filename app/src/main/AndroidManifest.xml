@@ -15,6 +15,7 @@
             android:exported="true"
             android:label="@string/app_name"
             android:theme="@style/Theme.EdenCourt">
+            <!-- T6.7：edge-to-edge 下不设 windowSoftInputMode，键盘由 Compose imePadding 处理（adjustResize 会造成双 insets，导致对话区沉底/最新消息不可见） -->
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />

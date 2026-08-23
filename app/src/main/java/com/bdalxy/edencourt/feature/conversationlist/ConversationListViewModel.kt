@@ -79,6 +79,16 @@ class ConversationListViewModel(
         }
     }
 
+    /**
+     * 置顶/取消置顶会话（T6.10）。
+     * 翻转 isPinned 字段；Room 响应式查询自动刷新列表（置顶排最前）。
+     */
+    fun togglePin(conversation: Conversation) {
+        viewModelScope.launch {
+            repository.updateConversation(conversation.copy(isPinned = !conversation.isPinned))
+        }
+    }
+
     companion object {
         /** 工厂：从 Application 中取仓库/角色卡 DAO 单例 */
         fun factory(application: Application): ViewModelProvider.Factory = viewModelFactory {

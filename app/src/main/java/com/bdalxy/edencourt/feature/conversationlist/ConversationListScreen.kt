@@ -83,6 +83,8 @@ fun ConversationListScreen(
 
     var menuExpanded by remember { mutableStateOf(false) }
     var pendingDelete by remember { mutableStateOf<Conversation?>(null) }
+    // 长按操作目标会话（T6.10：弹「置顶/取消置顶 + 删除」操作菜单）
+    var actionTarget by remember { mutableStateOf<Conversation?>(null) }
     // 新建会话选卡弹窗开关（T4.7）
     var showCardPicker by remember { mutableStateOf(false) }
 
@@ -152,7 +154,8 @@ fun ConversationListScreen(
                         // 取会话绑定的角色卡（未绑定为 null → 显示默认助手，T6.2A）
                         card = characterCards.firstOrNull { it.id == conversation.characterCardId },
                         onClick = { onNavigateToChat(conversation.id) },
-                        onLongClick = { pendingDelete = conversation },
+                        // T6.10：长按改为弹操作菜单（置顶/取消置顶、删除），不再直接弹删除确认
+                        onLongClick = { actionTarget = conversation },
                     )
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
                 }
@@ -199,6 +202,51 @@ fun ConversationListScreen(
                 }
             }
             Spacer(modifier = Modifier.height(16.dp))
+        }
+    }
+
+    // 长按操作菜单（T6.10 + 6.5 体验修正）：底部弹窗「置顶/取消置顶 + 删除」（更贴近微信长按交互）
+    actionTarget?.let { conversation ->
+        ModalBottomSheet(
+            onDismissRequest = { actionTarget = null },
+            sheetState = rememberModalBottomSheetState(),
+        ) {
+            Column(modifier = Modifier.fillMaxWidth().padding(bottom = 24.dp)) {
+                // 置顶 / 取消置顶
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            viewModel.togglePin(conversation)
+                            actionTarget = null
+                        }
+                        .padding(horizontal = 20.dp, vertical = 16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = if (conversation.isPinned) "取消置顶" else "置顶",
+                        style = MaterialTheme.typography.bodyLarge,
+                    )
+                }
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+                // 删除（仍走二次确认，保留安全保护）
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            pendingDelete = conversation
+                            actionTarget = null
+                        }
+                        .padding(horizontal = 20.dp, vertical = 16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = "删除",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+            }
         }
     }
 
@@ -260,6 +308,15 @@ private fun ConversationListItem(
         // 右侧：名称 + 预览（纵向），时间（右侧对齐）
         Column(modifier = Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
+                // T6.10：置顶会话在名称前显示「置顶」小标签（避免引 extended icons 增大体积）
+                if (conversation.isPinned) {
+                    Text(
+                        text = "置顶",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                }
                 Text(
                     text = displayName,
                     style = MaterialTheme.typography.titleMedium,

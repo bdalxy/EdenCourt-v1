@@ -3,11 +3,15 @@ package com.bdalxy.edencourt.feature.chat
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -44,6 +48,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -57,7 +62,9 @@ import com.bdalxy.edencourt.data.local.entity.MessageStatus
 import com.bdalxy.edencourt.data.local.entity.MessageType
 import com.bdalxy.edencourt.data.local.entity.Role
 import com.bdalxy.edencourt.data.remote.ApiErrorKind
+import kotlinx.coroutines.delay
 import java.time.Instant
+import java.time.LocalTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
@@ -67,7 +74,7 @@ import java.time.format.DateTimeFormatter
  * - LazyColumn 消息按时间正序，新消息自动滚到底部
  * - 每条消息带时间戳
  */
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun ChatScreen(
     conversationId: Long,
@@ -89,9 +96,19 @@ fun ChatScreen(
     // 输入框内容状态（旋转/重建后保留）
     var input by rememberSaveable { mutableStateOf("") }
 
-    // 滚动状态：消息/错误提示变化时自动滚到底部（发送后即生效；
-    // 监听 errorMessages.size 使失败提示出现时重新滚动，避免「重试」被输入栏遮挡，T6.1）
+    // 滚动状态：消息/错误提示/键盘弹出时自动滚到底部（T6.1 + T6.7 修复）
+    // - 键盘弹出：以 IME 高度为 key，动画期间每次高度变化都重新定位到底部；
+    //   动画结束高度稳定后最终定位一次，保证最新消息完整可见（避免视口压缩时旧 offset 停在中间）
+    // - 消息/错误变化：平滑滚到底（animateScrollToItem），保留 AI 回复的跟随感
     val listState = rememberLazyListState()
+    val imeBottom = WindowInsets.ime.getBottom(LocalDensity.current)
+    // 键盘弹出（IME 高度 > 0）：滚动到列表底部，保证最新消息完整可见
+    LaunchedEffect(imeBottom) {
+        if (imeBottom > 0 && messages.isNotEmpty()) {
+            listState.scrollToItem(messages.size - 1)
+        }
+    }
+    // 消息/错误提示变化：平滑滚到底部（发送后/失败提示出现时重新定位，避免「重试」被输入栏遮挡）
     LaunchedEffect(messages.size, errorMessages.size) {
         if (messages.isNotEmpty()) {
             listState.animateScrollToItem(messages.size - 1)
@@ -102,16 +119,26 @@ fun ChatScreen(
         topBar = {
             TopAppBar(
                 title = {
-                    // T6.2A：顶部左侧显示角色头像 + 角色名（企划书 5.3.2）
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        CharacterAvatar(
-                            avatarPath = roleCard?.avatar,
-                            name = roleName,
-                            modifier = Modifier.size(32.dp),
-                            textSize = 14.sp,
+                    // T6.2A + T6.8：顶部左侧显示角色头像 + 角色名；下方小字显示「正在输入…」或角色状态（企划书 5.3.2）
+                    Column {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            CharacterAvatar(
+                                avatarPath = roleCard?.avatar,
+                                name = roleName,
+                                modifier = Modifier.size(32.dp),
+                                textSize = 14.sp,
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(roleName, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                        // T6.8：生成中显示「正在输入…」，否则显示角色当前状态（在线/睡觉中，轻量版）
+                        Text(
+                            text = if (isGenerating) "正在输入…" else roleStatusText(),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.outline,
+                            maxLines = 1,
+                            modifier = Modifier.padding(start = 40.dp),
                         )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(roleName, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                 },
                 navigationIcon = {
@@ -153,6 +180,9 @@ fun ChatScreen(
                     MessageBubble(
                         message = message,
                         error = errorMessages[message.id],
+                        // T6.6：把会话绑定角色卡的头像/角色名传给气泡，AI 头像跟随角色卡（自定义/默认首字）
+                        assistantAvatar = roleCard?.avatar,
+                        assistantName = roleName,
                         onRetry = { viewModel.retry(message.id) },
                         onDismissError = { viewModel.dismissError(message.id) },
                         onOpenSettings = onOpenSettings,
@@ -168,6 +198,8 @@ fun ChatScreen(
 private fun MessageBubble(
     message: Message,
     error: ChatError?,
+    assistantAvatar: String?,
+    assistantName: String,
     onRetry: () -> Unit,
     onDismissError: () -> Unit,
     onOpenSettings: () -> Unit,
@@ -180,21 +212,14 @@ private fun MessageBubble(
         modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
         horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start,
     ) {
-        // AI 消息左侧显示圆形头像（后续角色卡阶段替换为角色头像）
+        // AI 消息左侧显示角色头像（T6.6：跟随会话绑定角色卡，与顶部一致；未绑定显示默认助手）
         if (!isUser) {
-            Surface(
+            CharacterAvatar(
+                avatarPath = assistantAvatar,
+                name = assistantName,
                 modifier = Modifier.size(36.dp).align(Alignment.Top),
-                shape = CircleShape,
-                color = MaterialTheme.colorScheme.secondaryContainer,
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Text(
-                        text = "永",
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.onSecondaryContainer,
-                    )
-                }
-            }
+                textSize = 14.sp,
+            )
             Spacer(modifier = Modifier.width(8.dp))
         }
 
@@ -215,16 +240,11 @@ private fun MessageBubble(
                 // ACTION/RESULT 预留样式，供远期 AI 设备控制接入
                 when (message.type) {
                     MessageType.TEXT -> {
-                        // 生成中且尚无内容时显示「对方正在输入…」（T5.9 类微信体验）
+                        // T6.8：生成中空内容不再显示「对方正在输入…」气泡（提示已移至顶部），
+                        // 渲染空占位保持消息位置稳定，避免连发时气泡消失造成跳动
                         if (message.status == MessageStatus.GENERATING && message.content.isBlank()) {
                             Text(
-                                text = "对方正在输入…",
-                                style = MaterialTheme.typography.bodyLarge,
-                                color = if (isUser) {
-                                    MaterialTheme.colorScheme.onPrimary
-                                } else {
-                                    MaterialTheme.colorScheme.onSurfaceVariant
-                                },
+                                text = "",
                                 modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
                             )
                         } else {
@@ -363,6 +383,29 @@ private fun formatTime(timestamp: Long): String =
     Instant.ofEpochMilli(timestamp)
         .atZone(ZoneId.systemDefault())
         .format(DateTimeFormatter.ofPattern("HH:mm"))
+
+/**
+ * 角色当前状态文本（T6.8 轻量版，用户需求「角色状态（在线/睡觉中）」）。
+ * 按时间段自动切换：6:00~22:59 为「在线」，其余为「睡觉中」；每分钟刷新一次。
+ * 后续深入开发时可改为随性格/对话/角色卡属性驱动。
+ */
+@Composable
+private fun roleStatusText(): String {
+    var text by remember { mutableStateOf(currentRoleStatus()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(60_000L)
+            text = currentRoleStatus()
+        }
+    }
+    return text
+}
+
+/** 计算当前角色状态：白天在线、深夜睡觉中（T6.8 轻量规则） */
+private fun currentRoleStatus(): String {
+    val hour = LocalTime.now().hour
+    return if (hour in 6..22) "在线" else "睡觉中"
+}
 
 /** 底部输入栏：多行输入框（1~5 行自动扩展）+ 发送按钮；生成中额外显示停止按钮（T5.10） */
 @Composable

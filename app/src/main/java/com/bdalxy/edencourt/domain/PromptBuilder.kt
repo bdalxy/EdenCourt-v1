@@ -3,6 +3,9 @@ package com.bdalxy.edencourt.domain
 import com.bdalxy.edencourt.data.local.entity.Message
 import com.bdalxy.edencourt.data.local.entity.Role
 import com.bdalxy.edencourt.data.remote.ChatMessage
+import java.time.ZonedDateTime
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 
 /**
  * Prompt 构建器（T3.6，参考企划书 3.4.2/3.5.1/3.6.2）。
@@ -53,11 +56,13 @@ object PromptBuilder {
     /**
      * 构建请求消息列表。
      * @param history 该会话历史消息（按时间正序）
-     * @param userInput 当前用户输入
+     * @param userInput 当前用户输入（连发攒批时多条以换行合并为一次「来信」，T6.9）
      * @param shortTermLimit 短期记忆条数：只取最近 N 条历史（默认 20）
      * @param systemPrompt system 提示词（默认助手；绑定角色卡时传 buildCardSystemPrompt 结果）
      * @param longTermMemories 长期记忆文本（已检索到的「[关于用户的长期记忆]- …」片段，
      *   拼接到 system 末尾供 AI 自然提及；为空则不影响，默认空串，T5.4）
+     * @param userBatchCount 本次来信合并的用户消息条数（>1 表示连发攒批，
+     *   在 system 中提示 AI 按性格决定逐条/综合/分组回应，T6.9）
      */
     fun build(
         history: List<Message>,
@@ -65,12 +70,22 @@ object PromptBuilder {
         shortTermLimit: Int = DEFAULT_SHORT_TERM_LIMIT,
         systemPrompt: String = DEFAULT_SYSTEM_PROMPT,
         longTermMemories: String = "",
+        userBatchCount: Int = 1,
     ): List<ChatMessage> {
-        // 1. system 消息（角色卡或默认助手）+ 末尾附加长期记忆片段（T5.4）
+        // 1. system 消息（角色卡或默认助手）+ 当前时间注入（T6.11）+ 长期记忆（T5.4）+ 攒批提示（T6.9）
         val finalSystem = buildString {
+            // T6.11：注入当前现实时间，让 AI 明确感知三次元时间（每次发送时刷新）
+            append("【当前现实时间】").append(currentTimeText()).append("\n\n")
             append(systemPrompt)
             if (longTermMemories.isNotBlank()) {
                 append("\n\n").append(longTermMemories)
+            }
+            // T6.9：连发多条时提示 AI 像真人一样按性格决定回应方式（不逐条秒回）
+            if (userBatchCount > 1) {
+                append("\n\n【对话提醒】用户刚连续发来了 ")
+                    .append(userBatchCount)
+                    .append(" 条消息（见下一条用户消息，多条以换行分隔）。")
+                    .append("请像真人聊天一样，按你的性格决定回应方式：可以逐条回应、综合回应，或把有关联的合起来回、无关的分开回。")
             }
         }
         val system = ChatMessage(role = "system", content = finalSystem)
@@ -88,4 +103,11 @@ object PromptBuilder {
 
         return listOf(system) + recent + user
     }
+
+    /**
+     * 当前现实时间文本（T6.11）：如「2026年8月24日 星期一 14:30」。
+     * 每次构建 Prompt 时调用，保证 AI 拿到的永远是当前时间。
+     */
+    private fun currentTimeText(): String =
+        ZonedDateTime.now().format(DateTimeFormatter.ofPattern("yyyy年M月d日 EEEE HH:mm", Locale.CHINESE))
 }
