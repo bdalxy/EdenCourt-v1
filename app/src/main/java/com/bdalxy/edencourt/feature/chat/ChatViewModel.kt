@@ -173,8 +173,8 @@ class ChatViewModel(
                     status = MessageStatus.SENT,
                 ),
             )
-            // 2. 更新会话摘要（标题/预览/时间）
-            updateConversationSummary(content)
+            // 2. 会话标题/时间/排序更新（T6.15：不再用用户内容覆盖预览，预览跟随 AI 最后回复）
+            updateConversationOnSend(content)
             // 3. 确保回复泵在跑：生成中连发的消息已入库，泵下轮循环自动取到并攒批回复
             ensureReplyPumpRunning()
         }
@@ -364,6 +364,8 @@ class ChatViewModel(
                 ),
             )
         }
+        // T6.15：AI 完成回复后，会话列表预览跟随最后一条 AI 回复并刷新时间/排序（类微信）
+        updateConversationOnReply(finalContent)
     }
 
     /** 异步提取长期记忆：取该条 AI 回复对应的用户消息做输入，失败不影响主流程（T5.3） */
@@ -382,16 +384,30 @@ class ChatViewModel(
         }
     }
 
-    /** 更新会话摘要：标题取首条用户消息截断，预览与时间跟随 */
-    private suspend fun updateConversationSummary(content: String) {
+    /** 用户发送时刷新会话（T6.15）：标题取首条用户消息，更新时间/触发排序，但不覆盖预览（预览跟随 AI 最后回复） */
+    private suspend fun updateConversationOnSend(content: String) {
         val conv = repository.getConversation(conversationId) ?: return
         val now = System.currentTimeMillis()
-        val preview = content.replace('\n', ' ')
+        val plain = content.replace('\n', ' ')
         val isUnnamed = conv.title.isBlank() || conv.title == "新对话"
         repository.updateConversation(
             conv.copy(
-                title = if (isUnnamed) preview.take(20) else conv.title,
-                lastMessagePreview = preview.take(50),
+                title = if (isUnnamed) plain.take(20) else conv.title,
+                lastMessageTime = now,
+                updatedAt = now,
+                // 预览保留 AI 上次回复；若尚无预览（首个会话），用本次用户输入兜底
+                lastMessagePreview = conv.lastMessagePreview.ifEmpty { plain.take(50) },
+            ),
+        )
+    }
+
+    /** AI 完成回复时更新会话（T6.15）：预览显示 AI 最后一条（类微信），并刷新时间/排序 */
+    private suspend fun updateConversationOnReply(content: String) {
+        val conv = repository.getConversation(conversationId) ?: return
+        val now = System.currentTimeMillis()
+        repository.updateConversation(
+            conv.copy(
+                lastMessagePreview = content.replace('\n', ' ').take(50),
                 lastMessageTime = now,
                 updatedAt = now,
             ),

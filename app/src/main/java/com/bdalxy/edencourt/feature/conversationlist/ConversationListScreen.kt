@@ -31,6 +31,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -85,6 +86,8 @@ fun ConversationListScreen(
     var pendingDelete by remember { mutableStateOf<Conversation?>(null) }
     // 长按操作目标会话（T6.10：弹「置顶/取消置顶 + 删除」操作菜单）
     var actionTarget by remember { mutableStateOf<Conversation?>(null) }
+    // 待编辑备注的会话（T6.14：长按菜单「备注」弹编辑对话框）
+    var remarkTarget by remember { mutableStateOf<Conversation?>(null) }
     // 新建会话选卡弹窗开关（T4.7）
     var showCardPicker by remember { mutableStateOf(false) }
 
@@ -229,6 +232,23 @@ fun ConversationListScreen(
                     )
                 }
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+                // 备注（T6.14：类微信备注显示名，改后列表展示备注别名）
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            remarkTarget = conversation
+                            actionTarget = null
+                        }
+                        .padding(horizontal = 20.dp, vertical = 16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = "备注",
+                        style = MaterialTheme.typography.bodyLarge,
+                    )
+                }
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
                 // 删除（仍走二次确认，保留安全保护）
                 Row(
                     modifier = Modifier
@@ -273,6 +293,18 @@ fun ConversationListScreen(
             },
         )
     }
+
+    // 会话备注编辑对话框（T6.14）：留空或输入新备注
+    remarkTarget?.let { conversation ->
+        RemarkEditDialog(
+            initial = conversation.remark,
+            onConfirm = { newRemark ->
+                viewModel.updateRemark(conversation, newRemark)
+                remarkTarget = null
+            },
+            onDismiss = { remarkTarget = null },
+        )
+    }
 }
 
 /**
@@ -287,8 +319,8 @@ private fun ConversationListItem(
     onClick: () -> Unit,
     onLongClick: () -> Unit,
 ) {
-    // 展示名：绑定角色卡用角色名，否则默认助手（企划书 5.8.1）
-    val displayName = card?.name ?: "默认助手"
+    // 展示名：会话备注优先生效（T6.14，类微信备注）；未绑定角色卡用默认助手（企划书 5.8.1）
+    val displayName = conversation.remark.ifBlank { card?.name ?: "默认助手" }
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -342,6 +374,41 @@ private fun ConversationListItem(
             )
         }
     }
+}
+
+/**
+ * 会话备注编辑对话框（T6.14）：底部弹窗输入备注，留空则回退原名。
+ */
+@Composable
+private fun RemarkEditDialog(
+    initial: String,
+    onConfirm: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var remark by remember { mutableStateOf(initial) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("设置备注") },
+        text = {
+            OutlinedTextField(
+                value = remark,
+                onValueChange = { remark = it },
+                label = { Text("备注（显示名，留空用原有名称）") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = { onConfirm(remark) }) {
+                Text("确定")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("取消")
+            }
+        },
+    )
 }
 
 /** 时间显示规则：当天只显 HH:mm；昨天显「昨天」；更早显日期 */

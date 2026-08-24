@@ -89,6 +89,16 @@ class ConversationListViewModel(
         }
     }
 
+    /**
+     * 更新会话备注别名（T6.14，类微信备注）。
+     * remark 为空则回退为会话原 title 展示。
+     */
+    fun updateRemark(conversation: Conversation, remark: String) {
+        viewModelScope.launch {
+            repository.updateConversation(conversation.copy(remark = remark.trim()))
+        }
+    }
+
     companion object {
         /** 工厂：从 Application 中取仓库/角色卡 DAO 单例 */
         fun factory(application: Application): ViewModelProvider.Factory = viewModelFactory {

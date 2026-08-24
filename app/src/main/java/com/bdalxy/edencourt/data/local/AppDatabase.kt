@@ -110,10 +110,11 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
-        /** v6→v7：memory_items 表新增 characterCardId 列，可空（记忆按角色卡隔离，T6.13） */
+        /** v6→v7：memory_items 表新增 characterCardId 列及其索引（记忆按角色卡隔离，T6.13） */
         private val MIGRATION_6_7 = object : Migration(6, 7) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE memory_items ADD COLUMN characterCardId INTEGER")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_memory_items_characterCardId` ON `memory_items` (`characterCardId`)")
             }
         }
 
