@@ -5,6 +5,7 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -31,6 +32,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -39,6 +41,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -83,6 +86,12 @@ fun CharacterScreen(onBack: () -> Unit) {
     var pendingDelete by remember { mutableStateOf<CharacterCardEntity?>(null) }
     // 待编辑详情的角色卡（点击触发）
     var editingCard by remember { mutableStateOf<CharacterCardEntity?>(null) }
+    // 角色管理页 FAB 操作菜单：新建角色 / 导入 JSON（T6.12）
+    var fabMenuExpanded by remember { mutableStateOf(false) }
+    // 新建角色表单开关（T6.12）
+    var creating by remember { mutableStateOf(false) }
+    // 新建角色暂存头像路径（点保存时才随卡入库；null=用默认首字头像）
+    var newAvatarPath by remember { mutableStateOf<String?>(null) }
 
     // JSON 文件选择器：选中后读取内容并导入
     val filePicker = rememberLauncherForActivityResult(
@@ -103,18 +112,29 @@ fun CharacterScreen(onBack: () -> Unit) {
     }
 
     // 头像选择器（T6.2B）：系统 Photo Picker 免权限选图，选中后自动圆形裁剪保存到私有目录
+    // 编辑详情时直接写到该卡；新建角色时暂存到 newAvatarPath（T6.12）
     val avatarPicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia(),
     ) { uri ->
-        if (uri == null || editingCard == null) return@rememberLauncherForActivityResult
-        val card = editingCard!!
+        if (uri == null) return@rememberLauncherForActivityResult
         scope.launch {
             val path = saveAvatarFromUri(context, uri)
-            if (path != null) {
-                viewModel.updateAvatar(card, path)
-                snackbarHostState.showSnackbar("头像已更新")
-            } else {
-                snackbarHostState.showSnackbar("头像处理失败，请重试")
+            val card = editingCard
+            when {
+                card != null -> {
+                    // 编辑已有角色卡：选中后立即生效
+                    if (path != null) {
+                        viewModel.updateAvatar(card, path)
+                        snackbarHostState.showSnackbar("头像已更新")
+                    } else {
+                        snackbarHostState.showSnackbar("头像处理失败，请重试")
+                    }
+                }
+                else -> {
+                    // 新建角色：暂存头像，保存卡片时一并入库
+                    newAvatarPath = path
+                    if (path == null) snackbarHostState.showSnackbar("头像处理失败，请重试")
+                }
             }
         }
     }
@@ -134,14 +154,14 @@ fun CharacterScreen(onBack: () -> Unit) {
         floatingActionButton = {
             FloatingActionButton(
                 onClick = {
-                    // 导入中忽略重复点击
-                    if (!importing) filePicker.launch("application/json")
+                    // 导入中忽略重复点击；否则弹出「新建/导入」操作菜单（T6.12）
+                    if (!importing) fabMenuExpanded = true
                 },
             ) {
                 if (importing) {
                     CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
                 } else {
-                    Icon(Icons.Filled.Add, contentDescription = "导入角色卡")
+                    Icon(Icons.Filled.Add, contentDescription = "新建/导入角色卡")
                 }
             }
         },
@@ -201,8 +221,8 @@ fun CharacterScreen(onBack: () -> Unit) {
         val liveCard = cards.firstOrNull { it.id == card.id } ?: card
         CharacterDetailDialog(
             card = liveCard,
-            onSave = { name, description ->
-                viewModel.updateCardInfo(liveCard, name, description)
+            onSave = { name, description, remark ->
+                viewModel.updateCardInfo(liveCard, name, description, remark)
                 editingCard = null
             },
             onPickAvatar = {
@@ -215,6 +235,133 @@ fun CharacterScreen(onBack: () -> Unit) {
             onDismiss = { editingCard = null },
         )
     }
+
+    // 角色管理页 FAB 操作菜单（T6.12）：新建角色 / 导入 JSON 两条路并存
+    if (fabMenuExpanded) {
+        ModalBottomSheet(
+            onDismissRequest = { fabMenuExpanded = false },
+            sheetState = rememberModalBottomSheetState(),
+        ) {
+            Column(modifier = Modifier.fillMaxWidth().padding(bottom = 24.dp)) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            fabMenuExpanded = false
+                            newAvatarPath = null
+                            creating = true
+                        }
+                        .padding(horizontal = 20.dp, vertical = 16.dp),
+                ) {
+                    Text("新建角色", style = MaterialTheme.typography.bodyLarge)
+                }
+                HorizontalDivider()
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            fabMenuExpanded = false
+                            filePicker.launch("application/json")
+                        }
+                        .padding(horizontal = 20.dp, vertical = 16.dp),
+                ) {
+                    Text("导入 JSON 文件", style = MaterialTheme.typography.bodyLarge)
+                }
+            }
+        }
+    }
+
+    // 新建角色对话框（T6.12）：名称/简介/性格 + 头像，保存后生成非内置角色卡
+    if (creating) {
+        CreateCardDialog(
+            avatarPath = newAvatarPath,
+            onPickAvatar = {
+                // 系统图片选择器（仅图片）
+                avatarPicker.launch(
+                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
+                )
+            },
+            onSave = { name, personality, background ->
+                viewModel.createCard(name, personality, background, newAvatarPath) { err ->
+                    if (err == null) {
+                        scope.launch { snackbarHostState.showSnackbar("角色创建成功") }
+                        creating = false
+                        newAvatarPath = null
+                    } else {
+                        scope.launch { snackbarHostState.showSnackbar(err) }
+                    }
+                }
+            },
+            onDismiss = { creating = false },
+        )
+    }
+}
+
+/** 新建角色对话框（T6.12）：头像 + 名称/简介/性格输入，保存后创建一张非内置角色卡 */
+@Composable
+private fun CreateCardDialog(
+    avatarPath: String?,
+    onPickAvatar: () -> Unit,
+    onSave: (name: String, personality: String, background: String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var name by remember { mutableStateOf("") }
+    var personality by remember { mutableStateOf("") }
+    var background by remember { mutableStateOf("") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("新建角色") },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+            ) {
+                // 头像区域：预览（自定义图片或默认首字）+ 选择头像按钮
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CharacterAvatar(
+                        avatarPath = avatarPath,
+                        name = name.ifBlank { "新" },
+                        modifier = Modifier.size(64.dp),
+                        textSize = 24.sp,
+                    )
+                    Spacer(modifier = Modifier.width(16.dp))
+                    TextButton(onClick = onPickAvatar) {
+                        Text(if (avatarPath != null) "更换头像" else "设置头像")
+                    }
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("名称（必填）") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = personality,
+                    onValueChange = { personality = it },
+                    label = { Text("性格设定（必填，决定 AI 口吻）") },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = background,
+                    onValueChange = { background = it },
+                    label = { Text("简介/背景（可选）") },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onSave(name, personality, background) }) { Text("创建") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("取消") }
+        },
+    )
 }
 
 /** 单个角色卡列表项：圆形头像（首字符）+ 名称 + 简介 + 内置/导入标签 */
@@ -288,18 +435,19 @@ private fun CharacterCardListItem(
 
 /**
  * 详情编辑对话框（企划书 5.3.3）：
- * 头像（可更换/恢复默认，T6.2B）+ 名称/简介可编辑并保存；JSON 内容只读滚动展示。
+ * 头像（可更换/恢复默认，T6.2B）+ 备注/名称/简介可编辑并保存；JSON 内容只读滚动展示。
  */
 @Composable
 private fun CharacterDetailDialog(
     card: CharacterCardEntity,
-    onSave: (name: String, description: String) -> Unit,
+    onSave: (name: String, description: String, remark: String) -> Unit,
     onPickAvatar: () -> Unit,
     onClearAvatar: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     var name by remember(card.id) { mutableStateOf(card.name) }
     var description by remember(card.id) { mutableStateOf(card.description) }
+    var remark by remember(card.id) { mutableStateOf(card.remark) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -330,6 +478,14 @@ private fun CharacterDetailDialog(
                         }
                     }
                 }
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = remark,
+                    onValueChange = { remark = it },
+                    label = { Text("备注（显示名，留空用原名）") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
                 Spacer(modifier = Modifier.height(8.dp))
                 OutlinedTextField(
                     value = name,
@@ -371,7 +527,7 @@ private fun CharacterDetailDialog(
                 onClick = {
                     // 名称不允许为空，空则提示不保存
                     if (name.isBlank()) return@TextButton
-                    onSave(name.trim(), description.trim())
+                    onSave(name.trim(), description.trim(), remark.trim())
                 },
             ) { Text("保存") }
         },

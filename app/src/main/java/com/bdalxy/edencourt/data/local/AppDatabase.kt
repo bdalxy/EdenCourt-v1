@@ -18,12 +18,12 @@ import com.bdalxy.edencourt.data.local.entity.Message
 /**
  * 本地数据库单例（企划书 3.3.2 / T2.4）。
  * - 挂载：Conversation、Message、CharacterCardEntity、MemoryItem 四个实体与对应 DAO
- * - version=6：v5→v6 character_cards 表加 avatar 列（自定义头像，T6.2B）
+ * - version=8：v5→v6 character_cards 加 avatar；v6→v7 memory_items 加 characterCardId；v7→v8 character_cards/conversations 加 remark（备注，T6.14）
  * - schema 已导出到 app/schemas（企划书 4.1.5）
  */
 @Database(
     entities = [Conversation::class, Message::class, CharacterCardEntity::class, MemoryItem::class],
-    version = 6,
+    version = 8,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -110,6 +110,21 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /** v6→v7：memory_items 表新增 characterCardId 列，可空（记忆按角色卡隔离，T6.13） */
+        private val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE memory_items ADD COLUMN characterCardId INTEGER")
+            }
+        }
+
+        /** v7→v8：character_cards / conversations 表各加 remark 列，默认空串（备注别名，T6.14） */
+        private val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE character_cards ADD COLUMN remark TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE conversations ADD COLUMN remark TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
         /** 获取单例（双重检查锁，避免并发重复建库） */
         fun getInstance(context: Context): AppDatabase =
             INSTANCE ?: synchronized(this) {
@@ -118,7 +133,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "edencourt.db",
                 ).addMigrations(
-                    MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6,
+                    MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8,
                 ).build().also { INSTANCE = it }
             }
     }

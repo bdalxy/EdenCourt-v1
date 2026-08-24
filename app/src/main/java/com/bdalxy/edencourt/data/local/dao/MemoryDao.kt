@@ -54,6 +54,20 @@ interface MemoryDao {
     @Query("UPDATE memory_items SET isDeleted = 1, updatedAt = :now WHERE id = :id")
     suspend fun softDeleteById(id: Long, now: Long = System.currentTimeMillis())
 
+    /**
+     * 按归属角色卡取未删除记忆（T6.13 按角色卡隔离注入）。
+     * 只返回该角色卡名下的记忆；旧数据 characterCardId=null 一并排除（无归属，不再注入）。
+     */
+    @Query(
+        """
+        SELECT * FROM memory_items
+        WHERE isDeleted = 0 AND characterCardId = :cardId
+        ORDER BY confidence DESC, createdAt DESC
+        LIMIT :limit
+        """,
+    )
+    suspend fun getActiveByCard(cardId: Long, limit: Int): List<MemoryItem>
+
     /** 记忆数量（统计用 / 空状态判断） */
     @Query("SELECT COUNT(*) FROM memory_items WHERE isDeleted = 0")
     suspend fun countActive(): Int

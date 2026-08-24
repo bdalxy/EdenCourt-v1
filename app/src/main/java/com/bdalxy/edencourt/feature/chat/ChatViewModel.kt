@@ -378,7 +378,7 @@ class ChatViewModel(
                 return@launch
             }
             Log.d(TAG, "记忆提取触发：user=[${userMsg.content.take(30)}], ai=[${aiMessage.content.take(30)}]")
-            memoryRepository.extractAndStore(userMsg.content, aiMessage.content)
+            memoryRepository.extractAndStore(userMsg.content, aiMessage.content, currentCardId())
         }
     }
 
@@ -425,7 +425,7 @@ class ChatViewModel(
      * @param userBatchCount 本次来信合并的用户消息条数（>1 表示连发攒批，T6.9）
      */
     private suspend fun buildPrompt(history: List<Message>, userInput: String, userBatchCount: Int = 1): List<ChatMessage> {
-        val memoryFragment = buildLongTermMemoryFragment(userInput)
+        val memoryFragment = buildLongTermMemoryFragment()
         return PromptBuilder.build(
             history = history,
             userInput = userInput,
@@ -435,17 +435,22 @@ class ChatViewModel(
         )
     }
 
-    /** 检索长期记忆并拼装注入片段（T5.4）：无命中返回空串 */
-    private suspend fun buildLongTermMemoryFragment(userInput: String): String {
-        // 拆词：按空格/标点拆成多个关键词，避免整句 LIKE 匹配永不命中
-        val terms = userInput
-            .split(Regex("[\\s,.;!?，。！？、；：\"'()\\[\\]{}]+"))
-            .map { it.trim() }
-            .filter { it.isNotBlank() && it.length >= 2 }
-            .distinct()
-            .take(MAX_MEMORY_SEARCH_TERMS)
-        val memories = memoryRepository.searchByTerms(terms)
-            .take(PromptBuilder.DEFAULT_MEMORY_LIMIT)
+    /**
+     * 取当前会话绑定的角色卡 id（用于记忆归属/检索过滤，T6.13）。
+     * 未绑定角色卡返回 null（默认助手不注入长期记忆）。
+     */
+    private suspend fun currentCardId(): Long? =
+        repository.getConversation(conversationId)?.characterCardId
+
+    /**
+     * 拼装注入当前角色卡的长期记忆片段（T6.13 按角色卡隔离）。
+     * 修复原「用户输入分词 LIKE 检索」：中文整句几乎无法命中记忆里的短句，
+     * 导致「AI 竟然不知道用户告知过的事实」。现直接取当前角色卡名下的记忆注入，
+     * 既保证「AI 记得」，又做到不同角色卡之间记忆互不可见。
+     */
+    private suspend fun buildLongTermMemoryFragment(): String {
+        val cardId = currentCardId() ?: return ""
+        val memories = memoryRepository.getActiveByCard(cardId)
         if (memories.isEmpty()) return ""
         return buildString {
             append("[关于用户的长期记忆]\n")
@@ -457,8 +462,6 @@ class ChatViewModel(
 
     companion object {
         private const val TAG = "ChatViewModel"
-        /** 检索时最多使用的关键词数量（T5.4：控制检索开销） */
-        private const val MAX_MEMORY_SEARCH_TERMS = 5
         /** 拆条连发间隔（T5.9：模拟真人连续打字发送的节奏） */
         private const val CHUNK_SEND_DELAY_MS = 500L
 

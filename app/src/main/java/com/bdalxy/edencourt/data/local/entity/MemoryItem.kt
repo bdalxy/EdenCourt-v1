@@ -29,6 +29,7 @@ enum class MemoryType {
         Index(value = ["type"]),
         Index(value = ["keywords"]),
         Index(value = ["isDeleted"]),
+        Index(value = ["characterCardId"]),
     ],
 )
 data class MemoryItem(
@@ -42,6 +43,8 @@ data class MemoryItem(
     val keywords: String = "",
     /** 置信度 0~1（提取模型给出，>= 阈值才入库） */
     val confidence: Float = 1f,
+    /** 归属角色卡 id（T6.13 按角色卡隔离；null=旧数据/未归类） */
+    val characterCardId: Long? = null,
     /** 来源会话 id（可空：手动添加无来源） */
     val sourceConversationId: Long? = null,
     /** 来源消息 id（可空） */

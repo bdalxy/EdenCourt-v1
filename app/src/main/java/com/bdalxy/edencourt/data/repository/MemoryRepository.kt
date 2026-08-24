@@ -42,6 +42,8 @@ class MemoryRepository(
     /** 高置信度入库阈值（企划书 3.5.2：高置信度才入库） */
     companion object {
         const val MIN_CONFIDENCE = 0.7f
+        /** 单角色卡注入记忆条数上限（T6.13，防止 prompt 过长） */
+        const val DEFAULT_MEMORY_INJECT_LIMIT = 30
         private const val TAG = "MemoryRepo"
     }
 
@@ -53,10 +55,8 @@ class MemoryRepository(
     /** 检索未删除记忆（T5.4 生成前注入用，按关键词匹配 keywords/content） */
     suspend fun search(keyword: String): List<MemoryItem> = dao.searchByKeyword(keyword)
 
-    /**
-     * 多关键词检索（T5.4 改进）：用户输入常为整句，直接整串 LIKE 匹配几乎永不命中。
-     * 这里按空格/标点拆成多个词分别检索，合并去重后按置信度排序返回。
-     */
+    /** 多关键词检索（T5.4 改进）：用户输入常为整句，直接整串 LIKE 匹配几乎永不命中。
+     * 这里按空格/标点拆成多个词分别检索，合并去重后按置信度排序返回。 */
     suspend fun searchByTerms(terms: List<String>): List<MemoryItem> {
         if (terms.isEmpty()) return emptyList()
         val result = LinkedHashMap<Long, MemoryItem>()
@@ -67,6 +67,14 @@ class MemoryRepository(
         }
         return result.values.sortedWith(compareByDescending<MemoryItem> { it.confidence }.thenByDescending { it.createdAt })
     }
+
+    /**
+     * 按归属角色卡取未删除记忆（T6.13 按角色卡隔离注入）。
+     * 注入不再依赖用户输入分词 LIKE 匹配（中文整句几乎无法命中），
+     * 直接取该角色卡名下高置信度/最近的记忆注入，保证「AI 记得用户告知过的事实」。
+     */
+    suspend fun getActiveByCard(cardId: Long, limit: Int = DEFAULT_MEMORY_INJECT_LIMIT): List<MemoryItem> =
+        dao.getActiveByCard(cardId, limit)
 
     // ---------- 写入 ----------
 
@@ -93,9 +101,12 @@ class MemoryRepository(
     /**
      * 每轮对话后异步提取长期记忆（企划书 3.5.2）。
      * 输入=用户消息+AI 回复；调 API 返回结构化 JSON 数组；入库前查冲突。
+     * @param userContent 用户消息
+     * @param aiContent AI 回复
+     * @param cardId 归属角色卡 id（T6.13 按角色卡隔离；null 则不归类）
      * 全程不抛错：任何失败都静默返回（记忆提取是附加能力，不影响主对话）。
      */
-    suspend fun extractAndStore(userContent: String, aiContent: String) {
+    suspend fun extractAndStore(userContent: String, aiContent: String, cardId: Long?) {
         val config = apiConfigStore.config.firstOrNull() ?: run {
             Log.w(TAG, "记忆提取跳过：未读到 API 配置")
             return
@@ -148,12 +159,12 @@ class MemoryRepository(
             val content = item.content.trim()
             if (content.isBlank()) return@forEach
             if (item.confidence < MIN_CONFIDENCE) return@forEach
-            upsertWithConflictCheck(item, content)
+            upsertWithConflictCheck(item, content, cardId)
         }
     }
 
     /** 冲突检查入库：内容相似(关键词或内容包含关系)时更新，否则新增（企划书 3.5.2） */
-    private suspend fun upsertWithConflictCheck(item: ExtractedMemory, content: String) {
+    private suspend fun upsertWithConflictCheck(item: ExtractedMemory, content: String, cardId: Long?) {
         val type = runCatching { MemoryType.valueOf(item.type.uppercase()) }.getOrDefault(MemoryType.OTHER)
         val now = System.currentTimeMillis()
 
@@ -164,13 +175,14 @@ class MemoryRepository(
         }
 
         if (existing != null) {
-            // 冲突：更新内容与置信度（取更高者），刷新时间
+            // 冲突：更新内容与置信度（取更高者），刷新时间；归属角色卡同步为新卡（T6.13）
             dao.update(
                 existing.copy(
                     type = type,
                     content = content,
                     keywords = item.keywords,
                     confidence = maxOf(existing.confidence, item.confidence),
+                    characterCardId = cardId,
                     updatedAt = now,
                 ),
             )
@@ -181,6 +193,7 @@ class MemoryRepository(
                     content = content,
                     keywords = item.keywords,
                     confidence = item.confidence,
+                    characterCardId = cardId,
                     createdAt = now,
                     updatedAt = now,
                 ),

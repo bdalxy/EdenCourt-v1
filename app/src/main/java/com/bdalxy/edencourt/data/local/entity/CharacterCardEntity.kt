@@ -19,6 +19,8 @@ data class CharacterCardEntity(
     val id: Long = 0L,
     /** 角色名（内置卡索引名） */
     val name: String,
+    /** 备注别名（T6.14 用户自定义显示名；空=用 name，类微信备注） */
+    val remark: String = "",
     /** 简介（列表页展示用一句话描述） */
     val description: String = "",
     /** 角色卡完整 JSON（CharacterCard 序列化结果） */

@@ -9,6 +9,7 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import com.bdalxy.edencourt.EdenCourtApp
 import com.bdalxy.edencourt.data.local.dao.CharacterCardDao
 import com.bdalxy.edencourt.data.local.entity.CharacterCardEntity
+import com.bdalxy.edencourt.domain.CharacterCard
 import com.bdalxy.edencourt.domain.CharacterCardParser
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -69,10 +70,51 @@ class CharacterViewModel(
     }
 
     /**
-     * 编辑角色卡名称/简介。
-     * 名称会同步写回 jsonContent（保证下次解析出的一致）；简介仅列表展示用。
+     * 在角色管理页「新建」一张非内置角色卡（T6.12）。
+     * 用户在表单中填名称/性格/简介并可设头像，落地为标准 jsonContent 入库。
+     * @param name 角色名（必填）
+     * @param personality 性格设定（必填，转 system prompt）
+     * @param background 简介/背景（可选，作列表简介）
+     * @param avatarPath 头像本地路径；null 表示用默认首字头像
+     * @param onResult 回调结果：null=成功；非 null=失败原因
      */
-    fun updateCardInfo(card: CharacterCardEntity, name: String, description: String) {
+    fun createCard(
+        name: String,
+        personality: String,
+        background: String,
+        avatarPath: String?,
+        onResult: (String?) -> Unit,
+    ) {
+        viewModelScope.launch {
+            val n = name.trim()
+            val p = personality.trim()
+            // 必填校验（企划书 3.4.1：name/personality 均非空）
+            if (n.isBlank() || p.isBlank()) {
+                onResult("名称与性格不能为空")
+                return@launch
+            }
+            val bg = background.trim()
+            val card = CharacterCard(name = n, personality = p, background = bg)
+            // 列表简介：优先用用户填的简介，否则取性格前 40 字（与 importCard 一致口径）
+            dao.insert(
+                CharacterCardEntity(
+                    name = n,
+                    description = bg.ifBlank { p.take(40) },
+                    jsonContent = CharacterCardParser.toJson(card),
+                    avatar = avatarPath,
+                    isBuiltIn = false,
+                ),
+            )
+            onResult(null)
+        }
+    }
+
+    /**
+     * 编辑角色卡名称/简介/备注（T6.14 加备注）。
+     * 名称会同步写回 jsonContent（保证下次解析出的一致）；简介仅列表展示用；
+     * 备注为本地别名（类微信备注），不写回卡 JSON。
+     */
+    fun updateCardInfo(card: CharacterCardEntity, name: String, description: String, remark: String) {
         viewModelScope.launch {
             // 解析原 JSON 并回写 name（解析失败则保留原 JSON 不动）
             val updatedJson = runCatching {
@@ -84,6 +126,7 @@ class CharacterViewModel(
                 card.copy(
                     name = name,
                     description = description,
+                    remark = remark.trim(),
                     jsonContent = updatedJson,
                     updatedAt = System.currentTimeMillis(),
                 ),

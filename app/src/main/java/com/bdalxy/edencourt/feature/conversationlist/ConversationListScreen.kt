@@ -179,7 +179,7 @@ fun ConversationListScreen(
                 // 默认助手：不绑定角色卡
                 item {
                     CardPickerItem(
-                        avatarText = "默",
+                        avatarPath = null,
                         name = "默认助手",
                         description = "永恒庭院 AI 助手",
                         onClick = {
@@ -190,7 +190,7 @@ fun ConversationListScreen(
                 }
                 items(items = characterCards, key = { it.id }) { card ->
                     CardPickerItem(
-                        avatarText = card.name.take(1),
+                        avatarPath = card.avatar,
                         name = card.name,
                         description = card.description.ifEmpty { "暂无简介" },
                         onClick = {
@@ -357,10 +357,10 @@ private fun formatTime(timestamp: Long): String {
     }
 }
 
-/** 角色卡选择项（T4.7）：圆形头像（首字）+ 名称 + 简介，点击回调 */
+/** 角色卡选择项（T4.7）：圆形头像（自定义图片/首字）+ 名称 + 简介，点击回调（T6.12 头像改 CharacterAvatar） */
 @Composable
 private fun CardPickerItem(
-    avatarText: String,
+    avatarPath: String?,
     name: String,
     description: String,
     onClick: () -> Unit,
@@ -372,20 +372,12 @@ private fun CardPickerItem(
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        // 头像：圆形色块 + 首字
-        Surface(
+        // 头像：自定义图片或默认首字，与会话列表/角色页样式一致（T6.12 修复选角弹窗不显示自定义头像）
+        CharacterAvatar(
+            avatarPath = avatarPath,
+            name = name,
             modifier = Modifier.size(44.dp),
-            shape = CircleShape,
-            color = MaterialTheme.colorScheme.primaryContainer,
-        ) {
-            Box(contentAlignment = Alignment.Center) {
-                Text(
-                    text = avatarText,
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer,
-                )
-            }
-        }
+        )
 
         Spacer(modifier = Modifier.width(12.dp))
 

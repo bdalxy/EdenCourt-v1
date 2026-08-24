@@ -16,6 +16,8 @@ data class Conversation(
     @PrimaryKey(autoGenerate = true)
     val id: Long = 0L,
     val title: String = "",
+    /** 会话备注别名（T6.14 用户自定义显示名；空=用 title，类微信备注） */
+    val remark: String = "",
     val characterCardId: Long? = null,
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis(),
