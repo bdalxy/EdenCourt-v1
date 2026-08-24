@@ -101,9 +101,9 @@ class ChatViewModel(
                 initialValue = null,
             )
 
-    /** 会话绑定角色名（T6.2A，企划书 5.3.2「顶部=返回+角色名+更多」）。由 roleCard 派生 */
+    /** 会话绑定角色名（T6.2A，企划书 5.3.2「顶部=返回+角色名+更多」）。由 roleCard 派生；T6.14 起优先显示备注别名 */
     val roleName: StateFlow<String> =
-        roleCard.map { it?.name ?: "默认助手" }
+        roleCard.map { it?.remark?.ifBlank { it.name } ?: "默认助手" }
             .stateIn(
                 scope = viewModelScope,
                 started = SharingStarted.WhileSubscribed(5_000),

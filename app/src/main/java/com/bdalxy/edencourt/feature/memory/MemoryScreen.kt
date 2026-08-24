@@ -1,6 +1,7 @@
 package com.bdalxy.edencourt.feature.memory
 
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -48,6 +49,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.bdalxy.edencourt.EdenCourtApp
+import com.bdalxy.edencourt.data.local.entity.CharacterCardEntity
 import com.bdalxy.edencourt.data.local.entity.MemoryItem
 import com.bdalxy.edencourt.data.local.entity.MemoryType
 import java.text.SimpleDateFormat
@@ -70,6 +72,8 @@ fun MemoryScreen(onBack: () -> Unit) {
     val viewModel: MemoryViewModel = viewModel(factory = MemoryViewModel.factory(app))
     val memories by viewModel.filteredMemories.collectAsStateWithLifecycle()
     val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
+    val characters by viewModel.characters.collectAsStateWithLifecycle()
+    val selectedCardId by viewModel.selectedCardId.collectAsStateWithLifecycle()
 
     // 待删除确认的记忆（长按触发）
     var pendingDelete by remember { mutableStateOf<MemoryItem?>(null) }
@@ -103,6 +107,13 @@ fun MemoryScreen(onBack: () -> Unit) {
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
             )
 
+            // 角色筛选（T6.13：按记忆归属的角色过滤）
+            CharacterFilterBar(
+                characters = characters,
+                selectedCardId = selectedCardId,
+                onSelect = { viewModel.setSelectedCard(it) },
+            )
+
             if (memories.isEmpty()) {
                 // 空状态：有搜索词则提示无结果，否则提示暂无记忆（企划书 5.5.2）
                 Box(
@@ -119,6 +130,12 @@ fun MemoryScreen(onBack: () -> Unit) {
                     items(items = memories, key = { it.id }) { memory ->
                         MemoryListItem(
                             memory = memory,
+                            // 归属名：角色备注/角色名，null=手动添加/未归属
+                            ownerName = memory.characterCardId?.let { id ->
+                                characters.firstOrNull { it.id == id }?.let {
+                                    it.remark.ifBlank { it.name }
+                                }
+                            },
                             onLongClick = { pendingDelete = memory },
                         )
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
@@ -160,11 +177,12 @@ fun MemoryScreen(onBack: () -> Unit) {
     }
 }
 
-/** 单个记忆列表项：类型标签 + 内容 + 时间 */
+/** 单个记忆列表项：类型标签 + 内容 + 时间 + 归属角色名（T6.13） */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun MemoryListItem(
     memory: MemoryItem,
+    ownerName: String?,
     onLongClick: () -> Unit,
 ) {
     Row(
@@ -196,14 +214,91 @@ private fun MemoryListItem(
                 overflow = TextOverflow.Ellipsis,
             )
             Spacer(modifier = Modifier.height(4.dp))
+            // 归属角色名（null=手动添加/未归属） + 时间
             Text(
-                text = formatTime(memory.createdAt),
+                text = buildString {
+                    append(ownerName ?: "手动/未归属")
+                    append(" · ")
+                    append(formatTime(memory.createdAt))
+                },
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
     }
 }
+
+/**
+ * 记忆归属角色筛选条（T6.13）：下拉选择「全部/某角色/手动未归属」。
+ * 让用户明确每条记忆是「谁的」。
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun CharacterFilterBar(
+    characters: List<CharacterCardEntity>,
+    selectedCardId: Long?,
+    onSelect: (Long?) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    // 当前筛选项标题
+    val currentTitle = if (selectedCardId == null) {
+        "全部记忆"
+    } else if (selectedCardId == MANUAL_CARD_ID) {
+        "手动/未归属"
+    } else {
+        characters.firstOrNull { it.id == selectedCardId }?.let { it.remark.ifBlank { it.name } }
+            ?: "全部记忆"
+    }
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        ExposedDropdownMenuBox(
+            expanded = expanded,
+            onExpandedChange = { expanded = it },
+        ) {
+            Text(
+                text = "筛选：$currentTitle",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier
+                    .menuAnchor()
+                    .clickable { expanded = true }
+                    .padding(vertical = 8.dp),
+            )
+            ExposedDropdownMenu(
+                expanded = expanded,
+                onDismissRequest = { expanded = false },
+            ) {
+                DropdownMenuItem(
+                    text = { Text("全部记忆") },
+                    onClick = { onSelect(null); expanded = false },
+                )
+                dropdownDivider()
+                characters.forEach { card ->
+                    DropdownMenuItem(
+                        text = { Text(card.remark.ifBlank { card.name }) },
+                        onClick = { onSelect(card.id); expanded = false },
+                    )
+                }
+                dropdownDivider()
+                DropdownMenuItem(
+                    text = { Text("手动/未归属") },
+                    onClick = { onSelect(MANUAL_CARD_ID); expanded = false },
+                )
+            }
+        }
+    }
+}
+
+/** 记忆筛选条内的分隔线 */
+@Composable
+private fun dropdownDivider() {
+    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+}
+
+/** 特殊占位 id：表示「手动添加/未归属」筛选（MemoryItem.characterCardId 为 null 那些） */
+private const val MANUAL_CARD_ID = -1L
 
 /** 记忆类型中文标签（企划书 4.1.4：个人信息/偏好/事件/其他） */
 private val MemoryType.label: String

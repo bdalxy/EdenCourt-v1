@@ -319,8 +319,9 @@ private fun ConversationListItem(
     onClick: () -> Unit,
     onLongClick: () -> Unit,
 ) {
-    // 展示名：会话备注优先生效（T6.14，类微信备注）；未绑定角色卡用默认助手（企划书 5.8.1）
-    val displayName = conversation.remark.ifBlank { card?.name ?: "默认助手" }
+    // 展示名：会话备注 > 角色备注 > 角色名 > 默认助手（T6.14，类微信备注；企划书 5.8.1）
+    val cardDisplayName = card?.remark?.ifBlank { card.name } ?: "默认助手"
+    val displayName = conversation.remark.ifBlank { cardDisplayName }
     Row(
         modifier = Modifier
             .fillMaxWidth()

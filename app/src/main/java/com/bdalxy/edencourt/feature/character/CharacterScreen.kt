@@ -392,7 +392,8 @@ private fun CharacterCardListItem(
         Column(modifier = Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    text = card.name,
+                    // T6.14：备注别名展示，未设则用原名（头像首字仍取 card.name，类微信）
+                    text = card.remark.ifBlank { card.name },
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Medium,
                     maxLines = 1,
