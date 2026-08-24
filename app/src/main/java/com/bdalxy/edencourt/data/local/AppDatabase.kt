@@ -18,12 +18,12 @@ import com.bdalxy.edencourt.data.local.entity.Message
 /**
  * 本地数据库单例（企划书 3.3.2 / T2.4）。
  * - 挂载：Conversation、Message、CharacterCardEntity、MemoryItem 四个实体与对应 DAO
- * - version=9：v5→v6 character_cards 加 avatar；v6→v7 memory_items 加 characterCardId；v7→v8 character_cards/conversations 加 remark（T6.14）；v8→v9 memory_items 加 visibility（共享/私有，T7.1）
+ * - version=11：v5→v6 character_cards 加 avatar；v6→v7 memory_items 加 characterCardId；v7→v8 character_cards/conversations 加 remark（T6.14）；v8→v9 memory_items 加 visibility（共享/私有，T7.1）；v9→v10 character_cards/conversations 加 code（会话唯一身份，T8.0）；v10→v11 memory_items 加 isTopSecret（绝密兜底，T8.2）
  * - schema 已导出到 app/schemas（企划书 4.1.5）
  */
 @Database(
     entities = [Conversation::class, Message::class, CharacterCardEntity::class, MemoryItem::class],
-    version = 9,
+    version = 11,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -48,6 +48,23 @@ abstract class AppDatabase : RoomDatabase() {
         private val MIGRATION_8_9 = object : Migration(8, 9) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE memory_items ADD COLUMN visibility TEXT NOT NULL DEFAULT 'SHARED'")
+            }
+        }
+
+        /** v9→v10：character_cards / conversations 表各加 code 列（随机短码，会话唯一身份底座，T8.0）。既有记录补发唯一短码（hex(randomblob) 12 位，前缀区分表） */
+        private val MIGRATION_9_10 = object : Migration(9, 10) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE character_cards ADD COLUMN code TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE conversations ADD COLUMN code TEXT NOT NULL DEFAULT ''")
+                db.execSQL("UPDATE character_cards SET code = 'C' || hex(randomblob(6)) WHERE code = ''")
+                db.execSQL("UPDATE conversations SET code = 'V' || hex(randomblob(6)) WHERE code = ''")
+            }
+        }
+
+        /** v10→v11：memory_items 表加 isTopSecret 列（绝密兜底，T8.2），默认 0（非绝密） */
+        private val MIGRATION_10_11 = object : Migration(10, 11) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE memory_items ADD COLUMN isTopSecret INTEGER NOT NULL DEFAULT 0")
             }
         }
 
@@ -141,7 +158,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "edencourt.db",
                 ).addMigrations(
-                    MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9,
+                    MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11,
                 ).build().also { INSTANCE = it }
             }
     }

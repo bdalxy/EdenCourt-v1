@@ -46,6 +46,10 @@ class ChatRepository(
     fun observeMessages(conversationId: Long): Flow<List<Message>> =
         messageDao.observeByConversation(conversationId)
 
+    /** 按会话一次性取全部消息（按时间正序，跨会话旁路暗访构建目标上下文用，T8.2） */
+    suspend fun getMessages(conversationId: Long): List<Message> =
+        messageDao.getByConversation(conversationId)
+
     /** 新增消息，返回生成的 id */
     suspend fun insertMessage(message: Message): Long = messageDao.insert(message)
 

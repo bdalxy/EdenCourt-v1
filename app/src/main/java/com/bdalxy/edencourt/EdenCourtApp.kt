@@ -6,6 +6,7 @@ import com.bdalxy.edencourt.data.local.dao.CharacterCardDao
 import com.bdalxy.edencourt.data.local.dao.MemoryDao
 import com.bdalxy.edencourt.data.remote.RemoteApiChatService
 import com.bdalxy.edencourt.data.repository.ChatRepository
+import com.bdalxy.edencourt.data.repository.CrossSessionConsultService
 import com.bdalxy.edencourt.data.repository.MemoryRepository
 import com.bdalxy.edencourt.data.setting.ApiConfigStore
 import com.bdalxy.edencourt.domain.BuiltInCards
@@ -59,6 +60,17 @@ class EdenCourtApp : Application() {
     val memoryRepository: MemoryRepository by lazy {
         MemoryRepository(
             dao = memoryDao,
+            apiConfigStore = apiConfigStore,
+            aiChatService = aiChatService,
+        )
+    }
+
+    /** 跨会话打听·旁路暗访执行器单例（v1.2 套话，T8.2 起供触发打听的对话链路使用） */
+    val crossSessionConsultService: CrossSessionConsultService by lazy {
+        CrossSessionConsultService(
+            chatRepository = chatRepository,
+            characterCardDao = characterCardDao,
+            memoryRepository = memoryRepository,
             apiConfigStore = apiConfigStore,
             aiChatService = aiChatService,
         )

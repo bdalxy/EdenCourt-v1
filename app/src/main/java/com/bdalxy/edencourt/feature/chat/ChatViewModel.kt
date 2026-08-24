@@ -17,8 +17,10 @@ import com.bdalxy.edencourt.data.local.entity.Role
 import com.bdalxy.edencourt.data.remote.AiChatService
 import com.bdalxy.edencourt.data.remote.ApiErrorKind
 import com.bdalxy.edencourt.data.remote.ApiException
+import com.bdalxy.edencourt.data.local.entity.Conversation
 import com.bdalxy.edencourt.data.remote.ChatMessage
 import com.bdalxy.edencourt.data.repository.ChatRepository
+import com.bdalxy.edencourt.data.repository.CrossSessionConsultService
 import com.bdalxy.edencourt.data.repository.MemoryRepository
 import com.bdalxy.edencourt.data.setting.ApiConfigStore
 import com.bdalxy.edencourt.domain.CharacterCard
@@ -70,6 +72,7 @@ class ChatViewModel(
     private val apiConfigStore: ApiConfigStore,
     private val aiChatService: AiChatService,
     private val memoryRepository: MemoryRepository,
+    private val crossSessionConsultService: CrossSessionConsultService,
 ) : ViewModel() {
 
     /** 该会话的消息流（按创建时间正序，数据库变化自动刷新） */
@@ -176,10 +179,100 @@ class ChatViewModel(
             )
             // 2. 会话标题/时间/排序更新（T6.15：不再用用户内容覆盖预览，预览跟随 AI 最后回复）
             updateConversationOnSend(content)
-            // 3. 确保回复泵在跑：生成中连发的消息已入库，泵下轮循环自动取到并攒批回复
+            // 3. v1.2 用户触发跨会话打听（T8.4）：命中则走旁路打听并原地回传，不走正常回复泵
+            val conversations = repository.observeConversations().first()
+            val consult = detectConsult(content, conversations)
+            if (consult != null) {
+                runConsultUntilDone(consult)
+                return@launch
+            }
+            // 4. 否则走正常流程：确保回复泵在跑（生成中连发的消息已入库，泵下轮循环自动取到并攒批回复）
             ensureReplyPumpRunning()
         }
     }
+
+    /** 用户触发跨会话打听的请求（v1.2，T8.4） */
+    private data class ConsultRequest(
+        val targetConversationId: Long?,
+        val question: String,
+    )
+
+    /**
+     * 检测用户消息是否为「跨会话打听」意图（T8.4，MVP 用关键词触发）：
+     * - 命中触发词（去问问/帮我打听/打听一下…）即视为打听；
+     * - 若能点名目标角色卡（消息里出现某角色名）→ 直接定位其某会话；
+     * - 主题 = 去掉触发词与点名的角色名后的剩余文本。
+     */
+    private suspend fun detectConsult(text: String, conversations: List<Conversation>): ConsultRequest? {
+        val trigger = CONSULT_TRIGGERS.firstOrNull { text.contains(it) } ?: return null
+        val cardNameById = characterCardDao.observeAll().first()
+            .mapNotNull { it.id to (it.remark.ifBlank { it.name }) }
+            .toMap()
+        var targetId: Long? = null
+        var matchedName: String? = null
+        // 在非当前会话中找「被点名角色」的任一会话作为打听目标
+        for (conv in conversations) {
+            if (conv.id == conversationId) continue
+            val cid = conv.characterCardId ?: continue
+            val name = cardNameById[cid] ?: continue
+            if (text.contains(name)) {
+                matchedName = name
+                targetId = conv.id
+                break
+            }
+        }
+        var question = text.replace(trigger, "").trim()
+        matchedName?.let { question = question.replace(it, "").trim() }
+        return ConsultRequest(targetConversationId = targetId, question = question.ifBlank { text })
+    }
+
+    /**
+     * 执行一次用户触发的旁路打听（T8.3 回传 + T8.4 装配）：
+     * - 未点名目标时用 T8.1 按主题检索候选会话 B；
+     * - 插一条 AI 占位消息（复用现有消息流渲染："我去打听一下…"），完成后原地更新为回传结果，用户全程可见、不打断正文。
+     */
+    private suspend fun runConsultUntilDone(req: ConsultRequest) {
+        var targetId = req.targetConversationId
+        if (targetId == null) {
+            val candidates = memoryRepository.locateTargetConversationIds(splitTerms(req.question), conversationId)
+            targetId = candidates.firstOrNull()
+        }
+        // AI 占位消息（GENERATING，UI 顶部显示「正在输入…」同款处理）
+        val aiId = repository.insertMessage(
+            Message(
+                conversationId = conversationId,
+                role = Role.ASSISTANT,
+                content = "（我去打听一下…）",
+                status = MessageStatus.GENERATING,
+            ),
+        )
+        _isGenerating.value = true
+        try {
+            if (targetId == null) {
+                updateConsultMessage(aiId, "我去问了一圈，没人知道呀。", MessageStatus.SENT)
+                return
+            }
+            val visitor = roleName.value
+            val result = crossSessionConsultService.consult(targetId, req.question, visitor)
+            if (result.success) {
+                // 回传：正文自然带来源（"我去问了X，X说…"），用户可看到打听到的内容与出处
+                updateConsultMessage(aiId, "我去问了${result.sourceName}，${result.sourceName}说：\n${result.answer}", MessageStatus.SENT)
+            } else {
+                updateConsultMessage(aiId, result.reason ?: "没问到", MessageStatus.SENT)
+            }
+        } finally {
+            _isGenerating.value = false
+        }
+    }
+
+    /** 把打听占位消息原地更新为最终回传文本（T8.3 结果回传 A） */
+    private suspend fun updateConsultMessage(id: Long, content: String, status: MessageStatus) {
+        repository.getMessage(id)?.let { repository.updateMessage(it.copy(content = content, status = status)) }
+    }
+
+    /** 打听主题拆词（按常见标点/空白切分，供 T8.1 检索） */
+    private fun splitTerms(question: String): List<String> =
+        question.split(Regex("[，。,.！!？?、\\s]+")).filter { it.isNotBlank() }
 
     /** 停止生成：取消当前回复泵任务（已生成内容保留并标记完成，不视为失败） */
     fun stopGenerating() {
@@ -503,6 +596,11 @@ class ChatViewModel(
         private const val TAG = "ChatViewModel"
         /** 拆条连发间隔（T5.9：模拟真人连续打字发送的节奏） */
         private const val CHUNK_SEND_DELAY_MS = 500L
+        /** 跨会话打听触发词（v1.2，T8.4 意图识别：命中任一即视为用户触发打听） */
+        private val CONSULT_TRIGGERS = listOf(
+            "去打听", "帮我打听", "打听一下", "去问问", "帮我问",
+            "打探", "探探口风", "问问", "去问",
+        )
 
         /** 工厂：传入路由参数 conversationId，从 Application 取仓库/角色卡 DAO/配置/网络服务单例 */
         fun factory(conversationId: Long, application: Application): ViewModelProvider.Factory =
@@ -516,6 +614,7 @@ class ChatViewModel(
                         apiConfigStore = app.apiConfigStore,
                         aiChatService = app.aiChatService,
                         memoryRepository = app.memoryRepository,
+                        crossSessionConsultService = app.crossSessionConsultService,
                     )
                 }
             }

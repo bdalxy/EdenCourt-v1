@@ -96,6 +96,21 @@ interface MemoryDao {
     )
     suspend fun getPrivateByConversation(conversationId: Long, limit: Int): List<MemoryItem>
 
+    /**
+     * 按关键词检索「来源会话」候选（v1.2 跨会话打听目标定位，T8.1）。
+     * 命中某条记忆则其来源会话（sourceConversationId）"可能知道"该话题，可作为打听目标候选 B。
+     * 只取 sourceConversationId 非空且未删除的记忆，按会话去重。
+     */
+    @Query(
+        """
+        SELECT DISTINCT m.sourceConversationId
+        FROM memory_items m
+        WHERE m.isDeleted = 0 AND m.sourceConversationId IS NOT NULL
+          AND (m.keywords LIKE '%' || :keyword || '%' OR m.content LIKE '%' || :keyword || '%')
+        """,
+    )
+    suspend fun findSourceConversationIdsByKeyword(keyword: String): List<Long>
+
     /** 记忆数量（统计用 / 空状态判断） */
     @Query("SELECT COUNT(*) FROM memory_items WHERE isDeleted = 0")
     suspend fun countActive(): Int

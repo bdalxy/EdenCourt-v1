@@ -38,4 +38,8 @@ interface MessageDao {
     /** 按 id 取单条消息（一次性查询） */
     @Query("SELECT * FROM messages WHERE id = :id")
     suspend fun getById(id: Long): Message?
+
+    /** 按会话一次性取全部消息（按时间正序，供跨会话旁路暗访构建目标上下文用，T8.2） */
+    @Query("SELECT * FROM messages WHERE conversationId = :conversationId ORDER BY createdAt ASC, id ASC")
+    suspend fun getByConversation(conversationId: Long): List<Message>
 }

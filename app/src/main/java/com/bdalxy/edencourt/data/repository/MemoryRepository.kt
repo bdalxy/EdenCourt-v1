@@ -28,7 +28,7 @@ class MemoryRepository(
     private val aiChatService: AiChatService,
 ) {
 
-    /** 提取结果 DTO：AI 返回的 JSON 数组元素（T5.3；replaceContent 用于用户更正时覆盖旧记忆 T6.13.2；visibility 记忆可见性 T7.2） */
+    /** 提取结果 DTO：AI 返回的 JSON 数组元素（T5.3；replaceContent 用于用户更正时覆盖旧记忆 T6.13.2；visibility 记忆可见性 T7.2；topSecret 绝密兜底 T8.2） */
     @Serializable
     private data class ExtractedMemory(
         @SerialName("type") val type: String = "other",
@@ -37,6 +37,7 @@ class MemoryRepository(
         @SerialName("confidence") val confidence: Float = 1f,
         @SerialName("replace_content") val replaceContent: String? = null,
         @SerialName("visibility") val visibility: String = "shared",
+        @SerialName("top_secret") val topSecret: Boolean = false,
     )
 
     /** 提取 JSON 解析器：忽略未知字段，容忍 AI 输出不规范 */
@@ -106,10 +107,28 @@ class MemoryRepository(
         return (shared + privates).distinctBy { it.id }
     }
 
+    /**
+     * 定位打听目标会话 B（v1.2 跨会话打听，T8.1）。
+     * 按打听主题拆词、检索各会话的记忆概况，返回「可能知道该话题」的候选会话 id 列表。
+     * @param terms 打听主题拆词（用户输入按逗号/空格拆分）
+     * @param excludeConversationId 发起会话 A 自身（排除，避免向自己打听）
+     * @return 候选会话 id，按「命中记忆数」降序（信息命中多者优先；MVP 先按此，后续再优化）
+     */
+    suspend fun locateTargetConversationIds(terms: List<String>, excludeConversationId: Long?): List<Long> {
+        if (terms.isEmpty()) return emptyList()
+        val freq = LinkedHashMap<Long, Int>()
+        terms.filter { it.isNotBlank() }.forEach { word ->
+            dao.findSourceConversationIdsByKeyword(word).forEach { cid ->
+                if (cid != excludeConversationId) freq[cid] = (freq[cid] ?: 0) + 1
+            }
+        }
+        return freq.entries.sortedByDescending { it.value }.map { it.key }
+    }
+
     // ---------- 写入 ----------
 
-    /** 手动添加记忆（T5.5 管理页）：置信度默认 1.0（用户明确填写）；T7.3 可指定可见性（默认共享） */
-    suspend fun addManual(type: MemoryType, content: String, keywords: String, visibility: MemoryVisibility = MemoryVisibility.SHARED): Long {
+    /** 手动添加记忆（T5.5 管理页）：置信度默认 1.0（用户明确填写）；T7.3 可指定可见性（默认共享）；T8.2 可标记绝密 */
+    suspend fun addManual(type: MemoryType, content: String, keywords: String, visibility: MemoryVisibility = MemoryVisibility.SHARED, isTopSecret: Boolean = false): Long {
         val now = System.currentTimeMillis()
         return dao.insert(
             MemoryItem(
@@ -118,11 +137,20 @@ class MemoryRepository(
                 keywords = keywords.trim(),
                 confidence = 1f,
                 visibility = visibility,
+                isTopSecret = isTopSecret,
                 createdAt = now,
                 updatedAt = now,
             ),
         )
     }
+
+    /**
+     * 取某角色卡「可向外打捞」的记忆（v1.2 旁路暗访，T8.2）：
+     * 仅该角色卡的【共享且非绝密】记忆——绝密记忆不注入目标会话，B 根本不知道，故无法外泄（硬性兜底）。
+     * @return 可被旁路打听引用的记忆列表
+     */
+    suspend fun getConsultableMemories(cardId: Long, limit: Int = DEFAULT_MEMORY_INJECT_LIMIT): List<MemoryItem> =
+        dao.getSharedByCard(cardId, limit).filter { !it.isTopSecret }
 
     /** 软删除记忆（T5.5 管理页，二次确认后调用；不物理删除，可回溯） */
     suspend fun softDelete(id: Long) = dao.softDeleteById(id)
@@ -161,6 +189,7 @@ class MemoryRepository(
             append("可见性规则（重要）：对每条记忆判断可见性——\n")
             append("  若用户明确要求保密/仅对当前角色说（如「别告诉别人」「你知我知」「这是我的秘密」），或属于私密心事，标 \"visibility\": \"private\"；\n")
             append("  一般事实（姓名/喜好/事件等）标 \"visibility\": \"shared\"。\n")
+            append("绝密规则（v1.2 绝密兜底）：若用户明确要求「绝对保密/绝不可让任何人知道/死了都要瞒着」（比一般私密更强硬的保密，如「绝对不能说出去」「谁都不能告诉」），除标 private 外，再加 \"top_secret\": true。只有一般私密（可对亲近者说）不标 top_secret。\n")
             if (existingMemories.isNotEmpty()) {
                 append("该角色已有记忆（原文+类型）：\n")
                 existingMemories.forEach { m -> append("  - ").append(m.content).append("（").append(m.type.label).append("）\n") }
@@ -168,7 +197,7 @@ class MemoryRepository(
                 append("请在对应新条目加字段 \"replace_content\": \"被覆盖的已有记忆的原文\"。仅同一事实被更正时使用，一般性补充不要加。\n\n")
             }
             append("输出格式：仅输出 JSON 数组，不要任何额外文字。每项格式：\n")
-            append("[{\"type\":\"personal_info\"|\"preference\"|\"event\"|\"other\",\"content\":\"一句话内容\",\"keywords\":\"关键词1,关键词2\",\"confidence\":0.0~1.0,\"replace_content\":\"可选，被覆盖的旧记忆原文\",\"visibility\":\"shared\"|\"private\"}]\n")
+            append("[{\"type\":\"personal_info\"|\"preference\"|\"event\"|\"other\",\"content\":\"一句话内容\",\"keywords\":\"关键词1,关键词2\",\"confidence\":0.0~1.0,\"replace_content\":\"可选，被覆盖的旧记忆原文\",\"visibility\":\"shared\"|\"private\",\"top_secret\":true或省略}]\n")
             append("若没有值得记住的信息，输出 []。\n\n")
             append("用户：").append(userContent).append("\n")
             append("AI：").append(aiContent)
@@ -214,8 +243,9 @@ class MemoryRepository(
         existingMemories: List<MemoryItem>,
     ) {
         val type = runCatching { MemoryType.valueOf(item.type.uppercase()) }.getOrDefault(MemoryType.OTHER)
-        // 可见性解析（T7.2）：非法值兜底为共享
+        // 可见性解析（T7.2）：非法值兜底为共享；绝密标记透传（T8.2）
         val visibility = runCatching { MemoryVisibility.valueOf(item.visibility.uppercase()) }.getOrDefault(MemoryVisibility.SHARED)
+        val topSecret = item.topSecret
         val now = System.currentTimeMillis()
 
         // 0. 显式覆盖：用户更正的条目带了 replace_content → 找到对应旧记忆并改为新内容（T6.13.2 修「记忆还是紫色」）
@@ -233,6 +263,7 @@ class MemoryRepository(
                         confidence = maxOf(target.confidence, item.confidence),
                         characterCardId = cardId,
                         visibility = visibility,
+                        isTopSecret = topSecret,
                         updatedAt = now,
                     ),
                 )
@@ -256,6 +287,7 @@ class MemoryRepository(
                     confidence = maxOf(existing.confidence, item.confidence),
                     characterCardId = cardId,
                     visibility = visibility,
+                    isTopSecret = topSecret,
                     updatedAt = now,
                 ),
             )
@@ -269,6 +301,7 @@ class MemoryRepository(
                     confidence = item.confidence,
                     characterCardId = cardId,
                     visibility = visibility,
+                    isTopSecret = topSecret,
                     createdAt = now,
                     updatedAt = now,
                 ),

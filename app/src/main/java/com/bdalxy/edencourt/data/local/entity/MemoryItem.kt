@@ -57,6 +57,9 @@ data class MemoryItem(
     val characterCardId: Long? = null,
     /** 可见性（v1.1 新增，T7.1）：共享/私有，默认共享；v2.x 套话/群聊的分层依据 */
     val visibility: MemoryVisibility = MemoryVisibility.SHARED,
+    /** 绝密标记（v1.2 跨会话打听硬性兜底，T8.2）：true=绝不可被任何打听外泄。
+     * 旁路暗访时绝密记忆不注入目标会话，目标根本不知道，故无法泄露（硬性保障）。默认 false。 */
+    val isTopSecret: Boolean = false,
     /** 来源会话 id（可空：手动添加无来源） */
     val sourceConversationId: Long? = null,
     /** 来源消息 id（可空） */

@@ -7,6 +7,7 @@ import androidx.room.PrimaryKey
 /**
  * 会话表（企划书 4.1.1 / 4.2.1）。
  * characterCardId 为空表示默认助手；lastMessageTime 为空表示尚无消息。
+ * code 建会话随机短码（v1.2 会话唯一身份组成部分，T8.0）。
  */
 @Entity(
     tableName = "conversations",
@@ -19,6 +20,8 @@ data class Conversation(
     /** 会话备注别名（T6.14 用户自定义显示名；空=用 title，类微信备注） */
     val remark: String = "",
     val characterCardId: Long? = null,
+    /** 建会话随机短码（v1.2 会话唯一身份，T8.0） */
+    val code: String = newShortCode(),
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis(),
     val isPinned: Boolean = false,
