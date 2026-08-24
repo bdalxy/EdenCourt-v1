@@ -5,10 +5,13 @@ import com.bdalxy.edencourt.data.local.AppDatabase
 import com.bdalxy.edencourt.data.local.dao.CharacterCardDao
 import com.bdalxy.edencourt.data.local.dao.MemoryDao
 import com.bdalxy.edencourt.data.remote.RemoteApiChatService
+import com.bdalxy.edencourt.data.consult.DailyConsultExecutor
+import com.bdalxy.edencourt.data.consult.DailyConsultScheduler
 import com.bdalxy.edencourt.data.repository.ChatRepository
 import com.bdalxy.edencourt.data.repository.CrossSessionConsultService
 import com.bdalxy.edencourt.data.repository.MemoryRepository
 import com.bdalxy.edencourt.data.setting.ApiConfigStore
+import com.bdalxy.edencourt.data.setting.DailyConsultConfigStore
 import com.bdalxy.edencourt.domain.BuiltInCards
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -74,5 +77,28 @@ class EdenCourtApp : Application() {
             apiConfigStore = apiConfigStore,
             aiChatService = aiChatService,
         )
+    }
+
+    /** 每日打听配置存储单例（v1.2 P2，T8.5：启用/窗口/概率） */
+    val dailyConsultConfigStore: DailyConsultConfigStore by lazy {
+        DailyConsultConfigStore(this)
+    }
+
+    /** 每日定时+概率+角色自驱动打听执行器单例（v1.2 P2，T8.5） */
+    val dailyConsultExecutor: DailyConsultExecutor by lazy {
+        DailyConsultExecutor(
+            chatRepository = chatRepository,
+            characterCardDao = characterCardDao,
+            memoryRepository = memoryRepository,
+            crossSessionConsultService = crossSessionConsultService,
+            apiConfigStore = apiConfigStore,
+            aiChatService = aiChatService,
+            configStore = dailyConsultConfigStore,
+        )
+    }
+
+    /** 每日打听定时调度器单例（v1.2 P2，T8.5：AlarmManager 精确窗口） */
+    val dailyConsultScheduler: DailyConsultScheduler by lazy {
+        DailyConsultScheduler(dailyConsultConfigStore)
     }
 }

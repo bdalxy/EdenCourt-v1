@@ -474,7 +474,7 @@ class ChatViewModel(
                 return@launch
             }
             Log.d(TAG, "记忆提取触发：user=[${userMsg.content.take(30)}], ai=[${aiMessage.content.take(30)}]")
-            memoryRepository.extractAndStore(userMsg.content, aiMessage.content, currentCardId())
+            memoryRepository.extractAndStore(userMsg.content, aiMessage.content, currentCardId(), conversationId)
         }
     }
 

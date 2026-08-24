@@ -2,6 +2,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- v1.2 P2（T8.5）：设备重启后重排每日打听闹钟 -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
     <application
         android:name=".EdenCourtApp"
@@ -21,6 +23,21 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- v1.2 P2（T8.5）：每日打听窗口闹钟接收器。
+             此处 exported=true 仅为便于 adb 显示广播手动触发调试/验收；
+             系统 AlarmManager 的 PendingIntent 走同 app 组件投递不受此限制。勿改回 false -->
+        <receiver
+            android:name=".data.consult.DailyConsultAlarmReceiver"
+            android:exported="true" />
+        <!-- v1.2 P2（T8.5）：设备开机后重排每日打听 -->
+        <receiver
+            android:name=".data.consult.DailyConsultBootReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
 
     </application>
 

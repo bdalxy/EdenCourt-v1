@@ -163,9 +163,10 @@ class MemoryRepository(
      * @param userContent 用户消息
      * @param aiContent AI 回复
      * @param cardId 归属角色卡 id（T6.13 按角色卡隔离；null 则不归类）
+     * @param conversationId 来源会话 id（v1.2 P2 修复：记忆标注来源会话，供跨会话打听定位 T8.1 + 会话私有隔离 T7.4）
      * 全程不抛错：任何失败都静默返回（记忆提取是附加能力，不影响主对话）。
      */
-    suspend fun extractAndStore(userContent: String, aiContent: String, cardId: Long?) {
+    suspend fun extractAndStore(userContent: String, aiContent: String, cardId: Long?, conversationId: Long? = null) {
         val config = apiConfigStore.config.firstOrNull() ?: run {
             Log.w(TAG, "记忆提取跳过：未读到 API 配置")
             return
@@ -231,7 +232,7 @@ class MemoryRepository(
             val content = item.content.trim()
             if (content.isBlank()) return@forEach
             if (item.confidence < MIN_CONFIDENCE) return@forEach
-            upsertWithConflictCheck(item, content, cardId, existingMemories)
+            upsertWithConflictCheck(item, content, cardId, conversationId, existingMemories)
         }
     }
 
@@ -240,6 +241,7 @@ class MemoryRepository(
         item: ExtractedMemory,
         content: String,
         cardId: Long?,
+        conversationId: Long?,
         existingMemories: List<MemoryItem>,
     ) {
         val type = runCatching { MemoryType.valueOf(item.type.uppercase()) }.getOrDefault(MemoryType.OTHER)
@@ -292,7 +294,7 @@ class MemoryRepository(
                 ),
             )
         } else {
-            // 3. 新增记忆
+            // 3. 新增记忆：标注来源会话（P2 修复，供跨会话打听定位 + 会话私有隔离）
             dao.insert(
                 MemoryItem(
                     type = type,
@@ -300,6 +302,7 @@ class MemoryRepository(
                     keywords = item.keywords,
                     confidence = item.confidence,
                     characterCardId = cardId,
+                    sourceConversationId = conversationId,
                     visibility = visibility,
                     isTopSecret = topSecret,
                     createdAt = now,
