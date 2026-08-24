@@ -18,12 +18,12 @@ import com.bdalxy.edencourt.data.local.entity.Message
 /**
  * 本地数据库单例（企划书 3.3.2 / T2.4）。
  * - 挂载：Conversation、Message、CharacterCardEntity、MemoryItem 四个实体与对应 DAO
- * - version=8：v5→v6 character_cards 加 avatar；v6→v7 memory_items 加 characterCardId；v7→v8 character_cards/conversations 加 remark（备注，T6.14）
+ * - version=9：v5→v6 character_cards 加 avatar；v6→v7 memory_items 加 characterCardId；v7→v8 character_cards/conversations 加 remark（T6.14）；v8→v9 memory_items 加 visibility（共享/私有，T7.1）
  * - schema 已导出到 app/schemas（企划书 4.1.5）
  */
 @Database(
     entities = [Conversation::class, Message::class, CharacterCardEntity::class, MemoryItem::class],
-    version = 8,
+    version = 9,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -43,6 +43,13 @@ abstract class AppDatabase : RoomDatabase() {
     companion object {
         @Volatile
         private var INSTANCE: AppDatabase? = null
+
+        /** v8→v9：memory_items 表新增 visibility 列，默认 'SHARED'（记忆可见性底座，T7.1）。区分度低不建索引 */
+        private val MIGRATION_8_9 = object : Migration(8, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE memory_items ADD COLUMN visibility TEXT NOT NULL DEFAULT 'SHARED'")
+            }
+        }
 
         /** v1→v2：messages 表新增 reasoning 列，默认空串（兼容旧数据） */
         private val MIGRATION_1_2 = object : Migration(1, 2) {
@@ -134,7 +141,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "edencourt.db",
                 ).addMigrations(
-                    MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8,
+                    MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9,
                 ).build().also { INSTANCE = it }
             }
     }

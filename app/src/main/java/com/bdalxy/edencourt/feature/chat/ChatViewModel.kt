@@ -10,6 +10,7 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import com.bdalxy.edencourt.EdenCourtApp
 import com.bdalxy.edencourt.data.local.dao.CharacterCardDao
 import com.bdalxy.edencourt.data.local.entity.CharacterCardEntity
+import com.bdalxy.edencourt.data.local.entity.MemoryItem
 import com.bdalxy.edencourt.data.local.entity.Message
 import com.bdalxy.edencourt.data.local.entity.MessageStatus
 import com.bdalxy.edencourt.data.local.entity.Role
@@ -466,7 +467,8 @@ class ChatViewModel(
      */
     private suspend fun buildLongTermMemoryFragment(): String {
         val cardId = currentCardId() ?: return ""
-        val memories = memoryRepository.getActiveByCard(cardId)
+        // T7.5 会话级私有定稿：注入 = 该角色共享记忆 + 本会话自己的私有记忆（跨会话私有不串）
+        val memories = memoryRepository.getInjectableMemories(cardId, conversationId)
         if (memories.isEmpty()) return ""
         return buildString {
             append("[关于用户的长期记忆]\n")
@@ -474,6 +476,27 @@ class ChatViewModel(
                 append("- ").append(m.content).append("\n")
             }
         }.trim()
+    }
+
+    // ---------- 会话记忆面板（T7.4 会话级私有：共享 + 私有两区） ----------
+
+    /** 会话记忆面板「共享区」：该角色卡的全部共享记忆 */
+    private val _sharedMemories = MutableStateFlow<List<MemoryItem>>(emptyList())
+    val sharedMemories: StateFlow<List<MemoryItem>> = _sharedMemories.asStateFlow()
+
+    /** 会话记忆面板「私有区」：仅本会话（sourceConversationId=conversationId）的私有记忆 */
+    private val _privateMemories = MutableStateFlow<List<MemoryItem>>(emptyList())
+    val privateMemories: StateFlow<List<MemoryItem>> = _privateMemories.asStateFlow()
+
+    /** 打开记忆面板时刷新两区数据（T7.4） */
+    fun refreshSessionMemories() {
+        viewModelScope.launch {
+            val cardId = currentCardId()
+            _sharedMemories.value =
+                if (cardId != null) memoryRepository.getSharedByCard(cardId) else emptyList()
+            _privateMemories.value =
+                memoryRepository.getPrivateByConversation(conversationId)
+        }
     }
 
     companion object {

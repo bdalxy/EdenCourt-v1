@@ -16,11 +16,21 @@ enum class MemoryType {
     OTHER,
 }
 
+/** 记忆可见性（v1.1 底座，用于角色套话/群聊的前置分层，默认共享）。
+ * SHARED=一般事实，将来可被其他角色「套话」得知；PRIVATE=该角色专属（私密心事），仅本角色可见。 */
+enum class MemoryVisibility {
+    /** 共享：可被其他角色通过套话得知（一般事实） */
+    SHARED,
+    /** 私有：仅记住它的角色自己可见（私密/保密内容） */
+    PRIVATE,
+}
+
 /**
  * 记忆条目表（企划书 4.1.4 / 4.2.4，T5.1）。
  * - keywords 逗号分隔，供关键词检索注入（T5.4）
  * - confidence 置信度 0~1，仅高置信度条目入库（T5.3）
  * - isDeleted 软删除：管理页删除仅标记，不物理删，保证可回溯
+ * - visibility 可见性（T7.1）：共享/私有，v1.1 新增，默认 SHARED；区分度低不建索引
  * - 索引：type / keywords / isDeleted（企划书 4.1.4）
  */
 @Entity(
@@ -45,6 +55,8 @@ data class MemoryItem(
     val confidence: Float = 1f,
     /** 归属角色卡 id（T6.13 按角色卡隔离；null=旧数据/未归类） */
     val characterCardId: Long? = null,
+    /** 可见性（v1.1 新增，T7.1）：共享/私有，默认共享；v2.x 套话/群聊的分层依据 */
+    val visibility: MemoryVisibility = MemoryVisibility.SHARED,
     /** 来源会话 id（可空：手动添加无来源） */
     val sourceConversationId: Long? = null,
     /** 来源消息 id（可空） */

@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
@@ -20,10 +21,13 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Warning
@@ -32,6 +36,7 @@ import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
@@ -57,6 +62,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.bdalxy.edencourt.EdenCourtApp
 import com.bdalxy.edencourt.core.ui.CharacterAvatar
+import com.bdalxy.edencourt.data.local.entity.MemoryItem
 import com.bdalxy.edencourt.data.local.entity.Message
 import com.bdalxy.edencourt.data.local.entity.MessageStatus
 import com.bdalxy.edencourt.data.local.entity.MessageType
@@ -95,6 +101,11 @@ fun ChatScreen(
 
     // 输入框内容状态（旋转/重建后保留）
     var input by rememberSaveable { mutableStateOf("") }
+
+    // 会话记忆面板开关（T7.4：共享 + 私有两区）
+    var showMemorySheet by rememberSaveable { mutableStateOf(false) }
+    val sharedMemories by viewModel.sharedMemories.collectAsStateWithLifecycle()
+    val privateMemories by viewModel.privateMemories.collectAsStateWithLifecycle()
 
     // 滚动状态：消息/错误提示/键盘弹出时自动滚到底部（T6.1 + T6.7 修复）
     // - 键盘弹出：以 IME 高度为 key，动画期间每次高度变化都重新定位到底部；
@@ -146,6 +157,15 @@ fun ChatScreen(
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
                     }
                 },
+                actions = {
+                    // T7.4：会话记忆入口（共享 + 本会话私有），点击先刷新数据再弹出
+                    IconButton(onClick = {
+                        showMemorySheet = true
+                        viewModel.refreshSessionMemories()
+                    }) {
+                        Icon(Icons.AutoMirrored.Filled.List, contentDescription = "记忆")
+                    }
+                },
             )
         },
         bottomBar = {
@@ -190,6 +210,15 @@ fun ChatScreen(
                 }
             }
         }
+    }
+    // T7.4：会话记忆面板（共享 + 本会话私有），点顶部「记忆」图标弹出
+    if (showMemorySheet) {
+        SessionMemorySheet(
+            sharedMemories = sharedMemories,
+            privateMemories = privateMemories,
+            cardName = roleName,
+            onDismiss = { showMemorySheet = false },
+        )
     }
 }
 
@@ -452,3 +481,84 @@ private fun ChatInputBar(
         }
     }
 }
+
+/**
+ * T7.4 会话记忆面板（会话级私有定稿）：
+ * - 「共享记忆」区：该角色卡的全部共享记忆
+ * - 「本会话私密记忆」区：仅本会话（sourceConversationId=当前会话）的私有记忆，跨会话隔离
+ * 两区空态分别提示。
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SessionMemorySheet(
+    sharedMemories: List<MemoryItem>,
+    privateMemories: List<MemoryItem>,
+    cardName: String,
+    onDismiss: () -> Unit,
+) {
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = 720.dp)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+        ) {
+            // 共享区
+            Text(
+                text = "共享记忆 · $cardName",
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            if (sharedMemories.isEmpty()) {
+                EmptyMemoryText("暂无共享记忆")
+            } else {
+                sharedMemories.forEach { MemorySheetItem(it) }
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+            // 私有区（仅本会话）
+            Text(
+                text = "本会话私密记忆",
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            if (privateMemories.isEmpty()) {
+                EmptyMemoryText("本会话暂无私密记忆")
+            } else {
+                privateMemories.forEach { MemorySheetItem(it) }
+            }
+            Spacer(modifier = Modifier.height(24.dp))
+        }
+    }
+}
+
+/** 记忆面板空态提示 */
+@Composable
+private fun EmptyMemoryText(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.outline,
+    )
+}
+
+/** 记忆面板单条：内容 + 创建时间 */
+@Composable
+private fun MemorySheetItem(memory: MemoryItem) {
+    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+        Text(memory.content, style = MaterialTheme.typography.bodyMedium)
+        Text(
+            text = formatMemoryTime(memory.createdAt),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.outline,
+        )
+    }
+}
+
+/** 记忆时间格式化：MM-dd HH:mm（区别于消息气泡的 formatTime） */
+private fun formatMemoryTime(timestamp: Long): String =
+    Instant.ofEpochMilli(timestamp)
+        .atZone(ZoneId.systemDefault())
+        .format(DateTimeFormatter.ofPattern("MM-dd HH:mm"))

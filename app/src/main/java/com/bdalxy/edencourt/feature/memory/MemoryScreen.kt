@@ -52,6 +52,7 @@ import com.bdalxy.edencourt.EdenCourtApp
 import com.bdalxy.edencourt.data.local.entity.CharacterCardEntity
 import com.bdalxy.edencourt.data.local.entity.MemoryItem
 import com.bdalxy.edencourt.data.local.entity.MemoryType
+import com.bdalxy.edencourt.data.local.entity.MemoryVisibility
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -204,6 +205,27 @@ private fun MemoryListItem(
                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
             )
         }
+        Spacer(modifier = Modifier.width(6.dp))
+        // 可见性标签（T7.3：共享/私密）
+        Surface(
+            shape = MaterialTheme.shapes.small,
+            color = if (memory.visibility == MemoryVisibility.PRIVATE) {
+                MaterialTheme.colorScheme.errorContainer
+            } else {
+                MaterialTheme.colorScheme.surfaceVariant
+            },
+        ) {
+            Text(
+                text = memory.visibility.label,
+                style = MaterialTheme.typography.labelSmall,
+                color = if (memory.visibility == MemoryVisibility.PRIVATE) {
+                    MaterialTheme.colorScheme.onErrorContainer
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+            )
+        }
         Spacer(modifier = Modifier.width(10.dp))
         // 内容 + 时间
         Column(modifier = Modifier.weight(1f)) {
@@ -309,11 +331,18 @@ private val MemoryType.label: String
         MemoryType.OTHER -> "其他"
     }
 
+/** 记忆可见性中文标签（T7.3：共享/私密） */
+private val MemoryVisibility.label: String
+    get() = when (this) {
+        MemoryVisibility.SHARED -> "共享"
+        MemoryVisibility.PRIVATE -> "私密"
+    }
+
 /** 时间格式化：MM-dd HH:mm（列表展示用） */
 private fun formatTime(timestamp: Long): String =
     SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()).format(Date(timestamp))
 
-/** 手动添加记忆对话框：类型下拉 + 内容 + 关键词 */
+/** 手动添加记忆对话框：类型下拉 + 内容 + 关键词（记忆管理页固定作为共享记忆，T7.3） */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun AddMemoryDialog(

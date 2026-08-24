@@ -625,7 +625,47 @@ app/src/main/
 
 > **阶段 6.6 人工审核门槛**：以上四项编译通过 + K60 真机逐项验证（新建角色设头像生效 / 同卡共享记忆、异卡隔离 / 备注显示 / 预览=AI最后一条），交用户确认后再推送 GitHub，随后进入 T6.4 朋友试用。
 
-> **后期路线图（M6 发布后再启动，用户 2026-08-24 概念设想，未定稿）**：记忆「可见性」升级（提取时标注共享/私有，检索按当前会话+可见性过滤）；角色间「信息不对等 + 套话」（如角色 B 向角色 A 打听你的事）；多角色同场互动（群聊雏形）。前两者依赖 T6.13 的角色隔离底座。
+---
+
+## 9.8 阶段 7（v1.1）：记忆可见性底座（M7，用户 2026-08-24 确认方向，2026 推进）
+
+> 目标：把长期记忆从「按角色隔离 + 一律共享」升级为「按角色隔离 + 共享/私有分层」，作为 v1.2 角色套话、v1.3 群聊的地基（ROADMAP.md M7）。v1.0 单角色对话体验不改变。
+> 语义：`SHARED`=一般事实，将来可被其他角色「套话」得知；`PRIVATE`=该角色专属（如用户私密心事），仅该角色自己可见。本阶段只做「数据层表达 + 提取标注 + 记忆页可视化」，跨角色获取的套话逻辑留 v1.2。
+
+### T7.1 memory_items 加 visibility 列 + Room 迁移 v8→v9
+- 依赖：无
+- 操作：MemoryItem 增 `visibility`（枚举 SHARED/PRIVATE，默认 SHARED）；AppDatabase version→9，MIGRATION_8_9 加列 `visibility TEXT NOT NULL DEFAULT 'SHARED'`（区分度低，不建索引）
+- 文件：`data/local/entity/MemoryItem.kt` · `data/local/AppDatabase.kt`
+- 验收：[ ] 既有记忆迁移后全部为 SHARED · [ ] 升级 0 崩溃（真机旧库覆盖升级） · [ ] 编译+安装+启动通过
+
+### T7.2 提取时标注可见性 + 冲突写入可见性
+- 依赖：T7.1
+- 参考：企划书 3.5.2 提取（在 T5.3/T6.13.2 提取链路上扩展字段）
+- 操作：①提取 prompt 增加可见性判定规则（私密=用户明确要求保密/仅对当前角色说的私密心事→PRIVATE；一般事实→SHARED），输出项加 `visibility` 字段；②`ExtractedMemory` DTO 加字段（默认 SHARED）；③`upsertWithConflictCheck` 新增/更新时写入 visibility
+- 文件：`data/repository/MemoryRepository.kt` · `data/local/entity/MemoryItem.kt`
+- 验收：[ ] 给角色 A 说「这是秘密，别告诉别人」→ 该记忆标记为【私密】 · [ ] 普通告知（如「喜欢奶茶」）→【共享】 · [ ] 编译+安装+启动通过
+
+### T7.3 记忆管理页收敛为「共享记忆池」（会话级私有改造，2026-08-24 定稿）
+- 依赖：T7.2
+- 参考：企划书 5.3.4 记忆页
+- 操作：记忆管理页**只显示共享记忆**（`visibility=SHARED`），隐藏私有；保留角色筛选（全部/各角色/手动未归属）；移除「私有」可见性筛选维度（私有改从会话内进去看）
+- 文件：`feature/memory/MemoryScreen.kt` · `MemoryViewModel.kt`
+- 验收：[ ] 记忆页只出现共享记忆 · [ ] 无「私有」筛选维度 · [ ] 编译+安装+启动通过
+
+### T7.4 会话内记忆面板（共享 + 私有）
+- 依赖：T7.3
+- 参考：企划书 5.3.4 记忆页延伸；产品哲学「一个会话≈一个独立人格实例」
+- 操作：会话聊天页右上角加「记忆」图标 → 半屏面板分两区：**共享**（该角色 `characterCardId=本卡 AND visibility=SHARED`）、**私有**（本会话 `sourceConversationId=当前会话 AND visibility=PRIVATE`）；空态显示「暂无记忆」
+- 文件：`feature/chat/ChatScreen.kt` · 新增面板 Composable + ViewModel 数据源
+- 验收：[ ] 会话内面板「共享」展示该角色共享记忆 · [ ] 「私有」展示本会话私密记忆（不含他会话） · [ ] 图标入口明显 · [ ] 编译+安装+启动通过
+
+### T7.5 检索注入对齐会话级私有
+- 依赖：T7.4
+- 操作：注入到 system prompt 的记忆改为「该角色共享 + 本会话私有」（原 ChatViewModel.kt:469 `getActiveByCard` 取同卡全部含私有，需要按会话过滤私有；共享仍按角色全取）
+- 文件：`data/local/dao/MemoryDao.kt` · `data/repository/MemoryRepository.kt` · `feature/chat/ChatViewModel.kt`
+- 验收：[ ] 会话A可见该角色共享 + 会话A私有；会话B的私有不注入会话A · [ ] 编译+安装+启动通过
+
+> **阶段 7（v1.1）人工审核门槛**：五项编译通过 + K60 真机逐项验证（升级不崩 / 记忆页只显共享 / 会话内共享+私有两区 / 私有跨会话隔离含检索注入 / 手动添加默认共享），交用户确认后再推送 GitHub。
 
 ---
 

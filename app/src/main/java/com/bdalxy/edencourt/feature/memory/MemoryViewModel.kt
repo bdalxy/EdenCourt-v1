@@ -11,6 +11,7 @@ import com.bdalxy.edencourt.data.local.dao.CharacterCardDao
 import com.bdalxy.edencourt.data.local.entity.CharacterCardEntity
 import com.bdalxy.edencourt.data.local.entity.MemoryItem
 import com.bdalxy.edencourt.data.local.entity.MemoryType
+import com.bdalxy.edencourt.data.local.entity.MemoryVisibility
 import com.bdalxy.edencourt.data.repository.MemoryRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -76,10 +77,12 @@ class MemoryViewModel(
         _selectedCardId.value = cardId
     }
 
-    /** 当前展示列表：按搜索词 + 角色筛选过滤 */
+    /** 当前展示列表：记忆管理页=共享记忆池（v1.1 会话级私有定稿），只显示 SHARED，按搜索词 + 角色筛选过滤 */
     val filteredMemories: StateFlow<List<MemoryItem>> =
         combine(_searchQuery, _selectedCardId, memories) { query, cardId, all ->
             all.filter { m ->
+                // 只显示共享记忆（私密从会话内进去看，T7.3）
+                if (m.visibility != MemoryVisibility.SHARED) return@filter false
                 // 角色筛选：null=全部；MANUAL_CARD_ID=只看手动/未归属；否则只看指定角色
                 val cardMatches = when (cardId) {
                     null -> true
@@ -97,7 +100,7 @@ class MemoryViewModel(
             initialValue = emptyList(),
         )
 
-    /** 手动添加记忆（T5.5：用户明确填写，置信度默认 1.0） */
+    /** 手动添加记忆（T5.5：用户明确填写，置信度默认 1.0；记忆管理页固定共享，T7.3） */
     fun addMemory(type: MemoryType, content: String, keywords: String) {
         val trimmed = content.trim()
         if (trimmed.isEmpty()) return

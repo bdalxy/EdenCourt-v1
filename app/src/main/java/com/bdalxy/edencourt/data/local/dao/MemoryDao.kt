@@ -68,6 +68,34 @@ interface MemoryDao {
     )
     suspend fun getActiveByCard(cardId: Long, limit: Int): List<MemoryItem>
 
+    /**
+     * 取某角色卡的「共享」记忆（v1.1 会话级私有定稿，T7.4/7.5）。
+     * 共享记忆对所有「用该卡创建的会话」可见；私密的不在此列（从会话内单独取）。
+     */
+    @Query(
+        """
+        SELECT * FROM memory_items
+        WHERE isDeleted = 0 AND characterCardId = :cardId AND visibility = 'SHARED'
+        ORDER BY confidence DESC, createdAt DESC
+        LIMIT :limit
+        """,
+    )
+    suspend fun getSharedByCard(cardId: Long, limit: Int): List<MemoryItem>
+
+    /**
+     * 取某会话的「私有」记忆（v1.1 会话级私有定稿，T7.4/7.5）。
+     * 私有记忆仅来源会话可见（sourceConversationId = 当前会话），跨会话完全隔离。
+     */
+    @Query(
+        """
+        SELECT * FROM memory_items
+        WHERE isDeleted = 0 AND sourceConversationId = :conversationId AND visibility = 'PRIVATE'
+        ORDER BY createdAt DESC
+        LIMIT :limit
+        """,
+    )
+    suspend fun getPrivateByConversation(conversationId: Long, limit: Int): List<MemoryItem>
+
     /** 记忆数量（统计用 / 空状态判断） */
     @Query("SELECT COUNT(*) FROM memory_items WHERE isDeleted = 0")
     suspend fun countActive(): Int

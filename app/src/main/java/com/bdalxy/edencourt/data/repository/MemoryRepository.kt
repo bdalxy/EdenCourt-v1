@@ -3,6 +3,7 @@ package com.bdalxy.edencourt.data.repository
 import com.bdalxy.edencourt.data.local.dao.MemoryDao
 import com.bdalxy.edencourt.data.local.entity.MemoryItem
 import com.bdalxy.edencourt.data.local.entity.MemoryType
+import com.bdalxy.edencourt.data.local.entity.MemoryVisibility
 import com.bdalxy.edencourt.data.remote.AiChatService
 import com.bdalxy.edencourt.data.remote.ChatMessage
 import com.bdalxy.edencourt.data.setting.ApiConfigStore
@@ -27,7 +28,7 @@ class MemoryRepository(
     private val aiChatService: AiChatService,
 ) {
 
-    /** 提取结果 DTO：AI 返回的 JSON 数组元素（T5.3；replaceContent 用于用户更正时覆盖旧记忆 T6.13.2） */
+    /** 提取结果 DTO：AI 返回的 JSON 数组元素（T5.3；replaceContent 用于用户更正时覆盖旧记忆 T6.13.2；visibility 记忆可见性 T7.2） */
     @Serializable
     private data class ExtractedMemory(
         @SerialName("type") val type: String = "other",
@@ -35,6 +36,7 @@ class MemoryRepository(
         @SerialName("keywords") val keywords: String = "",
         @SerialName("confidence") val confidence: Float = 1f,
         @SerialName("replace_content") val replaceContent: String? = null,
+        @SerialName("visibility") val visibility: String = "shared",
     )
 
     /** 提取 JSON 解析器：忽略未知字段，容忍 AI 输出不规范 */
@@ -86,10 +88,28 @@ class MemoryRepository(
     suspend fun getActiveByCard(cardId: Long, limit: Int = DEFAULT_MEMORY_INJECT_LIMIT): List<MemoryItem> =
         dao.getActiveByCard(cardId, limit)
 
+    /** 取某角色卡的共享记忆（T7.4 会话记忆面板「共享区」） */
+    suspend fun getSharedByCard(cardId: Long, limit: Int = DEFAULT_MEMORY_INJECT_LIMIT): List<MemoryItem> =
+        dao.getSharedByCard(cardId, limit)
+
+    /** 取某会话的私有记忆（T7.4 会话记忆面板「私有区」；T7.5 检索注入私有侧） */
+    suspend fun getPrivateByConversation(conversationId: Long, limit: Int = DEFAULT_MEMORY_INJECT_LIMIT): List<MemoryItem> =
+        dao.getPrivateByConversation(conversationId, limit)
+
+    /**
+     * 取可注入到 system prompt 的记忆（T7.5 会话级私有定稿）：
+     * = 该角色全部共享记忆 + 当前会话自己的私有记忆。合并去重。
+     */
+    suspend fun getInjectableMemories(cardId: Long, conversationId: Long, limit: Int = DEFAULT_MEMORY_INJECT_LIMIT): List<MemoryItem> {
+        val shared = dao.getSharedByCard(cardId, limit)
+        val privates = dao.getPrivateByConversation(conversationId, limit)
+        return (shared + privates).distinctBy { it.id }
+    }
+
     // ---------- 写入 ----------
 
-    /** 手动添加记忆（T5.5 管理页）：置信度默认 1.0（用户明确填写） */
-    suspend fun addManual(type: MemoryType, content: String, keywords: String): Long {
+    /** 手动添加记忆（T5.5 管理页）：置信度默认 1.0（用户明确填写）；T7.3 可指定可见性（默认共享） */
+    suspend fun addManual(type: MemoryType, content: String, keywords: String, visibility: MemoryVisibility = MemoryVisibility.SHARED): Long {
         val now = System.currentTimeMillis()
         return dao.insert(
             MemoryItem(
@@ -97,6 +117,7 @@ class MemoryRepository(
                 content = content.trim(),
                 keywords = keywords.trim(),
                 confidence = 1f,
+                visibility = visibility,
                 createdAt = now,
                 updatedAt = now,
             ),
@@ -137,6 +158,9 @@ class MemoryRepository(
         val prompt = buildString {
             append("你是记忆提取助手。请从下面的对话中，提取关于用户的值得长期记住的信息。\n")
             append("规则：只提取对话中明确出现的个人信息、偏好或重要事件；不要编造；不要提取一次性寒暄。\n")
+            append("可见性规则（重要）：对每条记忆判断可见性——\n")
+            append("  若用户明确要求保密/仅对当前角色说（如「别告诉别人」「你知我知」「这是我的秘密」），或属于私密心事，标 \"visibility\": \"private\"；\n")
+            append("  一般事实（姓名/喜好/事件等）标 \"visibility\": \"shared\"。\n")
             if (existingMemories.isNotEmpty()) {
                 append("该角色已有记忆（原文+类型）：\n")
                 existingMemories.forEach { m -> append("  - ").append(m.content).append("（").append(m.type.label).append("）\n") }
@@ -144,7 +168,7 @@ class MemoryRepository(
                 append("请在对应新条目加字段 \"replace_content\": \"被覆盖的已有记忆的原文\"。仅同一事实被更正时使用，一般性补充不要加。\n\n")
             }
             append("输出格式：仅输出 JSON 数组，不要任何额外文字。每项格式：\n")
-            append("[{\"type\":\"personal_info\"|\"preference\"|\"event\"|\"other\",\"content\":\"一句话内容\",\"keywords\":\"关键词1,关键词2\",\"confidence\":0.0~1.0,\"replace_content\":\"可选，被覆盖的旧记忆原文\"}]\n")
+            append("[{\"type\":\"personal_info\"|\"preference\"|\"event\"|\"other\",\"content\":\"一句话内容\",\"keywords\":\"关键词1,关键词2\",\"confidence\":0.0~1.0,\"replace_content\":\"可选，被覆盖的旧记忆原文\",\"visibility\":\"shared\"|\"private\"}]\n")
             append("若没有值得记住的信息，输出 []。\n\n")
             append("用户：").append(userContent).append("\n")
             append("AI：").append(aiContent)
@@ -190,6 +214,8 @@ class MemoryRepository(
         existingMemories: List<MemoryItem>,
     ) {
         val type = runCatching { MemoryType.valueOf(item.type.uppercase()) }.getOrDefault(MemoryType.OTHER)
+        // 可见性解析（T7.2）：非法值兜底为共享
+        val visibility = runCatching { MemoryVisibility.valueOf(item.visibility.uppercase()) }.getOrDefault(MemoryVisibility.SHARED)
         val now = System.currentTimeMillis()
 
         // 0. 显式覆盖：用户更正的条目带了 replace_content → 找到对应旧记忆并改为新内容（T6.13.2 修「记忆还是紫色」）
@@ -206,6 +232,7 @@ class MemoryRepository(
                         keywords = item.keywords,
                         confidence = maxOf(target.confidence, item.confidence),
                         characterCardId = cardId,
+                        visibility = visibility,
                         updatedAt = now,
                     ),
                 )
@@ -228,6 +255,7 @@ class MemoryRepository(
                     keywords = item.keywords,
                     confidence = maxOf(existing.confidence, item.confidence),
                     characterCardId = cardId,
+                    visibility = visibility,
                     updatedAt = now,
                 ),
             )
@@ -240,6 +268,7 @@ class MemoryRepository(
                     keywords = item.keywords,
                     confidence = item.confidence,
                     characterCardId = cardId,
+                    visibility = visibility,
                     createdAt = now,
                     updatedAt = now,
                 ),
