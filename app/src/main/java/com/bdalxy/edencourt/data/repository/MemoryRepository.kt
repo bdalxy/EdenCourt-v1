@@ -27,17 +27,27 @@ class MemoryRepository(
     private val aiChatService: AiChatService,
 ) {
 
-    /** 提取结果 DTO：AI 返回的 JSON 数组元素（T5.3） */
+    /** 提取结果 DTO：AI 返回的 JSON 数组元素（T5.3；replaceContent 用于用户更正时覆盖旧记忆 T6.13.2） */
     @Serializable
     private data class ExtractedMemory(
         @SerialName("type") val type: String = "other",
         @SerialName("content") val content: String = "",
         @SerialName("keywords") val keywords: String = "",
         @SerialName("confidence") val confidence: Float = 1f,
+        @SerialName("replace_content") val replaceContent: String? = null,
     )
 
     /** 提取 JSON 解析器：忽略未知字段，容忍 AI 输出不规范 */
     private val json = Json { ignoreUnknownKeys = true }
+
+    /** 记忆类型中文标签（提取 prompt 中展示已有记忆类型用） */
+    private val MemoryType.label: String
+        get() = when (this) {
+            MemoryType.PERSONAL_INFO -> "个人信息"
+            MemoryType.PREFERENCE -> "偏好"
+            MemoryType.EVENT -> "事件"
+            MemoryType.OTHER -> "其他"
+        }
 
     /** 高置信度入库阈值（企划书 3.5.2：高置信度才入库） */
     companion object {
@@ -120,12 +130,21 @@ class MemoryRepository(
             return
         }
 
-        // 1. 组装提取 prompt：要求输出 JSON 数组，只提取明确信息、不编造
+        // 1. 组装提取 prompt：要求输出 JSON 数组，只提取明确信息、不编造；
+        //    并带上本角色已有记忆，让 AI 识别「用户更正覆盖了哪条旧记忆」(T6.13.2)
+        // 取该角色已有的未删除记忆（含旧记忆原文，供覆盖判定）
+        val existingMemories = cardId?.let { dao.getActiveByCard(it, DEFAULT_MEMORY_INJECT_LIMIT) } ?: emptyList()
         val prompt = buildString {
             append("你是记忆提取助手。请从下面的对话中，提取关于用户的值得长期记住的信息。\n")
             append("规则：只提取对话中明确出现的个人信息、偏好或重要事件；不要编造；不要提取一次性寒暄。\n")
+            if (existingMemories.isNotEmpty()) {
+                append("该角色已有记忆（原文+类型）：\n")
+                existingMemories.forEach { m -> append("  - ").append(m.content).append("（").append(m.type.label).append("）\n") }
+                append("规则补充：如果新信息是对某条已有记忆的「更正/覆盖」（同一事实被用户改了，如喜欢颜色从紫色改成蓝色），\n")
+                append("请在对应新条目加字段 \"replace_content\": \"被覆盖的已有记忆的原文\"。仅同一事实被更正时使用，一般性补充不要加。\n\n")
+            }
             append("输出格式：仅输出 JSON 数组，不要任何额外文字。每项格式：\n")
-            append("[{\"type\":\"personal_info\"|\"preference\"|\"event\"|\"other\",\"content\":\"一句话内容\",\"keywords\":\"关键词1,关键词2\",\"confidence\":0.0~1.0}]\n")
+            append("[{\"type\":\"personal_info\"|\"preference\"|\"event\"|\"other\",\"content\":\"一句话内容\",\"keywords\":\"关键词1,关键词2\",\"confidence\":0.0~1.0,\"replace_content\":\"可选，被覆盖的旧记忆原文\"}]\n")
             append("若没有值得记住的信息，输出 []。\n\n")
             append("用户：").append(userContent).append("\n")
             append("AI：").append(aiContent)
@@ -159,23 +178,49 @@ class MemoryRepository(
             val content = item.content.trim()
             if (content.isBlank()) return@forEach
             if (item.confidence < MIN_CONFIDENCE) return@forEach
-            upsertWithConflictCheck(item, content, cardId)
+            upsertWithConflictCheck(item, content, cardId, existingMemories)
         }
     }
 
-    /** 冲突检查入库：内容相似(关键词或内容包含关系)时更新，否则新增（企划书 3.5.2） */
-    private suspend fun upsertWithConflictCheck(item: ExtractedMemory, content: String, cardId: Long?) {
+    /** 冲突检查入库：可覆盖旧记忆、或内容相似后合并更新，否则新增（企划书 3.5.2 / T6.13.2） */
+    private suspend fun upsertWithConflictCheck(
+        item: ExtractedMemory,
+        content: String,
+        cardId: Long?,
+        existingMemories: List<MemoryItem>,
+    ) {
         val type = runCatching { MemoryType.valueOf(item.type.uppercase()) }.getOrDefault(MemoryType.OTHER)
         val now = System.currentTimeMillis()
 
-        // 冲突判定：关键词任一命中已有记忆的 keywords 或 content，视为同一条记忆
+        // 0. 显式覆盖：用户更正的条目带了 replace_content → 找到对应旧记忆并改为新内容（T6.13.2 修「记忆还是紫色」）
+        val replaceContent = item.replaceContent?.trim()
+        if (!replaceContent.isNullOrBlank()) {
+            val target = existingMemories.firstOrNull {
+                it.content == replaceContent || replaceContent.contains(it.content) || it.content.contains(replaceContent)
+            }
+            if (target != null && !target.isDeleted) {
+                dao.update(
+                    target.copy(
+                        type = type,
+                        content = content,
+                        keywords = item.keywords,
+                        confidence = maxOf(target.confidence, item.confidence),
+                        characterCardId = cardId,
+                        updatedAt = now,
+                    ),
+                )
+                return
+            }
+        }
+
+        // 1. 冲突判定：关键词任一命中已有记忆的 keywords 或 content，视为同一条记忆
         val candidateKeywords = item.keywords.split(",").map { it.trim() }.filter { it.isNotEmpty() }
         val existing = candidateKeywords.firstNotNullOfOrNull { kw ->
             dao.searchByKeyword(kw).firstOrNull()
         }
 
         if (existing != null) {
-            // 冲突：更新内容与置信度（取更高者），刷新时间；归属角色卡同步为新卡（T6.13）
+            // 2. 冲突：更新内容与置信度（取更高者），刷新时间；归属角色卡同步为新卡（T6.13）
             dao.update(
                 existing.copy(
                     type = type,
@@ -187,6 +232,7 @@ class MemoryRepository(
                 ),
             )
         } else {
+            // 3. 新增记忆
             dao.insert(
                 MemoryItem(
                     type = type,
