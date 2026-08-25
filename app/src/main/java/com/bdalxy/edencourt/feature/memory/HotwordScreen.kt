@@ -1,6 +1,7 @@
 package com.bdalxy.edencourt.feature.memory
 
 import android.app.Application
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -59,6 +60,9 @@ fun HotwordScreen(onBack: () -> Unit) {
 
     // 当前正在查看详情（点命中记忆进详情，复用 MemoryDetailScreen 覆盖）
     var detailId by remember { mutableStateOf<Long?>(null) }
+
+    // 系统返回：拦截为「回到记忆列表」，避免直接退出到主界面（bugfix）；进详情时由详情页拦截
+    BackHandler(enabled = detailId == null) { onBack() }
 
     val detailIdValue = detailId
     if (detailIdValue != null) {

@@ -1,5 +1,6 @@
 package com.bdalxy.edencourt.feature.memory
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -79,6 +80,9 @@ fun MemoryDetailScreen(memoryId: Long, onBack: () -> Unit) {
         if (item != null) firstLoaded = true
         else if (firstLoaded) onBack()
     }
+
+    // 系统返回：无内部弹窗时拦截为「返回上一级」，避免直接退出到主界面（bugfix）
+    BackHandler(enabled = !showEdit && !confirmDelete) { onBack() }
 
     val memory = item
     if (memory == null) {

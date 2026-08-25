@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
@@ -27,6 +28,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
@@ -127,16 +129,6 @@ fun MemoryScreen(onBack: () -> Unit) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
                     }
                 },
-                actions = {
-                    // 时间轴入口（阶段二可视化 T10.7）
-                    IconButton(onClick = { showTimeline = true }) {
-                        Icon(Icons.Filled.DateRange, contentDescription = "时间轴")
-                    }
-                    // 共现热词入口（阶段三 T11.1）
-                    IconButton(onClick = { showHotwords = true }) {
-                        Icon(Icons.Filled.Star, contentDescription = "共现热词")
-                    }
-                },
             )
         },
         floatingActionButton = {
@@ -148,6 +140,27 @@ fun MemoryScreen(onBack: () -> Unit) {
         Column(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
             // 概览统计条（T10.6：全库 总量/置顶/重要/私密 一屏看懂）
             OverviewBar(overview)
+
+            // 可视化快捷入口（T10.7/T11.1：带文字便于发现，弥补顶栏纯图标难找）
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                AssistChip(
+                    onClick = { showTimeline = true },
+                    label = { Text("时间轴") },
+                    leadingIcon = {
+                        Icon(Icons.Filled.DateRange, contentDescription = null, modifier = Modifier.size(16.dp))
+                    },
+                )
+                AssistChip(
+                    onClick = { showHotwords = true },
+                    label = { Text("共现热词") },
+                    leadingIcon = {
+                        Icon(Icons.Filled.Star, contentDescription = null, modifier = Modifier.size(16.dp))
+                    },
+                )
+            }
 
             // 搜索框（T9.4 实时检索）
             OutlinedTextField(
