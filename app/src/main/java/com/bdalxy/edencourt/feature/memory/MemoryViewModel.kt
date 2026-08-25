@@ -72,6 +72,10 @@ class MemoryViewModel(
     private val _tabCounts = MutableStateFlow<Map<MemoryType?, Int>>(emptyMap())
     val tabCounts: StateFlow<Map<MemoryType?, Int>> = _tabCounts.asStateFlow()
 
+    /** 概览统计（T10.6：全库总/置顶/重要/私密，响应式刷新，不受当前筛选影响） */
+    private val _overview = MutableStateFlow(OverviewCounts(0, 0, 0, 0))
+    val overview: StateFlow<OverviewCounts> = _overview.asStateFlow()
+
     /** 每页条数（T9.5 简单分页） */
     private val pageSize = 20
 
@@ -92,10 +96,29 @@ class MemoryViewModel(
             ) { _, query, cardId, type -> Filter(query, cardId, type) }
                 .collect { reloadFirstPage() }
         }
+        // 概览统计（T10.6）：随表增删改自动刷新，跨全库不受当前筛选影响
+        viewModelScope.launch {
+            combine(
+                repository.observeActiveCount(),
+                repository.observePinnedCount(),
+                repository.observeImportantCount(),
+                repository.observePrivateCount(),
+            ) { total, pinned, important, privateCount ->
+                OverviewCounts(total, pinned, important, privateCount)
+            }.collect { _overview.value = it }
+        }
     }
 
     /** 一次重查的筛选参数快照 */
     private data class Filter(val query: String, val cardId: Long?, val type: MemoryType?)
+
+    /** 概览统计快照（T10.6：全库 总条数/置顶/重要/私密） */
+    data class OverviewCounts(
+        val total: Int = 0,
+        val pinned: Int = 0,
+        val important: Int = 0,
+        val privateCount: Int = 0,
+    )
 
     /** 角色卡 id -> 显示名（备注优先，未备注用角色名；T6.14） */
     fun displayNameFor(cardId: Long?): String? {

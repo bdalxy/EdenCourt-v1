@@ -124,6 +124,18 @@ interface MemoryDao {
     @Query("SELECT COUNT(*) FROM memory_items WHERE isDeleted = 0")
     fun observeActiveCount(): Flow<Int>
 
+    /** 观察置顶记忆数（T10.6 概览统计：随表增删改/置顶切换自动刷新） */
+    @Query("SELECT COUNT(*) FROM memory_items WHERE isDeleted = 0 AND isPinned = 1")
+    fun observePinnedCount(): Flow<Int>
+
+    /** 观察「重要」记忆数（T10.6 概览统计） */
+    @Query("SELECT COUNT(*) FROM memory_items WHERE isDeleted = 0 AND importance = 'IMPORTANT'")
+    fun observeImportantCount(): Flow<Int>
+
+    /** 观察私密记忆数（T10.6 概览统计） */
+    @Query("SELECT COUNT(*) FROM memory_items WHERE isDeleted = 0 AND visibility = 'PRIVATE'")
+    fun observePrivateCount(): Flow<Int>
+
     /**
      * 管理页综合分页检索（阶段一统一检索入口，T9.3/T9.5）。
      * 按「搜索词 + 角色归属 + 分类」组合过滤；置顶/重要优先，最新在前；LIMIT 翻页加载，避免全量进内存。

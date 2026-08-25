@@ -73,6 +73,15 @@ class MemoryRepository(
     /** 轻量表变化信号（T9.5）：记忆条数变化即发，管理页用它触发分页重查（避免全量加载行） */
     fun observeActiveCount(): Flow<Int> = dao.observeActiveCount()
 
+    /** 观察置顶记忆数（T10.6 概览统计） */
+    fun observePinnedCount(): Flow<Int> = dao.observePinnedCount()
+
+    /** 观察「重要」记忆数（T10.6 概览统计） */
+    fun observeImportantCount(): Flow<Int> = dao.observeImportantCount()
+
+    /** 观察私密记忆数（T10.6 概览统计） */
+    fun observePrivateCount(): Flow<Int> = dao.observePrivateCount()
+
     /** 检索未删除记忆（T5.4 生成前注入用，按关键词匹配 keywords/content） */
     suspend fun search(keyword: String): List<MemoryItem> = dao.searchByKeyword(keyword)
 

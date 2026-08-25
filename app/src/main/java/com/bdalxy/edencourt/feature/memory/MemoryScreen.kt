@@ -89,6 +89,7 @@ fun MemoryScreen(onBack: () -> Unit) {
     val selectedType by viewModel.selectedType.collectAsStateWithLifecycle()
     val tabCounts by viewModel.tabCounts.collectAsStateWithLifecycle()
     val totalCount by viewModel.totalCount.collectAsStateWithLifecycle()
+    val overview by viewModel.overview.collectAsStateWithLifecycle()
     val hasMore = viewModel.hasMore
     // 分页滚动状态（滚动到底触发加载下一页，T9.5）
     val listState = rememberLazyListState()
@@ -123,6 +124,9 @@ fun MemoryScreen(onBack: () -> Unit) {
         },
     ) { innerPadding ->
         Column(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
+            // 概览统计条（T10.6：全库 总量/置顶/重要/私密 一屏看懂）
+            OverviewBar(overview)
+
             // 搜索框（T9.4 实时检索）
             OutlinedTextField(
                 value = searchQuery,
@@ -236,6 +240,44 @@ fun MemoryScreen(onBack: () -> Unit) {
         )
     }
         } // 关闭 detailId==null 的 else 分支
+}
+
+/** 概览统计条（T10.6）：全库 总量/置顶/重要/私密，一屏看懂且随表变化实时刷新 */
+@Composable
+private fun OverviewBar(overview: MemoryViewModel.OverviewCounts) {
+    Surface(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+        ) {
+            OverviewStat("共", overview.total)
+            OverviewStat("置顶", overview.pinned)
+            OverviewStat("重要", overview.important)
+            OverviewStat("私密", overview.privateCount)
+        }
+    }
+}
+
+/** 概览统计中的单个数字项 */
+@Composable
+private fun OverviewStat(label: String, value: Int) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(
+            text = value.toString(),
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.primary,
+        )
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
 }
 
 /** 分类 Tab（T9.4）：全部 + 7 类，横向滚动，带数量角标 */
