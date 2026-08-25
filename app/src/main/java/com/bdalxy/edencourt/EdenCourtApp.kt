@@ -6,9 +6,11 @@ import com.bdalxy.edencourt.data.local.dao.CharacterCardDao
 import com.bdalxy.edencourt.data.local.dao.ConversationDao
 import com.bdalxy.edencourt.data.local.dao.InteractionDao
 import com.bdalxy.edencourt.data.local.dao.MemoryDao
+import com.bdalxy.edencourt.data.local.dao.MemorySearchDao
 import com.bdalxy.edencourt.data.local.dao.RelationshipDao
 import com.bdalxy.edencourt.data.local.dao.UserIdentityDao
 import com.bdalxy.edencourt.data.remote.RemoteApiChatService
+import com.bdalxy.edencourt.data.search.MemorySearchService
 import com.bdalxy.edencourt.data.consult.DailyConsultExecutor
 import com.bdalxy.edencourt.data.consult.DailyConsultScheduler
 import com.bdalxy.edencourt.data.interaction.InteractionExecutor
@@ -60,6 +62,11 @@ class EdenCourtApp : Application() {
         AppDatabase.getInstance(this).memoryDao()
     }
 
+    /** FTS4 全文检索数据访问单例（T9.2 起供记忆检索服务使用） */
+    val memorySearchDao: MemorySearchDao by lazy {
+        AppDatabase.getInstance(this).memorySearchDao()
+    }
+
     /** API 配置存储单例：DataStore 持久化，阶段 3 起供设置页/网络层使用 */
     val apiConfigStore: ApiConfigStore by lazy {
         ApiConfigStore(this)
@@ -70,10 +77,19 @@ class EdenCourtApp : Application() {
         RemoteApiChatService(RemoteApiChatService.defaultClient())
     }
 
+    /** 统一记忆检索服务单例（T9.3 起供管理页搜索 + 注入检索排序使用，覆盖 FTS + LIKE 兜底） */
+    val memorySearchService: MemorySearchService by lazy {
+        MemorySearchService(
+            memoryDao = memoryDao,
+            searchDao = memorySearchDao,
+        )
+    }
+
     /** 记忆仓库单例（T5.3 起供对话后台提取/记忆管理页使用） */
     val memoryRepository: MemoryRepository by lazy {
         MemoryRepository(
             dao = memoryDao,
+            searchService = memorySearchService,
             apiConfigStore = apiConfigStore,
             aiChatService = aiChatService,
         )

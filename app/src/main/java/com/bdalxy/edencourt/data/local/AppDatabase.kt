@@ -9,6 +9,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 import com.bdalxy.edencourt.data.local.dao.CharacterCardDao
 import com.bdalxy.edencourt.data.local.dao.ConversationDao
 import com.bdalxy.edencourt.data.local.dao.MemoryDao
+import com.bdalxy.edencourt.data.local.dao.MemorySearchDao
 import com.bdalxy.edencourt.data.local.dao.MessageDao
 import com.bdalxy.edencourt.data.local.dao.RelationshipDao
 import com.bdalxy.edencourt.data.local.dao.InteractionDao
@@ -31,7 +32,7 @@ import com.bdalxy.edencourt.data.local.entity.UserIdentity
  */
 @Database(
     entities = [Conversation::class, Message::class, CharacterCardEntity::class, MemoryItem::class, ConversationRelationship::class, Interaction::class, InteractionParticipant::class, InteractionTurn::class, UserIdentity::class],
-    version = 15,
+    version = 17,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -47,6 +48,9 @@ abstract class AppDatabase : RoomDatabase() {
 
     /** 互动表数据访问（v1.2b 互动系统，T8.10） */
     abstract fun interactionDao(): InteractionDao
+
+    /** 记忆检索（FTS4 虚拟表）数据访问（T9.2） */
+    abstract fun memorySearchDao(): MemorySearchDao
 
     /** 记忆条目表数据访问 */
     abstract fun memoryDao(): MemoryDao
@@ -182,6 +186,63 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /** v15→v16：memory_items 表一次性补齐阶段一多类型管理字段（T9.1），一次到位避免二次迁移。
+         * 新增列：timeScope(生命周期)/expiresAt(到期)/isPinned(置顶)/importance(重要)/locked(锁定)/sourceType(来源)。
+         * 默认值对齐实体 @ColumnInfo(defaultValue)，Room 校验默认值需一致；并建 type+timeScope+characterCardId+visibility 组合索引。 */
+        private val MIGRATION_15_16 = object : Migration(15, 16) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE memory_items ADD COLUMN timeScope TEXT NOT NULL DEFAULT 'LONG_TERM'")
+                db.execSQL("ALTER TABLE memory_items ADD COLUMN expiresAt INTEGER")
+                db.execSQL("ALTER TABLE memory_items ADD COLUMN isPinned INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE memory_items ADD COLUMN importance TEXT NOT NULL DEFAULT 'NORMAL'")
+                db.execSQL("ALTER TABLE memory_items ADD COLUMN locked INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE memory_items ADD COLUMN sourceType TEXT NOT NULL DEFAULT 'CHAT'")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_memory_type_scope` ON `memory_items` (`type`, `timeScope`, `characterCardId`, `visibility`)")
+            }
+        }
+
+        /** v16→v17：新增 FTS4 虚拟表 memory_items_fts（全文检索底座，T9.2）。
+         * 虚拟表不在 main 实体里声明（避免 Room 校验 FTS schema），用触发器与 memory_items 手动同步：
+         *   - AFTER INSERT：新增记忆 → 建索引行
+         *   - AFTER DELETE：物理删除 → 删索引行
+         *   - AFTER UPDATE OF content,keywords：编辑关键词 → 更新索引行
+         * 软删除为 UPDATE isDeleted=1（非 DELETE），索引行保留，检索时以 m.isDeleted=0 过滤，正确隐藏已删记录。
+         * tokenize=unicode61：Android/SQLite 稳定内置；中文子串命中由 MemorySearchService 兜底 LIKE（先按角色/分类缩小候选）。 */
+        private val MIGRATION_16_17 = object : Migration(16, 17) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE VIRTUAL TABLE IF NOT EXISTS `memory_items_fts` USING fts4(
+                        `content` TEXT,
+                        `keywords` TEXT,
+                        tokenize=unicode61
+                    )
+                    """.trimIndent(),
+                )
+                db.execSQL(
+                    """
+                    CREATE TRIGGER IF NOT EXISTS memory_items_ai AFTER INSERT ON memory_items BEGIN
+                        INSERT INTO memory_items_fts(rowid, content, keywords) VALUES (new.id, new.content, new.keywords);
+                    END
+                    """.trimIndent(),
+                )
+                db.execSQL(
+                    """
+                    CREATE TRIGGER IF NOT EXISTS memory_items_ad AFTER DELETE ON memory_items BEGIN
+                        DELETE FROM memory_items_fts WHERE rowid = old.id;
+                    END
+                    """.trimIndent(),
+                )
+                db.execSQL(
+                    """
+                    CREATE TRIGGER IF NOT EXISTS memory_items_au AFTER UPDATE OF content, keywords ON memory_items BEGIN
+                        UPDATE memory_items_fts SET content = new.content, keywords = new.keywords WHERE rowid = new.id;
+                    END
+                    """.trimIndent(),
+                )
+            }
+        }
+
         /** v1→v2：messages 表新增 reasoning 列，默认空串（兼容旧数据） */
         private val MIGRATION_1_2 = object : Migration(1, 2) {
             override fun migrate(db: SupportSQLiteDatabase) {
@@ -272,7 +333,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "edencourt.db",
                 ).addMigrations(
-                    MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15,
+                    MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17,
                 ).build().also { INSTANCE = it }
             }
     }

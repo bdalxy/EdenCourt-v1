@@ -799,6 +799,51 @@ app/src/main/
 
 ---
 
+## 9.11 阶段 9（v1.3 记忆管理页升级·阶段一地基）（2026-08-25 用户拍板「按1继续」）
+
+> 依赖：阶段 7/8（记忆底座）。参考 `docs/plan/PLAN-记忆系统升级.md` 定稿。
+> 目标：**先解决「大数据下管理页搜索慢 + 生成注入检索慢」**，并把多类型管理字段一步到位（避免二次迁移）。
+> 范围：字段/类型/索引 + FTS 底座 + 统一检索服务 + 分类Tab + 简单分页。**关系图谱/时间轴/详情放阶段二、三**（本期不做 UI）。
+
+### T9.1 字段补齐 + 类型扩 7 类 + Room v16 + 组合索引（阶段一地基）
+- `MemoryItem` 增字段：`timeScope`(SHORT_TERM/LONG_TERM) · `expiresAt`(可空) · `isPinned` · `importance`(NORMAL/IMPORTANT) · `locked` · `sourceType`(CHAT/USER_EDIT/SYSTEM)
+- `MemoryType` 扩为 7 类：个人信息/偏好/事件/技能/情景/关系/其他（新增 SKILL/SITUATION/RELATION）
+- `MIGRATION_15_16`：`ALTER TABLE memory_items ADD COLUMN` 全部默认值（一次到位）+ 组合索引 `type+timeScope+characterCardId+visibility`
+- 文件：`entity/MemoryItem.kt` · `AppDatabase.kt`
+- 验收：编译通过 · 真机迁移 v15→v16 无损 · 旧 memory_items 行新字段为默认值
+
+### T9.2 FTS4 虚拟表 `memory_items_fts`（contentEntity 自动同步 + 中文bigram）
+- `@Fts4(contentEntity=MemoryItem::class)`：新增/改/删自动同步，杜绝残留旧索引
+- 中文子串检索预处理：写入前 bigram；2 字短词/模糊词退 LIKE（先按类型/角色缩小候选）
+- 文件：`dao/MemorySearchDao.kt` · 迁移里手工建 FTS 索引
+- 验收：编译 · 管理页/注入检索能命中中文子串（如搜「青蓝」命中「调青蓝釉用钴料」）
+- 进度（2026-08-25）：✅ 已落地。FTS4 虚拟表 + 触发器(AFTER INSERT/UPDATE/DELETE 同步)在 MIGRATION_16_17 建立；`MemorySearchDao` 因虚拟表非 Room 实体改为 `@RawQuery` 动态 SQL（宽容映射回 MemoryItem）。中文子串由 `MemorySearchService.searchPaged` 走 LIKE 兜底（先按角色/分类缩小候选）。编译通过 + 真机迁移（v15→v17）无崩。
+
+### T9.3 MemorySearchService 统一检索服务
+- 主入口：FTS MATCH 检索（按 type/characterCardId/visibility 缩候选），LIKE 兜底短词
+- 注入路径 top-K 截断（默认 20），按 importance/pinned/updatedAt 排序——同时覆盖「管理页搜索」与「生成注入」
+- 改造：`ChatViewModel` 注入（getSharedByCard 等）与 `MemoryRepository` 检索改走该服务
+- 文件：`data/search/MemorySearchService.kt` · 改动注入调用点
+- 验收：注入检索不拖慢生成 · top-K 生效
+- 进度（2026-08-25）：✅ 已落地。新增 `MemorySearchService`（统一入口：`searchPaged`/`countFiltered` 走 LIKE 兜底、`searchFts` 走 FTS 精确、`rankByRelevance` 注入排序 top-K）。`MemoryRepository.searchPaged/countFiltered` 委托该服务，`getInjectableMemories` 注入改走 `rankByRelevance`（置顶>重要>更新时间）。编译通过。
+
+### T9.4 记忆管理页：分类 Tab（7 类+数量）+ 新字段展示 + 搜索走 FTS
+- `MemoryScreen` 顶部「分类 Tab」带数量；列表项信息密度升级（分类/可见性/置顶/重要/锁定/归属/相对时间）
+- `MemoryViewModel` 改用 `MemorySearchService` 做实时搜索
+- 文件：`feature/memory/MemoryScreen.kt` · `MemoryViewModel.kt`
+- 验收：分类筛选准确 · 搜索即输即查 · 新字段可见
+
+### T9.5 列表简单分页（LIMIT/OFFSET 滚动加载，不引入 Paging3 依赖）
+- DAO 分页查询 + ViewModel load-more；首屏限载，滚动按需取
+- 验收：大数据下管理页不卡
+
+### T9.6 阶段一收尾
+- 编译 + 真机验证：分类 Tab/搜索/注入检索正常；Room v15→v16 迁移无损；（可选）5000 条压测
+- 人工审核门槛：记忆管理页分类筛选准确、搜索即输即查、注入走新服务不拖慢生成、真机无崩、迁移无损
+- 进度（2026-08-25）：✅ 数据层真机冒烟通过：`assembleDebug` 编译成功；真机(K60) `-r` 安装保留数据，Room v15→v16→v17 链式迁移无崩溃、启动正常、进程存活。FTS 表/触发器随 MIGRATION_16_17 建成（无 SQL 异常）。【待补：管理页分类 Tab/搜索/注入 的 UI 端到端目检，可由用户后续验收或用 ADBKeyboard 中文检索冒烟】
+
+---
+
 ## 10. 远期决策项（不阻塞 MVP，记录待定）
 
 | 决策项 | 现状 | 何时定 |

@@ -7,6 +7,7 @@ import com.bdalxy.edencourt.data.local.entity.MemoryVisibility
 import com.bdalxy.edencourt.data.remote.AiChatService
 import com.bdalxy.edencourt.data.remote.ChatMessage
 import com.bdalxy.edencourt.data.setting.ApiConfigStore
+import com.bdalxy.edencourt.data.search.MemorySearchService
 import android.util.Log
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.firstOrNull
@@ -24,6 +25,7 @@ import kotlinx.serialization.json.Json
  */
 class MemoryRepository(
     private val dao: MemoryDao,
+    private val searchService: MemorySearchService,
     private val apiConfigStore: ApiConfigStore,
     private val aiChatService: AiChatService,
 ) {
@@ -49,6 +51,9 @@ class MemoryRepository(
             MemoryType.PERSONAL_INFO -> "个人信息"
             MemoryType.PREFERENCE -> "偏好"
             MemoryType.EVENT -> "事件"
+            MemoryType.SKILL -> "技能"
+            MemoryType.SITUATION -> "情景"
+            MemoryType.RELATION -> "关系"
             MemoryType.OTHER -> "其他"
         }
 
@@ -65,6 +70,9 @@ class MemoryRepository(
     /** 观察全部未删除记忆（最新在前，T5.5 管理页数据源） */
     fun observeAll(): Flow<List<MemoryItem>> = dao.observeAll()
 
+    /** 轻量表变化信号（T9.5）：记忆条数变化即发，管理页用它触发分页重查（避免全量加载行） */
+    fun observeActiveCount(): Flow<Int> = dao.observeActiveCount()
+
     /** 检索未删除记忆（T5.4 生成前注入用，按关键词匹配 keywords/content） */
     suspend fun search(keyword: String): List<MemoryItem> = dao.searchByKeyword(keyword)
 
@@ -80,6 +88,29 @@ class MemoryRepository(
         }
         return result.values.sortedWith(compareByDescending<MemoryItem> { it.confidence }.thenByDescending { it.createdAt })
     }
+
+    /**
+     * 管理页分页检索（阶段一统一检索入口，T9.3/T9.5）。
+     * 实际检索逻辑委托 MemorySearchService（统一入口：FTS 精确 + LIKE 兜底），
+     * 本方法按「搜索词 + 角色 + 分类」筛选并翻页，避免全量进内存。
+     * @param mapType 分类（null=全部）；manualOnly=true 表示「手动/未归属」筛选
+     */
+    suspend fun searchPaged(
+        query: String,
+        cardId: Long?,
+        manualOnly: Boolean = false,
+        mapType: MemoryType? = null,
+        page: Int = 0,
+        pageSize: Int = 20,
+    ): List<MemoryItem> = searchService.searchPaged(query, cardId, manualOnly, mapType, page, pageSize)
+
+    /** 管理页筛选计数（T9.3：分类 Tab 数量 / 分页总数），条件与 searchPaged 一致 */
+    suspend fun countFiltered(
+        query: String,
+        cardId: Long?,
+        manualOnly: Boolean = false,
+        mapType: MemoryType? = null,
+    ): Int = searchService.countFiltered(query, cardId, manualOnly, mapType)
 
     /**
      * 按归属角色卡取未删除记忆（T6.13 按角色卡隔离注入）。
@@ -104,7 +135,8 @@ class MemoryRepository(
     suspend fun getInjectableMemories(cardId: Long, conversationId: Long, limit: Int = DEFAULT_MEMORY_INJECT_LIMIT): List<MemoryItem> {
         val shared = dao.getSharedByCard(cardId, limit)
         val privates = dao.getPrivateByConversation(conversationId, limit)
-        return (shared + privates).distinctBy { it.id }
+        // 合并去重后走统一检索服务的 top-K 排序（置顶 > 重要 > 更新时间，T9.3），保证注入的是当前最该被记得的
+        return searchService.rankByRelevance((shared + privates).distinctBy { it.id }, limit)
     }
 
     /**

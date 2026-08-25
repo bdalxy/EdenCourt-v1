@@ -5,6 +5,7 @@ import androidx.room.Insert
 import androidx.room.Query
 import androidx.room.Update
 import com.bdalxy.edencourt.data.local.entity.MemoryItem
+import com.bdalxy.edencourt.data.local.entity.MemoryType
 import kotlinx.coroutines.flow.Flow
 
 /**
@@ -114,4 +115,69 @@ interface MemoryDao {
     /** 记忆数量（统计用 / 空状态判断） */
     @Query("SELECT COUNT(*) FROM memory_items WHERE isDeleted = 0")
     suspend fun countActive(): Int
+
+    /**
+     * 轻量「表变化信号」（T9.5）：观察未删除记忆条数。
+     * 任何行增删（count 变化）都会重发新计数，管理页用它触发分页重查——避免 observeAll 全量加载行打击分页。
+     * 仅「编辑不改条数」不触发；当前管理页缺该场景（仅删除/添加，均改变条数）。
+     */
+    @Query("SELECT COUNT(*) FROM memory_items WHERE isDeleted = 0")
+    fun observeActiveCount(): Flow<Int>
+
+    /**
+     * 管理页综合分页检索（阶段一统一检索入口，T9.3/T9.5）。
+     * 按「搜索词 + 角色归属 + 分类」组合过滤；置顶/重要优先，最新在前；LIMIT 翻页加载，避免全量进内存。
+     * @param query 搜索词（空串=不过滤）
+     * @param cardId 角色卡 id（null=全部；配合 manualOnly）
+     * @param manualOnly true=只看手动/未归属（characterCardId IS NULL）
+     * @param type 分类（null=全部）
+     * @param limit 每页条数
+     * @param offset 偏移
+     */
+    @Query(
+        """
+        SELECT * FROM memory_items
+        WHERE isDeleted = 0
+          AND CASE
+            WHEN :manualOnly = 1 THEN characterCardId IS NULL
+            WHEN :cardId IS NULL THEN 1
+            ELSE characterCardId = :cardId
+          END
+          AND (:type IS NULL OR type = :type)
+          AND (:query = '' OR content LIKE '%' || :query || '%' OR keywords LIKE '%' || :query || '%')
+        ORDER BY isPinned DESC,
+                 CASE WHEN importance = 'IMPORTANT' THEN 1 ELSE 0 END DESC,
+                 updatedAt DESC
+        LIMIT :limit OFFSET :offset
+        """,
+    )
+    suspend fun searchPaged(
+        query: String,
+        cardId: Long?,
+        manualOnly: Boolean,
+        type: MemoryType?,
+        limit: Int,
+        offset: Int,
+    ): List<MemoryItem>
+
+    /** 管理页筛选计数（T9.3：分类 Tab 数量 / 分页总数），过滤条件与 searchPaged 一致 */
+    @Query(
+        """
+        SELECT COUNT(*) FROM memory_items
+        WHERE isDeleted = 0
+          AND CASE
+            WHEN :manualOnly = 1 THEN characterCardId IS NULL
+            WHEN :cardId IS NULL THEN 1
+            ELSE characterCardId = :cardId
+          END
+          AND (:type IS NULL OR type = :type)
+          AND (:query = '' OR content LIKE '%' || :query || '%' OR keywords LIKE '%' || :query || '%')
+        """,
+    )
+    suspend fun countFiltered(
+        query: String,
+        cardId: Long?,
+        manualOnly: Boolean,
+        type: MemoryType?,
+    ): Int
 }

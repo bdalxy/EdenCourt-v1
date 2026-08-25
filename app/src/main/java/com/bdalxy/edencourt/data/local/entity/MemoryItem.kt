@@ -1,10 +1,11 @@
 package com.bdalxy.edencourt.data.local.entity
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
 
-/** 记忆类型（企划书 4.1.4：personal_info/preference/event/other）。 */
+/** 记忆类型（企划书 4.1.4 + 阶段一扩为 7 类，T9.1）。 */
 enum class MemoryType {
     /** 个人信息（如用户名字、职业、所在地） */
     PERSONAL_INFO,
@@ -12,8 +13,40 @@ enum class MemoryType {
     PREFERENCE,
     /** 事件（如「上周提到要去杭州出差」） */
     EVENT,
+    /** 技能（如「会调青蓝釉、Python 爬虫」） */
+    SKILL,
+    /** 情景（如特定场景/当下的氛围、场合记忆） */
+    SITUATION,
+    /** 关系（如「小夏是我的青梅竹马」） */
+    RELATION,
     /** 其他（未归类） */
     OTHER,
+}
+
+/** 记忆生命周期（阶段一新增，T9.1）。 */
+enum class TimeScope {
+    /** 短期记忆：可设到期时间（expiresAt），到期后不再注入 */
+    SHORT_TERM,
+    /** 长期记忆：常驻，无到期 */
+    LONG_TERM,
+}
+
+/** 记忆重要程度（阶段一新增，T9.1；注入排序时优先）。 */
+enum class MemoryImportance {
+    /** 普通 */
+    NORMAL,
+    /** 重要（注入排前、置顶展示） */
+    IMPORTANT,
+}
+
+/** 记忆来源类型（阶段一新增，T9.1）。 */
+enum class MemorySourceType {
+    /** 来自聊天对话提取 */
+    CHAT,
+    /** 用户手动编辑/添加 */
+    USER_EDIT,
+    /** 系统生成 */
+    SYSTEM,
 }
 
 /** 记忆可见性（v1.1 底座，用于角色套话/群聊的前置分层，默认共享）。
@@ -40,12 +73,17 @@ enum class MemoryVisibility {
         Index(value = ["keywords"]),
         Index(value = ["isDeleted"]),
         Index(value = ["characterCardId"]),
+        // 阶段一组合索引（T9.1）：分类+生命周期+角色+可见性，支撑管理页/注入检索缩候选集
+        Index(
+            value = ["type", "timeScope", "characterCardId", "visibility"],
+            name = "index_memory_type_scope",
+        ),
     ],
 )
 data class MemoryItem(
     @PrimaryKey(autoGenerate = true)
     val id: Long = 0L,
-    /** 记忆类型（个人信息/偏好/事件/其他） */
+    /** 记忆类型（个人信息/偏好/事件/技能/情景/关系/其他） */
     val type: MemoryType = MemoryType.OTHER,
     /** 记忆内容（自然语言一句话） */
     val content: String,
@@ -64,6 +102,23 @@ data class MemoryItem(
     val sourceConversationId: Long? = null,
     /** 来源消息 id（可空） */
     val sourceMessageId: Long? = null,
+    /** 生命周期（阶段一新增，T9.1）：长期/短期 */
+    @ColumnInfo(defaultValue = "'LONG_TERM'")
+    val timeScope: TimeScope = TimeScope.LONG_TERM,
+    /** 到期时间（阶段一新增，T9.1；短期记忆可设，到期后不再注入） */
+    val expiresAt: Long? = null,
+    /** 是否置顶（阶段一新增，T9.1；管理页置顶展示） */
+    @ColumnInfo(defaultValue = "0")
+    val isPinned: Boolean = false,
+    /** 重要程度（阶段一新增，T9.1；注入排序优先） */
+    @ColumnInfo(defaultValue = "'NORMAL'")
+    val importance: MemoryImportance = MemoryImportance.NORMAL,
+    /** 是否锁定防误删（阶段一新增，T9.1；锁定后删除需先解锁） */
+    @ColumnInfo(defaultValue = "0")
+    val locked: Boolean = false,
+    /** 来源类型（阶段一新增，T9.1）：聊天/手动/系统 */
+    @ColumnInfo(defaultValue = "'CHAT'")
+    val sourceType: MemorySourceType = MemorySourceType.CHAT,
     /** 创建时间（毫秒时间戳） */
     val createdAt: Long = System.currentTimeMillis(),
     /** 更新时间（毫秒时间戳） */
