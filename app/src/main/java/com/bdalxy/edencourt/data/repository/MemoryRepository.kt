@@ -187,6 +187,14 @@ class MemoryRepository(
     /** 软删除记忆（T5.5 管理页，二次确认后调用；不物理删除，可回溯） */
     suspend fun softDelete(id: Long) = dao.softDeleteById(id)
 
+    /** 单条记忆查询（详情页 T10.1：进入详情按 id 加载全文） */
+    suspend fun getMemoryById(id: Long): MemoryItem? = dao.getById(id)
+
+    /** 更新单条记忆（详情页编辑/置顶/重要/锁定/可见性切换；自动刷新 updatedAt，T10.1） */
+    suspend fun updateMemory(item: MemoryItem) {
+        dao.update(item.copy(updatedAt = System.currentTimeMillis()))
+    }
+
     // ---------- 提取（T5.3） ----------
 
     /**

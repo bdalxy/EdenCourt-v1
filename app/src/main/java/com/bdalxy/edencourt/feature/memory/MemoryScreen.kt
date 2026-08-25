@@ -97,8 +97,15 @@ fun MemoryScreen(onBack: () -> Unit) {
     var pendingDelete by remember { mutableStateOf<MemoryItem?>(null) }
     // 手动添加对话框开关
     var showAddDialog by remember { mutableStateOf(false) }
+    // 当前正在查看详情的记忆 id（null=列表页；T10.4 点条目进详情）
+    var detailId by remember { mutableStateOf<Long?>(null) }
 
-    Scaffold(
+    val detailIdValue = detailId
+    if (detailIdValue != null) {
+        // 详情页全屏覆盖（自身含 TopAppBar 返回）
+        MemoryDetailScreen(memoryId = detailIdValue, onBack = { detailId = null })
+    } else {
+        Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text("记忆") },
@@ -173,6 +180,7 @@ fun MemoryScreen(onBack: () -> Unit) {
                                     it.remark.ifBlank { it.name }
                                 }
                             },
+                            onItemClick = { detailId = memory.id },
                             onLongClick = { pendingDelete = memory },
                         )
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
@@ -227,6 +235,7 @@ fun MemoryScreen(onBack: () -> Unit) {
             onDismiss = { showAddDialog = false },
         )
     }
+        } // 关闭 detailId==null 的 else 分支
 }
 
 /** 分类 Tab（T9.4）：全部 + 7 类，横向滚动，带数量角标 */
@@ -263,12 +272,13 @@ private fun CategoryTabBar(
 private fun MemoryListItem(
     memory: MemoryItem,
     ownerName: String?,
+    onItemClick: () -> Unit,
     onLongClick: () -> Unit,
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .combinedClickable(onClick = { /* 暂无详情，点击无操作 */ }, onLongClick = onLongClick)
+            .combinedClickable(onClick = onItemClick, onLongClick = onLongClick)
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
