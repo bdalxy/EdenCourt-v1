@@ -199,6 +199,17 @@ class MemoryRepository(
     /** 软删除记忆（T5.5 管理页，二次确认后调用；不物理删除，可回溯） */
     suspend fun softDelete(id: Long) = dao.softDeleteById(id)
 
+    /** 批量软删除（T11.3 批量管理） */
+    suspend fun softDeleteByIds(ids: List<Long>) = dao.softDeleteByIds(ids)
+
+    /** 批量设重要/取消重要（T11.3 批量管理） */
+    suspend fun updateImportanceBatch(ids: List<Long>, importance: String) =
+        dao.updateImportanceByIds(ids, importance)
+
+    /** 批量置顶/取消置顶（T11.3 批量管理） */
+    suspend fun updatePinnedBatch(ids: List<Long>, pinned: Boolean) =
+        dao.updatePinnedByIds(ids, pinned)
+
     /** 单条记忆查询（详情页 T10.1：进入详情按 id 加载全文） */
     suspend fun getMemoryById(id: Long): MemoryItem? = dao.getById(id)
 

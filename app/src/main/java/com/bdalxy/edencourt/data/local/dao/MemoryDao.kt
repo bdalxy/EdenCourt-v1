@@ -59,6 +59,26 @@ interface MemoryDao {
     @Query("UPDATE memory_items SET isDeleted = 1, updatedAt = :now WHERE id = :id")
     suspend fun softDeleteById(id: Long, now: Long = System.currentTimeMillis())
 
+    /** 批量软删除（T11.3 批量管理）：id 集合一次性置 isDeleted=1 */
+    @Query("UPDATE memory_items SET isDeleted = 1, updatedAt = :now WHERE id IN (:ids)")
+    suspend fun softDeleteByIds(ids: List<Long>, now: Long = System.currentTimeMillis())
+
+    /** 批量设重要/取消重要（T11.3 批量管理）：importance 传枚举名（NORMAL/IMPORTANT） */
+    @Query("UPDATE memory_items SET importance = :importance, updatedAt = :now WHERE id IN (:ids)")
+    suspend fun updateImportanceByIds(
+        ids: List<Long>,
+        importance: String,
+        now: Long = System.currentTimeMillis(),
+    )
+
+    /** 批量置顶/取消置顶（T11.3 批量管理） */
+    @Query("UPDATE memory_items SET isPinned = :pinned, updatedAt = :now WHERE id IN (:ids)")
+    suspend fun updatePinnedByIds(
+        ids: List<Long>,
+        pinned: Boolean,
+        now: Long = System.currentTimeMillis(),
+    )
+
     /**
      * 按归属角色卡取未删除记忆（T6.13 按角色卡隔离注入）。
      * 只返回该角色卡名下的记忆；旧数据 characterCardId=null 一并排除（无归属，不再注入）。

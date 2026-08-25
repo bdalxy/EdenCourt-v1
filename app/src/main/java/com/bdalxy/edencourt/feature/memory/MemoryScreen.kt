@@ -1,7 +1,9 @@
 package com.bdalxy.edencourt.feature.memory
 
 import android.util.Log
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
@@ -26,10 +28,16 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
@@ -103,8 +111,6 @@ fun MemoryScreen(onBack: () -> Unit) {
     // 分页滚动状态（滚动到底触发加载下一页，T9.5）
     val listState = rememberLazyListState()
 
-    // 待删除确认的记忆（长按触发）
-    var pendingDelete by remember { mutableStateOf<MemoryItem?>(null) }
     // 手动添加对话框开关
     var showAddDialog by remember { mutableStateOf(false) }
     // 当前正在查看详情的记忆 id（null=列表/时间轴；T10.4 点条目进详情）
@@ -113,6 +119,19 @@ fun MemoryScreen(onBack: () -> Unit) {
     var showTimeline by remember { mutableStateOf(false) }
     // 是否显示共现热词页（阶段三 T11.1 顶栏入口切换）
     var showHotwords by remember { mutableStateOf(false) }
+    // 批量管理多选状态（T11.3：长按进入多选，勾选多项后批量删除/设重要/置顶）
+    var selectionMode by remember { mutableStateOf(false) }
+    var selectedIds by remember { mutableStateOf(setOf<Long>()) }
+    // 批量删除二次确认框开关（T11.3）
+    var pendingBatchDelete by remember { mutableStateOf(false) }
+    // 「更多操作」菜单开关（T11.3：设重要/取消重要/置顶/取消置顶）
+    var moreMenuExpanded by remember { mutableStateOf(false) }
+
+    // 多选模式：系统返回键退出多选（T11.3，避免误回上一页）
+    BackHandler(enabled = selectionMode) {
+        selectionMode = false
+        selectedIds = emptySet()
+    }
 
     val detailIdValue = detailId
     if (detailIdValue != null) {
@@ -127,18 +146,99 @@ fun MemoryScreen(onBack: () -> Unit) {
     } else {
         Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text("记忆") },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
-                    }
-                },
-            )
+            if (selectionMode) {
+                // 批量管理操作栏（T11.3）：显示已选数量 + 全选 + 删除 + 更多操作
+                TopAppBar(
+                    title = { Text("已选 ${selectedIds.size} 项") },
+                    navigationIcon = {
+                        IconButton(onClick = {
+                            selectionMode = false
+                            selectedIds = emptySet()
+                        }) {
+                            Icon(Icons.Filled.Close, contentDescription = "退出多选")
+                        }
+                    },
+                    actions = {
+                        // 全选/全不选
+                        IconButton(onClick = {
+                            val all = memories.map { it.id }.toSet()
+                            selectedIds = if (selectedIds.containsAll(all)) emptySet() else all
+                        }) {
+                            Icon(Icons.Filled.Check, contentDescription = "全选/全不选")
+                        }
+                        // 删除选中项（二次确认）
+                        IconButton(
+                            onClick = { pendingBatchDelete = true },
+                            enabled = selectedIds.isNotEmpty(),
+                        ) {
+                            Icon(Icons.Filled.Delete, contentDescription = "删除选中")
+                        }
+                        // 更多操作：设重要/取消重要/置顶/取消置顶
+                        Box {
+                            IconButton(onClick = { moreMenuExpanded = true }, enabled = selectedIds.isNotEmpty()) {
+                                Icon(Icons.Filled.MoreVert, contentDescription = "更多操作")
+                            }
+                            DropdownMenu(
+                                expanded = moreMenuExpanded,
+                                onDismissRequest = { moreMenuExpanded = false },
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text("设为重要") },
+                                    onClick = {
+                                        viewModel.batchSetImportance(selectedIds.toList(), MemoryImportance.IMPORTANT)
+                                        moreMenuExpanded = false
+                                        selectionMode = false
+                                        selectedIds = emptySet()
+                                    },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("取消重要") },
+                                    onClick = {
+                                        viewModel.batchSetImportance(selectedIds.toList(), MemoryImportance.NORMAL)
+                                        moreMenuExpanded = false
+                                        selectionMode = false
+                                        selectedIds = emptySet()
+                                    },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("置顶") },
+                                    onClick = {
+                                        viewModel.batchSetPinned(selectedIds.toList(), true)
+                                        moreMenuExpanded = false
+                                        selectionMode = false
+                                        selectedIds = emptySet()
+                                    },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("取消置顶") },
+                                    onClick = {
+                                        viewModel.batchSetPinned(selectedIds.toList(), false)
+                                        moreMenuExpanded = false
+                                        selectionMode = false
+                                        selectedIds = emptySet()
+                                    },
+                                )
+                            }
+                        }
+                    },
+                )
+            } else {
+                TopAppBar(
+                    title = { Text("记忆") },
+                    navigationIcon = {
+                        IconButton(onClick = onBack) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                        }
+                    },
+                )
+            }
         },
         floatingActionButton = {
-            FloatingActionButton(onClick = { showAddDialog = true }) {
-                Icon(Icons.Filled.Add, contentDescription = "手动添加记忆")
+            // 多选模式下隐藏 FAB，避免误触手动添加（T11.3）
+            if (!selectionMode) {
+                FloatingActionButton(onClick = { showAddDialog = true }) {
+                    Icon(Icons.Filled.Add, contentDescription = "手动添加记忆")
+                }
             }
         },
     ) { innerPadding ->
@@ -231,8 +331,23 @@ fun MemoryScreen(onBack: () -> Unit) {
                             // 归属名：角色备注/角色名，null=手动添加/未归属
                             ownerName = ownerCard?.let { it.remark.ifBlank { it.name } },
                             avatarPath = ownerCard?.avatar,
-                            onItemClick = { detailId = memory.id },
-                            onLongClick = { pendingDelete = memory },
+                            // 多选模式（T11.3）：显示勾选框 + 选中态；点击切换勾选而非进详情
+                            selected = selectionMode && memory.id in selectedIds,
+                            showCheckbox = selectionMode,
+                            onItemClick = {
+                                Log.d("MEM_SEL", "onItemClick id=${memory.id} selectionMode=$selectionMode")
+                                if (selectionMode) {
+                                    selectedIds = if (memory.id in selectedIds) selectedIds - memory.id else selectedIds + memory.id
+                                } else {
+                                    detailId = memory.id
+                                }
+                            },
+                            // 长按进入多选并勾选该项（替代原单条删除确认，T11.3）
+                            onLongClick = {
+                                Log.d("MEM_SEL", "onLongClick id=${memory.id}")
+                                selectionMode = true
+                                selectedIds = setOf(memory.id)
+                            },
                         )
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
                     }
@@ -256,22 +371,24 @@ fun MemoryScreen(onBack: () -> Unit) {
         }
     }
 
-    // 长按删除二次确认对话框
-    pendingDelete?.let { memory ->
+    // 批量删除二次确认对话框（T11.3）
+    if (pendingBatchDelete) {
         AlertDialog(
-            onDismissRequest = { pendingDelete = null },
+            onDismissRequest = { pendingBatchDelete = false },
             title = { Text("删除记忆") },
-            text = { Text("确定删除这条记忆？删除后无法恢复。") },
+            text = { Text("确定删除选中的 ${selectedIds.size} 条记忆？删除后无法恢复。") },
             confirmButton = {
                 TextButton(
                     onClick = {
-                        viewModel.deleteMemory(memory.id)
-                        pendingDelete = null
+                        viewModel.batchDelete(selectedIds.toList())
+                        pendingBatchDelete = false
+                        selectionMode = false
+                        selectedIds = emptySet()
                     },
                 ) { Text("删除") }
             },
             dismissButton = {
-                TextButton(onClick = { pendingDelete = null }) { Text("取消") }
+                TextButton(onClick = { pendingBatchDelete = false }) { Text("取消") }
             },
         )
     }
@@ -355,23 +472,35 @@ private fun CategoryTabBar(
     }
 }
 
-/** 单个记忆列表项：角色头像 + 类型标签 + 内容 + 时间 + 归属角色名（T6.13 + T11.2） */
+/** 单个记忆列表项：多选勾选 + 角色头像 + 类型标签 + 内容 + 时间 + 归属角色名（T6.13 + T11.2 + T11.3） */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun MemoryListItem(
     memory: MemoryItem,
     ownerName: String?,
     avatarPath: String?,
+    selected: Boolean = false,
+    showCheckbox: Boolean = false,
     onItemClick: () -> Unit,
     onLongClick: () -> Unit,
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            // 多选模式下高亮选中行（T11.3）
+            .then(if (selected) Modifier.background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f)) else Modifier)
             .combinedClickable(onClick = onItemClick, onLongClick = onLongClick)
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        // 多选勾选框（T11.3：进入多选模式后显示在最前）
+        if (showCheckbox) {
+            Checkbox(
+                checked = selected,
+                onCheckedChange = { onItemClick() },
+            )
+            Spacer(modifier = Modifier.width(4.dp))
+        }
         // 归属角色头像（T11.2：有归属显示头像，一眼看出记忆是谁的；未归属无头像）
         if (ownerName != null) {
             CharacterAvatar(

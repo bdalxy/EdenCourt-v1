@@ -10,6 +10,7 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import com.bdalxy.edencourt.EdenCourtApp
 import com.bdalxy.edencourt.data.local.dao.CharacterCardDao
 import com.bdalxy.edencourt.data.local.entity.CharacterCardEntity
+import com.bdalxy.edencourt.data.local.entity.MemoryImportance
 import com.bdalxy.edencourt.data.local.entity.MemoryItem
 import com.bdalxy.edencourt.data.local.entity.MemoryType
 import com.bdalxy.edencourt.data.repository.MemoryRepository
@@ -196,6 +197,33 @@ class MemoryViewModel(
     fun deleteMemory(id: Long) {
         viewModelScope.launch {
             repository.softDelete(id)
+        }
+    }
+
+    /** 批量软删除（T11.3 批量管理；调用方需已二次确认） */
+    fun batchDelete(ids: List<Long>) {
+        if (ids.isEmpty()) return
+        viewModelScope.launch {
+            repository.softDeleteByIds(ids)
+            reloadFirstPage()
+        }
+    }
+
+    /** 批量设重要/取消重要（T11.3 批量管理；改排序维度，操作后强制刷新列表） */
+    fun batchSetImportance(ids: List<Long>, importance: MemoryImportance) {
+        if (ids.isEmpty()) return
+        viewModelScope.launch {
+            repository.updateImportanceBatch(ids, importance.name)
+            reloadFirstPage()
+        }
+    }
+
+    /** 批量置顶/取消置顶（T11.3 批量管理；改排序维度，操作后强制刷新列表） */
+    fun batchSetPinned(ids: List<Long>, pinned: Boolean) {
+        if (ids.isEmpty()) return
+        viewModelScope.launch {
+            repository.updatePinnedBatch(ids, pinned)
+            reloadFirstPage()
         }
     }
 
