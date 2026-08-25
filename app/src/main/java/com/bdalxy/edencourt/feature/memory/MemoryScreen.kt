@@ -1,5 +1,6 @@
 package com.bdalxy.edencourt.feature.memory
 
+import android.util.Log
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -61,6 +62,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.bdalxy.edencourt.EdenCourtApp
+import com.bdalxy.edencourt.core.ui.CharacterAvatar
 import com.bdalxy.edencourt.data.local.entity.CharacterCardEntity
 import com.bdalxy.edencourt.data.local.entity.MemoryImportance
 import com.bdalxy.edencourt.data.local.entity.MemoryItem
@@ -92,9 +94,12 @@ fun MemoryScreen(onBack: () -> Unit) {
     val selectedCardId by viewModel.selectedCardId.collectAsStateWithLifecycle()
     val selectedType by viewModel.selectedType.collectAsStateWithLifecycle()
     val tabCounts by viewModel.tabCounts.collectAsStateWithLifecycle()
+    // 角色 Tab 数量（T11.2：全部/手动未归属/各角色，带角标）
+    val cardTabCounts by viewModel.cardTabCounts.collectAsStateWithLifecycle()
     val totalCount by viewModel.totalCount.collectAsStateWithLifecycle()
     val overview by viewModel.overview.collectAsStateWithLifecycle()
-    val hasMore = viewModel.hasMore
+    // 是否还有下一页（T9.5：改 StateFlow 可观察，修复普通 getter 快照导致滚动加载不触发）
+    val hasMore by viewModel.hasMoreState.collectAsStateWithLifecycle()
     // 分页滚动状态（滚动到底触发加载下一页，T9.5）
     val listState = rememberLazyListState()
 
@@ -171,10 +176,11 @@ fun MemoryScreen(onBack: () -> Unit) {
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
             )
 
-            // 角色筛选（T6.13：按记忆归属的角色过滤）
-            CharacterFilterBar(
+            // 角色 Tab（T11.2：全部/各角色/手动未归属，带记忆数量角标，点击即筛）
+            CardTabBar(
                 characters = characters,
                 selectedCardId = selectedCardId,
+                counts = cardTabCounts,
                 onSelect = { viewModel.setSelectedCard(it) },
             )
 
@@ -198,27 +204,33 @@ fun MemoryScreen(onBack: () -> Unit) {
                 }
             } else {
                 // 滚动监听：接近末尾且还有下一页 → 追加加载（T9.5）
+                // 用 lastVisibleItemIndex 判断「触底」，避免 firstVisibleIndex 差值恒等于屏显数导致永不到阈值
                 LaunchedEffect(listState, memories, hasMore) {
                     snapshotFlow {
-                        val total = listState.layoutInfo.totalItemsCount
-                        total to listState.firstVisibleItemIndex
+                        val info = listState.layoutInfo
+                        val total = info.totalItemsCount
+                        val last = info.visibleItemsInfo.lastOrNull()?.index ?: 0
+                        total to last
                     }
                         .distinctUntilChanged()
-                        .collect { (total, first) ->
-                            if (total > 0 && total - first <= 5 && hasMore) viewModel.loadMore()
+                        .collect { (total, last) ->
+                            val cond = total > 0 && last >= total - 5 && hasMore
+                            Log.d("MEM_PAGING", "scroll total=$total last=$last hasMore=$hasMore trigger=$cond")
+                            if (cond) viewModel.loadMore()
                         }
                 }
 
                 LazyColumn(modifier = Modifier.fillMaxSize(), state = listState) {
                     items(items = memories, key = { it.id }) { memory ->
+                        // 归属角色卡（T11.2：头像 + 归属名；未归属=手动添加/无角色）
+                        val ownerCard = memory.characterCardId?.let { id ->
+                            characters.firstOrNull { it.id == id }
+                        }
                         MemoryListItem(
                             memory = memory,
                             // 归属名：角色备注/角色名，null=手动添加/未归属
-                            ownerName = memory.characterCardId?.let { id ->
-                                characters.firstOrNull { it.id == id }?.let {
-                                    it.remark.ifBlank { it.name }
-                                }
-                            },
+                            ownerName = ownerCard?.let { it.remark.ifBlank { it.name } },
+                            avatarPath = ownerCard?.avatar,
                             onItemClick = { detailId = memory.id },
                             onLongClick = { pendingDelete = memory },
                         )
@@ -343,12 +355,13 @@ private fun CategoryTabBar(
     }
 }
 
-/** 单个记忆列表项：类型标签 + 内容 + 时间 + 归属角色名（T6.13） */
+/** 单个记忆列表项：角色头像 + 类型标签 + 内容 + 时间 + 归属角色名（T6.13 + T11.2） */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun MemoryListItem(
     memory: MemoryItem,
     ownerName: String?,
+    avatarPath: String?,
     onItemClick: () -> Unit,
     onLongClick: () -> Unit,
 ) {
@@ -359,6 +372,16 @@ private fun MemoryListItem(
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        // 归属角色头像（T11.2：有归属显示头像，一眼看出记忆是谁的；未归属无头像）
+        if (ownerName != null) {
+            CharacterAvatar(
+                avatarPath = avatarPath,
+                name = ownerName,
+                modifier = Modifier.size(28.dp),
+                textSize = MaterialTheme.typography.labelMedium.fontSize,
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+        }
         // 类型标签
         Surface(
             shape = MaterialTheme.shapes.small,
@@ -421,72 +444,42 @@ private fun MemoryListItem(
 }
 
 /**
- * 记忆归属角色筛选条（T6.13）：下拉选择「全部/某角色/手动未归属」。
- * 让用户明确每条记忆是「谁的」。
+ * 记忆归属角色 Tab（T11.2）：横向一排「全部 / 各角色 / 手动未归属」chip，带记忆数量角标，点击即筛。
+ * 替代原下拉筛选条（T6.13），让「记忆是谁的」一屏可见。
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun CharacterFilterBar(
+private fun CardTabBar(
     characters: List<CharacterCardEntity>,
     selectedCardId: Long?,
+    counts: MemoryViewModel.CardTabCounts,
     onSelect: (Long?) -> Unit,
 ) {
-    var expanded by remember { mutableStateOf(false) }
-    // 当前筛选项标题
-    val currentTitle = if (selectedCardId == null) {
-        "全部记忆"
-    } else if (selectedCardId == MANUAL_CARD_ID) {
-        "手动/未归属"
-    } else {
-        characters.firstOrNull { it.id == selectedCardId }?.let { it.remark.ifBlank { it.name } }
-            ?: "全部记忆"
-    }
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
+    LazyRow(
+        contentPadding = PaddingValues(horizontal = 16.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        ExposedDropdownMenuBox(
-            expanded = expanded,
-            onExpandedChange = { expanded = it },
-        ) {
-            Text(
-                text = "筛选：$currentTitle",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier
-                    .menuAnchor()
-                    .clickable { expanded = true }
-                    .padding(vertical = 8.dp),
+        item {
+            FilterChip(
+                selected = selectedCardId == null,
+                onClick = { onSelect(null) },
+                label = { Text("全部 ${counts.total}") },
             )
-            ExposedDropdownMenu(
-                expanded = expanded,
-                onDismissRequest = { expanded = false },
-            ) {
-                DropdownMenuItem(
-                    text = { Text("全部记忆") },
-                    onClick = { onSelect(null); expanded = false },
-                )
-                dropdownDivider()
-                characters.forEach { card ->
-                    DropdownMenuItem(
-                        text = { Text(card.remark.ifBlank { card.name }) },
-                        onClick = { onSelect(card.id); expanded = false },
-                    )
-                }
-                dropdownDivider()
-                DropdownMenuItem(
-                    text = { Text("手动/未归属") },
-                    onClick = { onSelect(MANUAL_CARD_ID); expanded = false },
-                )
-            }
+        }
+        items(characters, key = { it.id }) { card ->
+            FilterChip(
+                selected = selectedCardId == card.id,
+                onClick = { onSelect(card.id) },
+                label = { Text("${card.remark.ifBlank { card.name }} ${counts.byCard[card.id] ?: 0}") },
+            )
+        }
+        item {
+            FilterChip(
+                selected = selectedCardId == MANUAL_CARD_ID,
+                onClick = { onSelect(MANUAL_CARD_ID) },
+                label = { Text("手动/未归属 ${counts.manual}") },
+            )
         }
     }
-}
-
-/** 记忆筛选条内的分隔线 */
-@Composable
-private fun dropdownDivider() {
-    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
 }
 
 /** 记忆类型中文标签（企划书 4.1.4 + 阶段一扩 7 类，T9.1） */

@@ -1,6 +1,7 @@
 package com.bdalxy.edencourt.feature.memory
 
 import android.app.Application
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -76,14 +77,22 @@ class MemoryViewModel(
     private val _overview = MutableStateFlow(OverviewCounts(0, 0, 0, 0))
     val overview: StateFlow<OverviewCounts> = _overview.asStateFlow()
 
+    /** 角色 Tab 数量（T11.2：各角色记忆数 + 手动未归属；随「搜索词+分类筛选」变化，不受当前角色筛选影响） */
+    private val _cardTabCounts = MutableStateFlow(CardTabCounts())
+    val cardTabCounts: StateFlow<CardTabCounts> = _cardTabCounts.asStateFlow()
+
     /** 每页条数（T9.5 简单分页） */
     private val pageSize = 20
 
     /** 已累计加载条数（分页游标，用于 hasMore 与下一页偏移） */
     private var loadedTotal = 0
 
-    /** 是否还有下一页（滚动触发 loadMore 用） */
-    val hasMore: Boolean get() = loadedTotal < _totalCount.value
+    /** 是否还有下一页（T9.5 滚动加载；StateFlow 供 UI 可观察，避免普通 getter 快照不触发重组） */
+    private val _hasMore = MutableStateFlow(false)
+    val hasMoreState: StateFlow<Boolean> = _hasMore.asStateFlow()
+
+    /** 是否还有下一页（内部判断用，读 StateFlow 最新值） */
+    val hasMore: Boolean get() = _hasMore.value
 
     init {
         // 统一驱动：表变化信号（新增/删除改变条数）+ 搜索词 + 角色 + 分类，任一变化 → 重置到第一页重查
@@ -120,6 +129,13 @@ class MemoryViewModel(
         val privateCount: Int = 0,
     )
 
+    /** 角色 Tab 计数快照（T11.2：total=当前筛选下总数；manual=手动/未归属数；byCard=各角色 id->数量） */
+    data class CardTabCounts(
+        val total: Int = 0,
+        val manual: Int = 0,
+        val byCard: Map<Long, Int> = emptyMap(),
+    )
+
     /** 角色卡 id -> 显示名（备注优先，未备注用角色名；T6.14） */
     fun displayNameFor(cardId: Long?): String? {
         if (cardId == null) return null
@@ -144,7 +160,10 @@ class MemoryViewModel(
 
     /** 滚动到底追加下一页（T9.5） */
     fun loadMore() {
-        if (!hasMore) return
+        if (!hasMore) {
+            Log.d("MEM_PAGING", "loadMore SKIP hasMore=false loadedTotal=$loadedTotal totalCount=${_totalCount.value}")
+            return
+        }
         viewModelScope.launch {
             val page = loadedTotal / pageSize
             val (manual, card) = resolveCardFilter()
@@ -159,6 +178,8 @@ class MemoryViewModel(
             // 追加并去重（防止与当前页因数据变化重叠）
             _items.value = (_items.value + more).distinctBy { it.id }
             loadedTotal += more.size
+            _hasMore.value = loadedTotal < _totalCount.value
+            Log.d("MEM_PAGING", "loadMore page=$page fetch=${more.size} items=${_items.value.size} loadedTotal=$loadedTotal totalCount=${_totalCount.value} hasMore=${hasMore}")
         }
     }
 
@@ -192,7 +213,10 @@ class MemoryViewModel(
         _items.value = first
         loadedTotal = first.size
         _totalCount.value = repository.countFiltered(_searchQuery.value, card, manual, _selectedType.value)
+        _hasMore.value = loadedTotal < _totalCount.value
+        Log.d("MEM_PAGING", "reloadFirstPage query='${_searchQuery.value}' fetch=${first.size} loadedTotal=$loadedTotal totalCount=${_totalCount.value}")
         loadTabCounts()
+        loadCardTabCounts()
     }
 
     /** 计算各分类选项卡数量（T9.4：Tab 角标） */
@@ -205,6 +229,23 @@ class MemoryViewModel(
             map[t] = repository.countFiltered(query, card, manual, t)
         }
         _tabCounts.value = map
+    }
+
+    /**
+     * 计算角色 Tab 数量（T11.2：全部/手动未归属/各角色）。
+     * 维度跟随「搜索词+分类筛选」变化，**不受当前角色筛选影响**（否则选中某角色后其余角色数量归零、Tab 失去意义）。
+     * 角色卡数量很少（个位数），逐卡 countFiltered 开销可接受。
+     */
+    private suspend fun loadCardTabCounts() {
+        val query = _searchQuery.value
+        val type = _selectedType.value
+        val total = repository.countFiltered(query, null, false, type)
+        val manual = repository.countFiltered(query, null, true, type)
+        val byCard = mutableMapOf<Long, Int>()
+        characters.value.forEach { card ->
+            byCard[card.id] = repository.countFiltered(query, card.id, false, type)
+        }
+        _cardTabCounts.value = CardTabCounts(total = total, manual = manual, byCard = byCard)
     }
 
     /** 解析角色筛选：MANUAL_CARD_ID→manualOnly=true；否则按卡 id */
