@@ -67,6 +67,7 @@ fun InteractionCenterScreen(
         factory = InteractionCenterViewModel.Factory(app),
     )
     val listItems by viewModel.listItems.collectAsStateWithLifecycle()
+    val relationships by viewModel.relationships.collectAsStateWithLifecycle()
     val globalEnabled by viewModel.globalEnabled.collectAsStateWithLifecycle()
     val selectable by viewModel.selectableConversations.collectAsStateWithLifecycle()
     val convNames by viewModel.convNames.collectAsStateWithLifecycle()
@@ -130,6 +131,39 @@ fun InteractionCenterScreen(
             }
         } else {
             LazyColumn(modifier = Modifier.fillMaxSize().padding(padding)) {
+                // T11.6 关系一览：每对会话的好感度/档位/次数（置于互动列表顶部，随互动实时刷新）
+                if (relationships.isNotEmpty()) {
+                    item {
+                        Text(
+                            text = "关系一览（好感度）",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                        )
+                    }
+                    items(relationships.size) { i ->
+                        val r = relationships[i]
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = r.title,
+                                style = MaterialTheme.typography.bodyMedium,
+                                modifier = Modifier.weight(1f),
+                            )
+                            Text(
+                                text = "${r.tierLabel} · ${r.affinityScore} 分 · ${r.interactionCount} 次",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                    item { HorizontalDivider(modifier = Modifier.padding(top = 6.dp, bottom = 2.dp)) }
+                }
                 items(listItems, key = { it.interaction.id }) { item ->
                     InteractionRow(
                         title = item.title,

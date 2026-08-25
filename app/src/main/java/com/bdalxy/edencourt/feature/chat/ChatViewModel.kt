@@ -10,8 +10,10 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import com.bdalxy.edencourt.EdenCourtApp
 import com.bdalxy.edencourt.data.local.dao.CharacterCardDao
 import com.bdalxy.edencourt.data.local.dao.InteractionDao
+import com.bdalxy.edencourt.data.local.dao.RelationshipDao
 import com.bdalxy.edencourt.data.local.dao.UserIdentityDao
 import com.bdalxy.edencourt.data.local.entity.CharacterCardEntity
+import com.bdalxy.edencourt.data.local.entity.ConversationRelationship
 import com.bdalxy.edencourt.data.local.entity.InteractionStatus
 import com.bdalxy.edencourt.data.local.entity.MemoryItem
 import com.bdalxy.edencourt.data.local.entity.Message
@@ -69,6 +71,14 @@ data class InteractionRecordItem(
     val summary: String,
 )
 
+/** 本会话角色参与的一条关系（T11.6 好感度细分：互动面板「我的关系（好感度）」条目） */
+data class RelationshipItem(
+    val peerName: String,
+    val affinityScore: Int,
+    val tierLabel: String,
+    val interactionCount: Int,
+)
+
 /**
  * 聊天页 ViewModel（T2.7 + T3.7 + T4.6 + T5.10 + T6.1）。
  * - 按 conversationId 观察该会话消息流与标题
@@ -87,6 +97,7 @@ class ChatViewModel(
     private val memoryRepository: MemoryRepository,
     private val crossSessionConsultService: CrossSessionConsultService,
     private val interactionDao: InteractionDao,
+    private val relationshipDao: RelationshipDao,
     private val userIdentityDao: UserIdentityDao,
 ) : ViewModel() {
 
@@ -195,6 +206,30 @@ class ChatViewModel(
             repository.updateConversation(conv.copy(interactionEnabled = enabled))
         }
     }
+
+    /** 本会话角色参与的全部关系（T11.6 好感度细分：互动面板「我的关系（好感度）」区，随互动实时刷新） */
+    val myRelationships: StateFlow<List<RelationshipItem>> =
+        relationshipDao.observeForConversation(conversationId)
+            .flatMapLatest { rels ->
+                flow {
+                    val items = rels.map { r ->
+                        // 对方 = 关系中除本会话外的会话；好感度档位按数值推导
+                        val peerConvId = if (r.convAId == conversationId) r.convBId else r.convAId
+                        RelationshipItem(
+                            peerName = resolvePeerName(peerConvId, r.convAId, r.convBId),
+                            affinityScore = r.affinityScore,
+                            tierLabel = ConversationRelationship.affinityTierLabel(r.affinityScore),
+                            interactionCount = r.interactionCount,
+                        )
+                    }
+                    emit(items)
+                }
+            }
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(5_000),
+                initialValue = emptyList(),
+            )
 
     /** 解析对方会话显示名（用户定稿：会话备注优先，其次角色卡备注/名，兜底标题） */
     private suspend fun resolvePeerName(peerConvId: Long, initConvId: Long, targetConvId: Long): String {
@@ -718,6 +753,7 @@ class ChatViewModel(
                         memoryRepository = app.memoryRepository,
                         crossSessionConsultService = app.crossSessionConsultService,
                         interactionDao = app.interactionDao,
+                        relationshipDao = app.relationshipDao,
                         userIdentityDao = app.userIdentityDao,
                     )
                 }

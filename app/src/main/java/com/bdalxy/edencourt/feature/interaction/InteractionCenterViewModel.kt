@@ -8,7 +8,9 @@ import com.bdalxy.edencourt.data.interaction.InteractionExecutor
 import com.bdalxy.edencourt.data.local.dao.CharacterCardDao
 import com.bdalxy.edencourt.data.local.dao.ConversationDao
 import com.bdalxy.edencourt.data.local.dao.InteractionDao
+import com.bdalxy.edencourt.data.local.dao.RelationshipDao
 import com.bdalxy.edencourt.data.local.entity.Conversation
+import com.bdalxy.edencourt.data.local.entity.ConversationRelationship
 import com.bdalxy.edencourt.data.local.entity.Interaction
 import com.bdalxy.edencourt.data.local.entity.InteractionParticipant
 import com.bdalxy.edencourt.data.local.entity.InteractionTurn
@@ -41,6 +43,14 @@ data class InteractionDetail(
     val turns: List<InteractionTurn>,
 )
 
+/** 一对会话的关系一览（互动中心顶部「关系一览」，T11.6：好感度/档位/次数） */
+data class RelationshipOverview(
+    val title: String,          // "A × B"
+    val affinityScore: Int,     // 好感度数值
+    val tierLabel: String,      // 中文档位（陌生/相识/友好/亲密）
+    val interactionCount: Int,  // 互动次数
+)
+
 /**
  * 互动中心 ViewModel（v1.2b，T8.11/T8.12）。
  * - 全部互动列表（双方名 + 视角摘要 + 未读红点）
@@ -54,6 +64,7 @@ class InteractionCenterViewModel(
     private val characterCardDao: CharacterCardDao,
     private val interactionConfigStore: InteractionConfigStore,
     private val interactionExecutor: InteractionExecutor,
+    private val relationshipDao: RelationshipDao,
 ) : ViewModel() {
 
     /** 全局总开关 */
@@ -104,6 +115,24 @@ class InteractionCenterViewModel(
             }
         }
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
+
+    /** 全部关系一览（T11.6：好感度数值/档位/互动次数，随互动实时刷新，供互动中心顶部展示） */
+    val relationships: StateFlow<List<RelationshipOverview>> = relationshipDao.observeAll()
+        .combine(convNames) { rels, names ->
+            rels.map { r ->
+                RelationshipOverview(
+                    title = buildString {
+                        append(names[r.convAId] ?: "会话")
+                        append(" × ")
+                        append(names[r.convBId] ?: "会话")
+                    },
+                    affinityScore = r.affinityScore,
+                    tierLabel = ConversationRelationship.affinityTierLabel(r.affinityScore),
+                    interactionCount = r.interactionCount,
+                )
+            }
+        }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     /** 组装列表条目（双方名 + 视角摘要 + 未读） */
     val listItems: StateFlow<List<InteractionListItem>> = combine(interactions, participants, convNames) { its, parts, names ->
@@ -212,6 +241,7 @@ class InteractionCenterViewModel(
                 characterCardDao = app.characterCardDao,
                 interactionConfigStore = app.interactionConfigStore,
                 interactionExecutor = app.interactionExecutor,
+                relationshipDao = app.relationshipDao,
             ) as T
         }
     }

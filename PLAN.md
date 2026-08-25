@@ -951,7 +951,17 @@ app/src/main/
   - 进度（2026-08-26）：✅ 已实现并真机(K60)自测通过。验证过程：入口 chip→图谱页渲染 13 节点正常；点「滚动加载」→命中列表 4919 条+归属名正确；**压测数据每条仅 1 关键词导致无边** → 注入 30 条「樱花,春(,赏花)」共现记忆后边像素 234→1608，点「樱花」节点→共现词 chips「春 ×30」「赏花 ×10」+命中列表 30 条正确、点「春 ×830」chip 切换联动；注入 800 条「樱花,春」使边最粗（5dp）；点命中记忆进详情、返回逐级回退（详情→图谱→记忆列表）全通过；**期间修复注入事故**：sourceType 注入成不存在的 `MANUAL` 枚举导致 Room 读库崩溃 `Can't convert value to enum` → 修正为 `USER_EDIT` 后正常；**注：真机库注入 830 条测试记忆（内容含「共现图谱」前缀），如需恢复干净库需人工确认后删除**。
 
 ### 方向 B：互动 + 好感度（角色自交往）
-- **T11.6 好感度数值体系**：互动行为（对话/互动次数/氛围）改变好感度；好感度分档驱动互动氛围与对话内容（取代 T8.9b 仅靠次数的近似）。
+- **T11.6 好感度数值体系**（2026-08-26 立项 & 完成）：互动行为（对话/互动次数/氛围）改变好感度；好感度分档驱动互动氛围与对话内容（取代 T8.9b 仅靠次数的近似）。
+  - 目标：把 T8.8 预留的 `affinity_score` 从"占位 0"升级为生效的数值体系——每场互动按投入度累计好感度；好感度分档（陌生/相识/友好/亲密）决定关系标签，进而驱动互动氛围与对话内容；互动中心可视化展示
+  - 操作：
+    ① `ConversationRelationship` 伴生对象集中定义分档阈值（20/40/70）与规则：单场加成 `affinityGain = 10 + 2×min(回合,5)`（聊得越投入加越多）、`relationStatusForAffinity(score)`（取代按次数推导）、`affinityTierLabel(score)` 中文档位名
+    ② `RelationshipDao`：`touchInteraction` 增加 `affinityScore = :affinity` 更新列；新增 `observeAll()` 供关系一览实时刷新
+    ③ `InteractionExecutor`：互动前按「当前好感度」定氛围（RIFT 人工负向态保留）；`relationTone` 增强——注入「好感度约 X · 已到「档位」」让对话内容随数值更细腻；互动成功后 `affinityScore += gain` 并按新值递进标签
+    ④ `InteractionCenterViewModel` + `InteractionCenterScreen`：互动列表顶部新增「关系一览（好感度）」区——每对会话显示「档位 · X 分 · N 次」，随互动实时刷新
+  - 文件：`data/local/entity/ConversationRelationship.kt` · `data/local/dao/RelationshipDao.kt` · `data/interaction/InteractionExecutor.kt` · `feature/interaction/InteractionCenterViewModel.kt` · `feature/interaction/InteractionCenterScreen.kt`
+  - 验收：[x] 单场互动好感度按公式累计 · [x] 分档随数值递进（20=相识/40=友好/70=亲密） · [x] 好感度跨重启持久（WAL 回放） · [x] 互动中心「关系一览」实时显示档位/分/次数 · [x] 编译+真机通过
+  - 进度（2026-08-26）：✅ 已实现并真机(K60)自测通过。验证过程：无存量关系 → 注入第二个可互动会话「光羽」(card 3, 与学姐异卡)；互动中心发起「学姐→光羽」两场 → 关系一览 20 分(相识)→40 分(友好)、2 次实时刷新；**注意**：App 运行中写入在 WAL（主库文件不即时增长属正常），force-stop 后 pull 主库仍为空是 WAL 未合并——重启 App 后 UI 数据完整（WAL 回放正常）即持久化达标；真机库新增「光羽」会话与 2 场真实互动记录（非测试垃圾数据，保留）。
+  - 追加（2026-08-26 会话记忆面板升级 + 好感度细分到会话角色）：① `ChatScreen.SessionMemorySheet` 重构——顶部搜索框（本地过滤共享/私有两区）+ 卡片式分区「共享记忆/本会话私密记忆」带计数角标 + 每条类型 chip·内容·时间 + 底部「前往记忆管理页」入口；② `ChatViewModel` 新增 `relationshipDao` 依赖与 `myRelationships` 流（按本会话聚合其参与的关系，解析对方名）；③ `ChatScreen.InteractionSheet` 新增「我的关系（好感度）· 角色名」区——逐条显示「与 X · 分值 · 档位色标 · 已互动 N 次」，好感度细分到会话角色；④ `AppNavHost` 接通 `onOpenMemoryManagement` → 记忆管理页。
 - **T11.7 互动自动驱动**：已授权互动的角色按概率/时间自发发起互动（参考 T8.6 定时窗口），取代纯手动触发。
 
 ### 方向 D：互动服务（记忆可见性升级，用户强调：是互动不是套话）

@@ -98,11 +98,17 @@ class InteractionExecutor(
             val bPlain = resolvePlainName(b)
             val now = System.currentTimeMillis()
 
-            // 同源判定 + 已互动次数：同卡告知双方"来自同一张角色卡"；氛围由关系标签（按次数递进）驱动
+            // 同源判定 + 当前好感度：同卡告知双方"来自同一张角色卡"；氛围由好感度分档驱动（T11.6 取代按次数近似）
             val isSameCard = a.characterCardId != null && a.characterCardId == b.characterCardId
             val sameCardName = if (isSameCard) aPlain else ""
-            val interactionCount = relationshipDao.getBetween(a.id, b.id)?.interactionCount ?: 0
-            val relationStatus = relationStatusForCount(interactionCount)
+            val existingRel = relationshipDao.getBetween(a.id, b.id)
+            val affinityScore = existingRel?.affinityScore ?: 0
+            // RIFT 为人工负向态，保留不覆盖；其余按好感度分档推导当前关系氛围
+            val relationStatus = if (existingRel?.relationStatus == RelationStatus.RIFT.name) {
+                RelationStatus.RIFT.name
+            } else {
+                ConversationRelationship.relationStatusForAffinity(affinityScore)
+            }
 
             // 2. 建主记录 + 两条参与者（未读）
             val interactionId = interactionDao.insertInteraction(
@@ -127,7 +133,7 @@ class InteractionExecutor(
             var ended = false
             for (i in 0 until maxTurns) {
                 if (ended) break
-                val line = requestLine(config, a, b, aIdentity, bIdentity, speaker, turns, topicSeed, isOpening = i == 0 && speaker.id == a.id, isSameCard = isSameCard, relationStatus = relationStatus, sameCardName = sameCardName)
+                val line = requestLine(config, a, b, aIdentity, bIdentity, speaker, turns, topicSeed, isOpening = i == 0 && speaker.id == a.id, isSameCard = isSameCard, relationStatus = relationStatus, affinityScore = affinityScore, sameCardName = sameCardName)
                 if (line.isBlank()) { ended = true; break }
                 if (i == 0 && speaker.id == a.id) topicSeed = line // 第一句 A 的开场即话题锚点
                 turns.add(speaker.id.let { if (it == a.id) aIdentity else bIdentity } to line)
@@ -147,8 +153,8 @@ class InteractionExecutor(
                 return InteractionOutcome(false, message = "聊不起来，双方没接上")
             }
 
-            // 5. 关系：无则建（初始陌生），有则累计互动次数与最近时间
-            upsertRelationshipProgress(a.id, b.id, now)
+            // 5. 关系：无则建（按首场好感度定档），有则累计好感度/互动次数/最近时间并递进关系标签
+            upsertRelationshipProgress(a.id, b.id, now, turns.size)
 
             // 6. 参与者摘要（按会话视角）写入：摘要名用自然角色名（不带短码），进用户会话不显机械
             val aSummary = buildDigest(aPlain, bPlain, aIdentity, bIdentity, topicSeed, turns, fromA = true)
@@ -189,6 +195,7 @@ class InteractionExecutor(
         isOpening: Boolean,
         isSameCard: Boolean,
         relationStatus: String,
+        affinityScore: Int,
         sameCardName: String,
     ): String {
         val speakerName = if (speaker.id == a.id) aName else bName
@@ -209,7 +216,7 @@ class InteractionExecutor(
                 append("你的身份是「").append(speakerName).append("」，对方是「").append(otherName)
                 append("」。你们是两个独立的个体，你就是你、对方是对方。\n")
             }
-            append(relationTone(relationStatus, isSameCard))
+            append(relationTone(relationStatus, isSameCard, affinityScore))
             append("规则：1) 只输出你这一句的台词，不要替对方说话，不要加括号说明或其他解释；\n")
             append("2) 只基于你自己的记忆和已发生的对话回应，不要凭空编造新信息；\n")
             append("3) 对方不想说的事、以及他人绝不可知的秘密，绝不要吐露，也不要去逼问；\n")
@@ -295,8 +302,13 @@ class InteractionExecutor(
         return entity.remark.ifBlank { entity.name }
     }
 
-    /** 更新关系表：无则建（按首次互动次数定初始标签），有则累计互动次数/最近时间并递进标签 */
-    private suspend fun upsertRelationshipProgress(aId: Long, bId: Long, now: Long) {
+    /**
+     * 更新关系表（T11.6 好感度数值体系）：
+     * - 无关系 → 建：好感度=本场加成，关系标签按好感度定档，次数=1
+     * - 有关系 → 累计好感度 += 本场加成，次数+1，标签按新好感度递进，刷新最近互动时间
+     */
+    private suspend fun upsertRelationshipProgress(aId: Long, bId: Long, now: Long, turnCount: Int) {
+        val gain = ConversationRelationship.affinityGain(turnCount)
         val smallId = minOf(aId, bId)
         val bigId = maxOf(aId, bId)
         val existing = relationshipDao.getBetween(aId, bId)
@@ -304,34 +316,39 @@ class InteractionExecutor(
             relationshipDao.upsert(
                 ConversationRelationship(
                     convAId = smallId, convBId = bigId,
-                    relationStatus = relationStatusForCount(1),
+                    relationStatus = ConversationRelationship.relationStatusForAffinity(gain),
+                    affinityScore = gain,
                     interactionCount = 1, lastInteractionAt = now,
                 ),
             )
         } else {
-            // 互动后 count+1，按新次数递进关系标签（供互动中心展示；氛围在 start() 已按新 count 推导）
-            relationshipDao.touchInteraction(existing.id, now, relationStatusForCount(existing.interactionCount + 1))
+            // 互动后好感度累计、次数+1，按新好感度递进关系标签（供互动中心展示；氛围在 start() 已按当前好感度推导）
+            val newScore = existing.affinityScore + gain
+            relationshipDao.touchInteraction(existing.id, now, ConversationRelationship.relationStatusForAffinity(newScore), newScore)
         }
     }
 
-    /** 按互动次数推导关系标签（最小一期：标签驱动，不做数值好感度；affinity_score 后续可升级） */
-    private fun relationStatusForCount(count: Int): String = when {
-        count <= 0 -> RelationStatus.STRANGER.name
-        count <= 2 -> RelationStatus.ACQUAINTANCE.name
-        count <= 5 -> RelationStatus.FRIENDLY.name
-        else -> RelationStatus.CLOSE.name
-    }
-
-    /** 关系标签 → 互动氛围引导（角色性格已由 persona 注入，这里只定双方关系基调） */
-    private fun relationTone(status: String, isSameCard: Boolean): String = when (status) {
-        RelationStatus.STRANGER.name ->
-            if (isSameCard) "这是你们第一次见面：可以自然地惊讶、好奇这份相似，但简单带过即可，很快进入自然的聊天。\n"
-            else "你们是第一次见面，彼此还很陌生：自然地寒暄、认识对方。\n"
-        RelationStatus.ACQUAINTANCE.name -> "你们已经认识，还算不上很熟：带着一点熟悉和一点客套，自然地聊。\n"
-        RelationStatus.FRIENDLY.name -> "你们是老朋友了，彼此熟悉又自在：像老朋友一样轻松地聊。\n"
-        RelationStatus.CLOSE.name -> "你们非常亲密、无话不谈：可以聊很私密、很交心的话题。\n"
-        RelationStatus.RIFT.name -> "你们之间曾有过不快，关系有些疏远：说话时带着一点距离和小心。\n"
-        else -> "自然地聊就好。\n"
+    /** 好感度分档 → 互动氛围引导（T11.6：数值分档驱动，取代按次数近似；角色性格已由 persona 注入，这里只定双方关系基调） */
+    private fun relationTone(status: String, isSameCard: Boolean, affinityScore: Int): String {
+        // RIFT 为人工负向态，优先保留其疏远氛围
+        if (status == RelationStatus.RIFT.name) {
+            return "你们之间曾有过不快，关系有些疏远：说话时带着一点距离和小心。\n"
+        }
+        // 好感度感知：让对话内容随数值更细腻（数值越高越亲近自然）
+        val tier = ConversationRelationship.affinityTierLabel(affinityScore)
+        val base = when (status) {
+            RelationStatus.STRANGER.name ->
+                if (isSameCard) "这是你们第一次见面：可以自然地惊讶、好奇这份相似，但简单带过即可，很快进入自然的聊天。\n"
+                else "你们是第一次见面，彼此还很陌生：自然地寒暄、认识对方。\n"
+            RelationStatus.ACQUAINTANCE.name -> "你们已经认识，还算不上很熟：带着一点熟悉和一点客套，自然地聊。\n"
+            RelationStatus.FRIENDLY.name -> "你们是老朋友了，彼此熟悉又自在：像老朋友一样轻松地聊。\n"
+            RelationStatus.CLOSE.name -> "你们非常亲密、无话不谈：可以聊很私密、很交心的话题。\n"
+            else -> "自然地聊就好。\n"
+        }
+        return buildString {
+            append("（你们之间的好感度约 ").append(affinityScore).append("，已到「").append(tier).append("」的关系。）\n")
+            append(base)
+        }
     }
 
     /**

@@ -43,10 +43,16 @@ interface RelationshipDao {
     )
     fun observeForConversation(id: Long): kotlinx.coroutines.flow.Flow<List<ConversationRelationship>>
 
-    /** 互动成功后更新计数、关系标签（按互动次数递进）与最近互动时间 */
+    /** 观察全部关系（互动中心「关系一览」好感度/档位/次数，T11.6） */
+    @Query(
+        "SELECT * FROM conv_relationship ORDER BY lastInteractionAt DESC",
+    )
+    fun observeAll(): kotlinx.coroutines.flow.Flow<List<ConversationRelationship>>
+
+    /** 互动成功后更新计数、关系标签（按好感度分档）、好感度数值与最近互动时间 */
     @Query(
         "UPDATE conv_relationship SET interactionCount = interactionCount + 1, " +
-            "relationStatus = :status, lastInteractionAt = :now WHERE id = :id",
+            "relationStatus = :status, affinityScore = :affinity, lastInteractionAt = :now WHERE id = :id",
     )
-    suspend fun touchInteraction(id: Long, now: Long, status: String)
+    suspend fun touchInteraction(id: Long, now: Long, status: String, affinity: Int)
 }

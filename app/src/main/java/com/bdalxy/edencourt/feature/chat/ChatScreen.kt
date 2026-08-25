@@ -3,6 +3,7 @@ package com.bdalxy.edencourt.feature.chat
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -31,6 +32,7 @@ import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Email
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
@@ -60,6 +62,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -69,6 +72,7 @@ import com.bdalxy.edencourt.EdenCourtApp
 import com.bdalxy.edencourt.core.ui.CharacterAvatar
 import com.bdalxy.edencourt.data.local.entity.InteractionStatus
 import com.bdalxy.edencourt.data.local.entity.MemoryItem
+import com.bdalxy.edencourt.data.local.entity.MemoryType
 import com.bdalxy.edencourt.data.local.entity.Message
 import com.bdalxy.edencourt.data.local.entity.MessageStatus
 import com.bdalxy.edencourt.data.local.entity.MessageType
@@ -93,6 +97,7 @@ fun ChatScreen(
     onBack: () -> Unit,
     onOpenSettings: () -> Unit,
     onOpenInteraction: () -> Unit,
+    onOpenMemoryManagement: () -> Unit,
 ) {
     val app = LocalContext.current.applicationContext as EdenCourtApp
     val viewModel: ChatViewModel = viewModel(
@@ -125,6 +130,8 @@ fun ChatScreen(
     var showInteractionSheet by rememberSaveable { mutableStateOf(false) }
     val interactionEnabled by viewModel.interactionEnabled.collectAsStateWithLifecycle()
     val interactionRecords by viewModel.interactionRecords.collectAsStateWithLifecycle()
+    // T11.6 好感度细分：本会话角色的关系一览（互动面板「我的关系（好感度）」区）
+    val myRelationships by viewModel.myRelationships.collectAsStateWithLifecycle()
 
     // 滚动状态：消息/错误提示/键盘弹出时自动滚到底部（T6.1 + T6.7 修复）
     // - 键盘弹出：以 IME 高度为 key，动画期间每次高度变化都重新定位到底部；
@@ -246,6 +253,7 @@ fun ChatScreen(
             sharedMemories = sharedMemories,
             privateMemories = privateMemories,
             cardName = roleName,
+            onOpenMemoryManagement = onOpenMemoryManagement,
             onDismiss = { showMemorySheet = false },
         )
     }
@@ -256,6 +264,7 @@ fun ChatScreen(
             enabled = interactionEnabled,
             onEnabledChange = { viewModel.setInteractionEnabled(it) },
             records = interactionRecords,
+            relationships = myRelationships,
             onOpenCenter = {
                 showInteractionSheet = false
                 onOpenInteraction()
@@ -533,10 +542,10 @@ private fun ChatInputBar(
 }
 
 /**
- * T7.4 会话记忆面板（会话级私有定稿）：
- * - 「共享记忆」区：该角色卡的全部共享记忆
- * - 「本会话私密记忆」区：仅本会话（sourceConversationId=当前会话）的私有记忆，跨会话隔离
- * 两区空态分别提示。
+ * T7.4 + T11.6 会话记忆面板（会话级私有定稿 + 升级）：
+ * - 「共享记忆」区：该角色卡的全部共享记忆（卡片式分区 + 计数角标）
+ * - 「本会话私密记忆」区：仅本会话的私有记忆，跨会话隔离
+ * - 顶部搜索框本地过滤两区；每条显示类型 chip + 内容 + 时间；底部「前往记忆管理页」
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -544,8 +553,19 @@ private fun SessionMemorySheet(
     sharedMemories: List<MemoryItem>,
     privateMemories: List<MemoryItem>,
     cardName: String,
+    onOpenMemoryManagement: () -> Unit,
     onDismiss: () -> Unit,
 ) {
+    // 搜索关键词：本地过滤共享/私有两区（按内容或关键词匹配）
+    var query by remember { mutableStateOf("") }
+    val q = query.trim()
+    val sharedFiltered =
+        if (q.isEmpty()) sharedMemories
+        else sharedMemories.filter { it.content.contains(q) || it.keywords.contains(q) }
+    val privateFiltered =
+        if (q.isEmpty()) privateMemories
+        else privateMemories.filter { it.content.contains(q) || it.keywords.contains(q) }
+
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(
             modifier = Modifier
@@ -554,32 +574,101 @@ private fun SessionMemorySheet(
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 16.dp, vertical = 12.dp),
         ) {
-            // 共享区
             Text(
-                text = "共享记忆 · $cardName",
-                style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.primary,
+                text = "会话记忆 · $cardName",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
             )
-            Spacer(modifier = Modifier.height(4.dp))
-            if (sharedMemories.isEmpty()) {
-                EmptyMemoryText("暂无共享记忆")
-            } else {
-                sharedMemories.forEach { MemorySheetItem(it) }
-            }
-            Spacer(modifier = Modifier.height(16.dp))
-            // 私有区（仅本会话）
-            Text(
-                text = "本会话私密记忆",
-                style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.error,
+            Spacer(modifier = Modifier.height(8.dp))
+            // 搜索框
+            OutlinedTextField(
+                value = query,
+                onValueChange = { query = it },
+                placeholder = { Text("搜索记忆…") },
+                leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
+                singleLine = true,
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth(),
             )
-            Spacer(modifier = Modifier.height(4.dp))
-            if (privateMemories.isEmpty()) {
-                EmptyMemoryText("本会话暂无私密记忆")
-            } else {
-                privateMemories.forEach { MemorySheetItem(it) }
+            Spacer(modifier = Modifier.height(12.dp))
+            // 共享记忆分区卡片
+            MemorySectionCard(
+                title = "共享记忆 · $cardName",
+                count = sharedFiltered.size,
+                accent = false,
+            ) {
+                if (sharedFiltered.isEmpty()) {
+                    EmptyMemoryText(if (q.isEmpty()) "暂无共享记忆" else "无匹配结果")
+                } else {
+                    sharedFiltered.forEach { MemorySheetItem(it) }
+                }
             }
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(12.dp))
+            // 本会话私密记忆分区卡片
+            MemorySectionCard(
+                title = "本会话私密记忆",
+                count = privateFiltered.size,
+                accent = true,
+            ) {
+                if (privateFiltered.isEmpty()) {
+                    EmptyMemoryText(if (q.isEmpty()) "本会话暂无私密记忆" else "无匹配结果")
+                } else {
+                    privateFiltered.forEach { MemorySheetItem(it) }
+                }
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            // 前往记忆管理页（搜索/分类/时间轴/热词/图谱全功能）
+            TextButton(
+                onClick = onOpenMemoryManagement,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("前往记忆管理页")
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+        }
+    }
+}
+
+/** 记忆分区卡片：标题 + 计数角标 + 内容区（T11.6 记忆面板布局升级，卡片式清晰分隔两区） */
+@Composable
+private fun MemorySectionCard(
+    title: String,
+    count: Int,
+    accent: Boolean,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleSmall,
+                    color = if (accent) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.weight(1f),
+                )
+                // 计数角标（区分共享/私有用主题色/错误色）
+                Surface(
+                    shape = CircleShape,
+                    color = if (accent) {
+                        MaterialTheme.colorScheme.error.copy(alpha = 0.12f)
+                    } else {
+                        MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+                    },
+                ) {
+                    Text(
+                        text = "$count",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (accent) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(6.dp))
+            content()
         }
     }
 }
@@ -594,18 +683,46 @@ private fun EmptyMemoryText(text: String) {
     )
 }
 
-/** 记忆面板单条：内容 + 创建时间 */
+/** 记忆面板单条：类型 chip + 内容 + 时间（T11.6 升级：类型标识 + 时间右置一行） */
 @Composable
 private fun MemorySheetItem(memory: MemoryItem) {
     Column(modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            // 类型 chip：浅色圆角小标签
+            Surface(
+                shape = RoundedCornerShape(6.dp),
+                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
+            ) {
+                Text(
+                    text = memory.type.label,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                )
+            }
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = formatMemoryTime(memory.createdAt),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.outline,
+            )
+        }
+        Spacer(modifier = Modifier.height(2.dp))
         Text(memory.content, style = MaterialTheme.typography.bodyMedium)
-        Text(
-            text = formatMemoryTime(memory.createdAt),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.outline,
-        )
     }
 }
+
+/** 记忆类型中文标签（与记忆管理页一致，供会话记忆面板类型 chip 用） */
+private val MemoryType.label: String
+    get() = when (this) {
+        MemoryType.PERSONAL_INFO -> "个人信息"
+        MemoryType.PREFERENCE -> "偏好"
+        MemoryType.EVENT -> "事件"
+        MemoryType.SKILL -> "技能"
+        MemoryType.SITUATION -> "情景"
+        MemoryType.RELATION -> "关系"
+        MemoryType.OTHER -> "其他"
+    }
 
 /**
  * 互动面板（v1.2b T8.11，聊天页顶部「互动」图标弹出）。
@@ -620,6 +737,7 @@ private fun InteractionSheet(
     enabled: Boolean,
     onEnabledChange: (Boolean) -> Unit,
     records: List<InteractionRecordItem>,
+    relationships: List<RelationshipItem>,
     onOpenCenter: () -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -687,6 +805,59 @@ private fun InteractionSheet(
                                 overflow = TextOverflow.Ellipsis,
                             )
                         }
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(20.dp))
+            HorizontalDivider()
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // 我的关系（好感度）：本会话角色与各会话角色的好感度数值 + 档位（T11.6 好感度细分到会话角色）
+            Text(
+                text = "我的关系（好感度） · $roleName",
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            if (relationships.isEmpty()) {
+                Text(
+                    text = "暂无好感度数据，去互动中心发起互动吧",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.outline,
+                )
+            } else {
+                relationships.forEach { r ->
+                    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = "与 ${r.peerName}",
+                                style = MaterialTheme.typography.bodyMedium,
+                                modifier = Modifier.weight(1f),
+                            )
+                            // 好感度档位色：亲密=暖色系 / 友好 / 相识 / 陌生 逐级递减
+                            val tierColor = when (r.tierLabel) {
+                                "亲密" -> MaterialTheme.colorScheme.error
+                                "友好" -> MaterialTheme.colorScheme.tertiary
+                                "相识" -> MaterialTheme.colorScheme.primary
+                                else -> MaterialTheme.colorScheme.outline
+                            }
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = tierColor.copy(alpha = 0.15f),
+                            ) {
+                                Text(
+                                    text = "${r.affinityScore} · ${r.tierLabel}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = tierColor,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                                )
+                            }
+                        }
+                        Text(
+                            text = "已互动 ${r.interactionCount} 次",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.outline,
+                        )
                     }
                 }
             }

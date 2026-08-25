@@ -38,6 +38,8 @@ fun AppRoot() {
                 onOpenSettings = { navController.navigate(NavRoutes.SETTINGS) },
                 // v1.2b T8.11：聊天页顶部「互动」图标 → 互动中心
                 onOpenInteraction = { navController.navigate(NavRoutes.INTERACTION_CENTER) },
+                // T11.6：会话记忆面板「前往记忆管理页」入口
+                onOpenMemoryManagement = { navController.navigate(NavRoutes.MEMORY_LIST) },
             )
         }
         // v1.2b T8.11：互动中心（列表 + 全局开关 + 发起互动）
