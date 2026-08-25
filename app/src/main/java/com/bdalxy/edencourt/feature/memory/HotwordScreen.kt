@@ -169,9 +169,9 @@ fun HotwordScreen(onBack: () -> Unit) {
     }
 }
 
-/** 命中「热词」的一条记忆：副标题(分类·时间) + 内容 + 归属 */
+/** 命中「热词」的一条记忆：副标题(分类·时间) + 内容 + 归属（供 T11.1 热词页 / T11.5 图谱页复用） */
 @Composable
-private fun HotwordHitItem(
+internal fun HotwordHitItem(
     memory: MemoryItem,
     ownerName: String?,
     subtitle: String,

@@ -36,6 +36,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
@@ -122,6 +123,8 @@ fun MemoryScreen(onBack: () -> Unit) {
     var showTimeline by remember { mutableStateOf(false) }
     // 是否显示共现热词页（阶段三 T11.1 顶栏入口切换）
     var showHotwords by remember { mutableStateOf(false) }
+    // 是否显示关系图谱页（阶段三 T11.5：共现网络可视化，与列表/时间轴/热词互斥）
+    var showGraph by remember { mutableStateOf(false) }
     // 批量管理多选状态（T11.3：长按进入多选，勾选多项后批量删除/设重要/置顶）
     var selectionMode by remember { mutableStateOf(false) }
     var selectedIds by remember { mutableStateOf(setOf<Long>()) }
@@ -184,6 +187,9 @@ fun MemoryScreen(onBack: () -> Unit) {
     } else if (showHotwords) {
         // 共现热词页（阶段三 T11.1：关键词排行 → 筛相关记忆）
         HotwordScreen(onBack = { showHotwords = false })
+    } else if (showGraph) {
+        // 关系图谱页（阶段三 T11.5：共现网络可视化 → 点节点看关联记忆）
+        GraphScreen(onBack = { showGraph = false })
     } else {
         Scaffold(
         topBar = {
@@ -331,6 +337,13 @@ fun MemoryScreen(onBack: () -> Unit) {
                     label = { Text("共现热词") },
                     leadingIcon = {
                         Icon(Icons.Filled.Star, contentDescription = null, modifier = Modifier.size(16.dp))
+                    },
+                )
+                AssistChip(
+                    onClick = { showGraph = true },
+                    label = { Text("关系图谱") },
+                    leadingIcon = {
+                        Icon(Icons.Filled.Share, contentDescription = null, modifier = Modifier.size(16.dp))
                     },
                 )
             }
