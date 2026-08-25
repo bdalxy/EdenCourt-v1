@@ -2,6 +2,7 @@ package com.bdalxy.edencourt.domain
 
 import com.bdalxy.edencourt.data.local.entity.Message
 import com.bdalxy.edencourt.data.local.entity.Role
+import com.bdalxy.edencourt.data.local.entity.UserIdentity
 import com.bdalxy.edencourt.data.remote.ChatMessage
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
@@ -29,9 +30,10 @@ object PromptBuilder {
      * 拼接规则：「你是{name}。你的性格：{personality}…请始终以该角色身份回复」，
      * 并附加背景/说话风格/示例对话/约束（有则拼入）。
      * @param card 会话绑定的角色卡
+     * @param userIdentityText 用户自设身份注入片段（T8.13，可为空），所有角色默认知道用户
      * @return system 提示词文本
      */
-    fun buildCardSystemPrompt(card: CharacterCard): String = buildString {
+    fun buildCardSystemPrompt(card: CharacterCard, userIdentityText: String = ""): String = buildString {
         append("你是「").append(card.name).append("」。\n")
         append("你的性格：").append(card.personality).append("\n")
         if (card.background.isNotBlank()) {
@@ -50,7 +52,24 @@ object PromptBuilder {
         if (card.constraints.isNotBlank()) {
             append("行为约束：").append(card.constraints).append("\n")
         }
+        // T8.13：注入用户自设身份（统一称呼用户），所有角色默认知道
+        if (userIdentityText.isNotBlank()) {
+            append("\n").append(userIdentityText)
+        }
         append("请始终以「").append(card.name).append("」的身份、用上述风格回复用户，不要跳出角色。")
+    }
+
+    /**
+     * 构建「用户自设身份」注入片段（T8.13）。
+     * 所有角色默认知道用户身份：统一的称呼/名字/自设描述，随角色卡 persona 注入，保证全角色统一称呼用户。
+     * @param identity 用户自设身份（唯一一条，id=1）
+     * @return 注入片段文本（恒非空，调用方可直接拼接）
+     */
+    fun buildUserIdentityPrompt(identity: UserIdentity): String = buildString {
+        append("【关于用户】你认识用户「").append(identity.name).append("」，你会称呼他为「").append(identity.calling).append("」。\n")
+        if (identity.description.isNotBlank()) append("用户的自述：").append(identity.description).append("\n")
+        if (identity.personality.isNotBlank()) append("用户的性格：").append(identity.personality).append("\n")
+        if (identity.background.isNotBlank()) append("用户的背景：").append(identity.background).append("\n")
     }
 
     /**

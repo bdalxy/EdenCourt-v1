@@ -10,6 +10,7 @@ import com.bdalxy.edencourt.feature.about.AboutScreen
 import com.bdalxy.edencourt.feature.character.CharacterScreen
 import com.bdalxy.edencourt.feature.chat.ChatScreen
 import com.bdalxy.edencourt.feature.conversationlist.ConversationListScreen
+import com.bdalxy.edencourt.feature.interaction.InteractionCenterScreen
 import com.bdalxy.edencourt.feature.memory.MemoryScreen
 import com.bdalxy.edencourt.feature.settings.SettingsScreen
 
@@ -35,7 +36,13 @@ fun AppRoot() {
                 onBack = { navController.popBackStack() },
                 // T6.1：聊天页错误提示「Key 无效」可跳转设置页
                 onOpenSettings = { navController.navigate(NavRoutes.SETTINGS) },
+                // v1.2b T8.11：聊天页顶部「互动」图标 → 互动中心
+                onOpenInteraction = { navController.navigate(NavRoutes.INTERACTION_CENTER) },
             )
+        }
+        // v1.2b T8.11：互动中心（列表 + 全局开关 + 发起互动）
+        composable(NavRoutes.INTERACTION_CENTER) {
+            InteractionCenterScreen(onBack = { navController.popBackStack() })
         }
         composable(NavRoutes.CHARACTER_CARDS) {
             CharacterScreen(onBack = { navController.popBackStack() })

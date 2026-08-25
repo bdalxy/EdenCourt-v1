@@ -30,9 +30,13 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -40,6 +44,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -62,6 +67,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.bdalxy.edencourt.EdenCourtApp
 import com.bdalxy.edencourt.core.ui.CharacterAvatar
+import com.bdalxy.edencourt.data.local.entity.InteractionStatus
 import com.bdalxy.edencourt.data.local.entity.MemoryItem
 import com.bdalxy.edencourt.data.local.entity.Message
 import com.bdalxy.edencourt.data.local.entity.MessageStatus
@@ -86,6 +92,7 @@ fun ChatScreen(
     conversationId: Long,
     onBack: () -> Unit,
     onOpenSettings: () -> Unit,
+    onOpenInteraction: () -> Unit,
 ) {
     val app = LocalContext.current.applicationContext as EdenCourtApp
     val viewModel: ChatViewModel = viewModel(
@@ -98,6 +105,13 @@ fun ChatScreen(
     val roleName by viewModel.roleName.collectAsStateWithLifecycle()
     val isGenerating by viewModel.isGenerating.collectAsStateWithLifecycle()
     val errorMessages by viewModel.errorMessages.collectAsStateWithLifecycle()
+    // v1.2b T8.11：顶部「互动」图标未读红点
+    val unreadInteractions by viewModel.unreadInteractions.collectAsStateWithLifecycle()
+
+    // v1.2b T8.11：进入会话即把本会话互动标记已读，消除顶部红点
+    LaunchedEffect(conversationId) {
+        viewModel.markInteractionsRead()
+    }
 
     // 输入框内容状态（旋转/重建后保留）
     var input by rememberSaveable { mutableStateOf("") }
@@ -106,6 +120,11 @@ fun ChatScreen(
     var showMemorySheet by rememberSaveable { mutableStateOf(false) }
     val sharedMemories by viewModel.sharedMemories.collectAsStateWithLifecycle()
     val privateMemories by viewModel.privateMemories.collectAsStateWithLifecycle()
+
+    // v1.2b T8.11：互动面板（本会话互动记录 + 开放互动开关 + 前往互动中心）
+    var showInteractionSheet by rememberSaveable { mutableStateOf(false) }
+    val interactionEnabled by viewModel.interactionEnabled.collectAsStateWithLifecycle()
+    val interactionRecords by viewModel.interactionRecords.collectAsStateWithLifecycle()
 
     // 滚动状态：消息/错误提示/键盘弹出时自动滚到底部（T6.1 + T6.7 修复）
     // - 键盘弹出：以 IME 高度为 key，动画期间每次高度变化都重新定位到底部；
@@ -158,6 +177,16 @@ fun ChatScreen(
                     }
                 },
                 actions = {
+                    // v1.2b T8.11：互动入口（带未读红点），点击弹出本会话互动面板
+                    IconButton(onClick = { showInteractionSheet = true }) {
+                        BadgedBox(badge = {
+                            if (unreadInteractions > 0) {
+                                Badge { Text("${unreadInteractions.coerceAtMost(99)}") }
+                            }
+                        }) {
+                            Icon(Icons.Filled.Email, contentDescription = "角色互动")
+                        }
+                    }
                     // T7.4：会话记忆入口（共享 + 本会话私有），点击先刷新数据再弹出
                     IconButton(onClick = {
                         showMemorySheet = true
@@ -218,6 +247,20 @@ fun ChatScreen(
             privateMemories = privateMemories,
             cardName = roleName,
             onDismiss = { showMemorySheet = false },
+        )
+    }
+    // v1.2b T8.11：互动面板（本会话互动记录 + 开放互动开关 + 前往互动中心）
+    if (showInteractionSheet) {
+        InteractionSheet(
+            roleName = roleName,
+            enabled = interactionEnabled,
+            onEnabledChange = { viewModel.setInteractionEnabled(it) },
+            records = interactionRecords,
+            onOpenCenter = {
+                showInteractionSheet = false
+                onOpenInteraction()
+            },
+            onDismiss = { showInteractionSheet = false },
         )
     }
 }
@@ -337,6 +380,13 @@ private fun MessageBubble(
                             color = MaterialTheme.colorScheme.outline,
                         )
                     }
+                    // 互动摘要（v1.2b，T8.10）：角色间互动的一行摘要，居中浅色小字
+                    MessageType.INTERACTION_DIGEST -> Text(
+                        text = message.content,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.outline,
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                    )
                 }
             }
             // 思考过程折叠区：AI 消息且存在思考过程时展示（默认折叠，点击展开/收起）
@@ -555,6 +605,111 @@ private fun MemorySheetItem(memory: MemoryItem) {
             color = MaterialTheme.colorScheme.outline,
         )
     }
+}
+
+/**
+ * 互动面板（v1.2b T8.11，聊天页顶部「互动」图标弹出）。
+ * - 「开放互动」开关：控制本会话能否成为互动成员（persist 到 conversations.interactionEnabled）
+ * - 「本会话互动记录」：对方名 + 该会话视角摘要
+ * - 「前往互动中心」：看全部互动、发起新互动
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun InteractionSheet(
+    roleName: String,
+    enabled: Boolean,
+    onEnabledChange: (Boolean) -> Unit,
+    records: List<InteractionRecordItem>,
+    onOpenCenter: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = 640.dp)
+                .verticalScroll(rememberScrollState())
+                .padding(start = 16.dp, end = 16.dp, bottom = 24.dp),
+        ) {
+            // 开放互动开关
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("开放角色互动", style = MaterialTheme.typography.titleSmall)
+                    Text(
+                        text = "开启后会被其他会话选中互动",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Switch(checked = enabled, onCheckedChange = onEnabledChange)
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+            HorizontalDivider()
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // 本会话互动记录
+            Text(
+                text = "本会话互动记录 · $roleName",
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            if (records.isEmpty()) {
+                Text(
+                    text = "暂无互动记录",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.outline,
+                )
+            } else {
+                records.forEach { r ->
+                    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = "与 ${r.peerName}",
+                                style = MaterialTheme.typography.bodyMedium,
+                                modifier = Modifier.weight(1f),
+                            )
+                            Text(
+                                text = interactionStatusText(r.status),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.outline,
+                            )
+                        }
+                        if (r.summary.isNotBlank()) {
+                            Text(
+                                text = r.summary,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(20.dp))
+
+            // 前往互动中心
+            TextButton(
+                onClick = onOpenCenter,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("前往互动中心")
+            }
+        }
+    }
+}
+
+/** 互动状态中文标签（互动面板记录用） */
+private fun interactionStatusText(status: String): String = when (status) {
+    InteractionStatus.COMPLETED.name -> "已完成"
+    InteractionStatus.RUNNING.name -> "进行中"
+    InteractionStatus.SKIPPED.name -> "已跳过"
+    InteractionStatus.FAILED.name -> "未完成"
+    else -> "待发起"
 }
 
 /** 记忆时间格式化：MM-dd HH:mm（区别于消息气泡的 formatTime） */

@@ -22,6 +22,8 @@ data class Conversation(
     val characterCardId: Long? = null,
     /** 建会话随机短码（v1.2 会话唯一身份，T8.0） */
     val code: String = newShortCode(),
+    /** 是否开放参与角色间互动（v1.2b 互动资格开关，T8.7；新建默认 false=不参与互动） */
+    val interactionEnabled: Boolean = false,
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis(),
     val isPinned: Boolean = false,

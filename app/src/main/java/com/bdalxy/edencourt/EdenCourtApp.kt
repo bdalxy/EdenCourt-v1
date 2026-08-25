@@ -3,15 +3,21 @@ package com.bdalxy.edencourt
 import android.app.Application
 import com.bdalxy.edencourt.data.local.AppDatabase
 import com.bdalxy.edencourt.data.local.dao.CharacterCardDao
+import com.bdalxy.edencourt.data.local.dao.ConversationDao
+import com.bdalxy.edencourt.data.local.dao.InteractionDao
 import com.bdalxy.edencourt.data.local.dao.MemoryDao
+import com.bdalxy.edencourt.data.local.dao.RelationshipDao
+import com.bdalxy.edencourt.data.local.dao.UserIdentityDao
 import com.bdalxy.edencourt.data.remote.RemoteApiChatService
 import com.bdalxy.edencourt.data.consult.DailyConsultExecutor
 import com.bdalxy.edencourt.data.consult.DailyConsultScheduler
+import com.bdalxy.edencourt.data.interaction.InteractionExecutor
 import com.bdalxy.edencourt.data.repository.ChatRepository
 import com.bdalxy.edencourt.data.repository.CrossSessionConsultService
 import com.bdalxy.edencourt.data.repository.MemoryRepository
 import com.bdalxy.edencourt.data.setting.ApiConfigStore
 import com.bdalxy.edencourt.data.setting.DailyConsultConfigStore
+import com.bdalxy.edencourt.data.setting.InteractionConfigStore
 import com.bdalxy.edencourt.domain.BuiltInCards
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -42,6 +48,11 @@ class EdenCourtApp : Application() {
     /** 角色卡表数据访问单例（T4.2 起供角色卡管理/选卡流程使用） */
     val characterCardDao: CharacterCardDao by lazy {
         AppDatabase.getInstance(this).characterCardDao()
+    }
+
+    /** 会话表数据访问单例（T8.11 互动中心选会话用） */
+    val conversationDao: ConversationDao by lazy {
+        AppDatabase.getInstance(this).conversationDao()
     }
 
     /** 记忆条目表数据访问单例（T5.1 起供记忆系统使用） */
@@ -100,5 +111,40 @@ class EdenCourtApp : Application() {
     /** 每日打听定时调度器单例（v1.2 P2，T8.5：AlarmManager 精确窗口） */
     val dailyConsultScheduler: DailyConsultScheduler by lazy {
         DailyConsultScheduler(dailyConsultConfigStore)
+    }
+
+    /** 角色间互动全局配置存储单例（v1.2b，T8.7：全局总开关） */
+    val interactionConfigStore: InteractionConfigStore by lazy {
+        InteractionConfigStore(this)
+    }
+
+    /** 互动表数据访问单例（v1.2b 互动系统，T8.10） */
+    val interactionDao: InteractionDao by lazy {
+        AppDatabase.getInstance(this).interactionDao()
+    }
+
+    /** 会话间关系表数据访问单例（v1.2b 互动系统，T8.8） */
+    val relationshipDao: RelationshipDao by lazy {
+        AppDatabase.getInstance(this).relationshipDao()
+    }
+
+    /** 用户自设身份表数据访问单例（v1.2b，T8.13：我的身份，唯一一条） */
+    val userIdentityDao: UserIdentityDao by lazy {
+        AppDatabase.getInstance(this).userIdentityDao()
+    }
+
+    /** 角色间互动执行器单例（v1.2b，T8.9：双向多轮状态机，供手动触发入口调用） */
+    val interactionExecutor: InteractionExecutor by lazy {
+        InteractionExecutor(
+            chatRepository = chatRepository,
+            characterCardDao = characterCardDao,
+            memoryRepository = memoryRepository,
+            interactionDao = interactionDao,
+            relationshipDao = relationshipDao,
+            interactionConfigStore = interactionConfigStore,
+            apiConfigStore = apiConfigStore,
+            aiChatService = aiChatService,
+            userIdentityDao = userIdentityDao,
+        )
     }
 }

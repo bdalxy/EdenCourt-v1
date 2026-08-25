@@ -39,4 +39,8 @@ interface ConversationDao {
     /** 按 id 取单个会话（一次性查询） */
     @Query("SELECT * FROM conversations WHERE id = :id")
     suspend fun getById(id: Long): Conversation?
+
+    /** 统计某角色卡下挂了多少个会话（判断同卡多会话个体，互动身份需加码区分） */
+    @Query("SELECT COUNT(*) FROM conversations WHERE characterCardId = :cardId")
+    suspend fun countByCardId(cardId: Long): Int
 }

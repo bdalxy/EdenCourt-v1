@@ -75,10 +75,18 @@ fun SettingsScreen(onBack: () -> Unit) {
             )
         },
     ) { innerPadding ->
-        ApiSettingsSection(
-            viewModel = viewModel,
-            modifier = Modifier.fillMaxSize().padding(innerPadding),
-        )
+        Column(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
+            // 第 1 区：AI API 配置（T3.3，可滚动）
+            ApiSettingsSection(
+                viewModel = viewModel,
+                modifier = Modifier.weight(1f),
+            )
+            // 第 2 区：我的身份（用户自设角色卡身份，T8.13）
+            IdentitySettingsSection(
+                viewModel = viewModel,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
     }
 }
 
@@ -224,6 +232,93 @@ private fun ApiSettingsSection(viewModel: SettingsViewModel, modifier: Modifier 
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+            )
+        }
+    }
+}
+
+/** 第 2 区：我的身份（用户自设角色卡身份，T8.13）——唯一绑定，所有角色默认知道并统一称呼 */
+@Composable
+private fun IdentitySettingsSection(viewModel: SettingsViewModel, modifier: Modifier = Modifier) {
+    val identity by viewModel.userIdentity.collectAsStateWithLifecycle()
+
+    // 编辑态本地状态：初始用当前身份值，点「保存身份」才统一写库（避免逐字写回产生半成品）
+    var name by rememberSaveable { mutableStateOf(identity?.name ?: "我") }
+    var calling by rememberSaveable { mutableStateOf(identity?.calling ?: "你") }
+    var description by rememberSaveable { mutableStateOf(identity?.description ?: "") }
+    var personality by rememberSaveable { mutableStateOf(identity?.personality ?: "") }
+    var background by rememberSaveable { mutableStateOf(identity?.background ?: "") }
+    var saved by rememberSaveable { mutableStateOf(false) }
+
+    // 身份在「加载完成」或「保存成功」后同步到编辑态；不会覆盖用户正在输入的内容
+    LaunchedEffect(identity) {
+        name = identity?.name ?: "我"
+        calling = identity?.calling ?: "你"
+        description = identity?.description ?: ""
+        personality = identity?.personality ?: ""
+        background = identity?.background ?: ""
+    }
+
+    Column(
+        modifier = modifier.padding(horizontal = 16.dp).padding(bottom = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Text(
+            text = "我的身份",
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.primary,
+        )
+        Text(
+            text = "给自己安排一个唯一身份，所有角色默认知道，并统一用「称呼」叫你。",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        OutlinedTextField(
+            value = name,
+            onValueChange = { name = it; saved = false },
+            label = { Text("名字/昵称") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        OutlinedTextField(
+            value = calling,
+            onValueChange = { calling = it; saved = false },
+            label = { Text("别人对你的称呼") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        OutlinedTextField(
+            value = description,
+            onValueChange = { description = it; saved = false },
+            label = { Text("身份自述（我是谁，一句话）") },
+            modifier = Modifier.fillMaxWidth(),
+        )
+        OutlinedTextField(
+            value = personality,
+            onValueChange = { personality = it; saved = false },
+            label = { Text("性格（可选）") },
+            modifier = Modifier.fillMaxWidth(),
+        )
+        OutlinedTextField(
+            value = background,
+            onValueChange = { background = it; saved = false },
+            label = { Text("背景（可选）") },
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Button(
+            onClick = {
+                viewModel.saveIdentity(name, calling, description, personality, background)
+                saved = true
+            },
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text("保存身份")
+        }
+        if (saved) {
+            Text(
+                text = "已保存：所有角色将统一以「$calling」称呼你",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.primary,
             )
         }
     }

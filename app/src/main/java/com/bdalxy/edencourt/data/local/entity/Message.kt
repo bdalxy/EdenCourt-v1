@@ -23,7 +23,9 @@ enum class MessageStatus {
  * 当前阶段仅 TEXT 正常渲染，ACTION/RESULT 预留渲染骨架。
  */
 enum class MessageType {
-    TEXT, ACTION, RESULT
+    TEXT, ACTION, RESULT,
+    /** 互动摘要（v1.2b 角色间互动，T8.10）：插入双方会话的一条"今天有人来找我/我找了谁"摘要消息 */
+    INTERACTION_DIGEST,
 }
 
 /**

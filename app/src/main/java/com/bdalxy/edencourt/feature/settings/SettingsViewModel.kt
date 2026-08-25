@@ -7,6 +7,8 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.bdalxy.edencourt.EdenCourtApp
+import com.bdalxy.edencourt.data.local.dao.UserIdentityDao
+import com.bdalxy.edencourt.data.local.entity.UserIdentity
 import com.bdalxy.edencourt.data.remote.AiChatService
 import com.bdalxy.edencourt.data.remote.ApiErrorKind
 import com.bdalxy.edencourt.data.remote.ApiException
@@ -38,6 +40,7 @@ sealed interface TestState {
 class SettingsViewModel(
     private val apiConfigStore: ApiConfigStore,
     private val aiChatService: AiChatService,
+    private val userIdentityDao: UserIdentityDao,
 ) : ViewModel() {
 
     /** API 配置流（温度滑块等连续控件直接绑定此值） */
@@ -46,6 +49,14 @@ class SettingsViewModel(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5_000),
             initialValue = ApiConfig(),
+        )
+
+    /** 用户自设身份流（T8.13：无则 null，UI 显示默认值） */
+    val userIdentity: StateFlow<UserIdentity?> = userIdentityDao.observe()
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = null,
         )
 
     /** 测试连接状态流 */
@@ -77,6 +88,20 @@ class SettingsViewModel(
         apiConfigStore.update {
             it.copy(maxTokens = value.toIntOrNull()?.coerceIn(1, 32_768) ?: it.maxTokens)
         }
+    }
+
+    /** 保存用户自设身份（唯一一条，T8.13）：空白兜底默认值，避免空身份 */
+    fun saveIdentity(name: String, calling: String, description: String, personality: String, background: String) = viewModelScope.launch {
+        userIdentityDao.upsert(
+            UserIdentity(
+                name = name.trim().ifBlank { "我" },
+                calling = calling.trim().ifBlank { "你" },
+                description = description.trim(),
+                personality = personality.trim(),
+                background = background.trim(),
+                updatedAt = System.currentTimeMillis(),
+            ),
+        )
     }
 
     /** 测试连接：发最小 stream=false 请求，按结果更新状态（T3.9） */
@@ -112,6 +137,7 @@ class SettingsViewModel(
                 SettingsViewModel(
                     apiConfigStore = app.apiConfigStore,
                     aiChatService = app.aiChatService,
+                    userIdentityDao = app.userIdentityDao,
                 )
             }
         }

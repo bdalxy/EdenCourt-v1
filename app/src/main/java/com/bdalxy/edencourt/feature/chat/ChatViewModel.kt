@@ -9,10 +9,14 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.bdalxy.edencourt.EdenCourtApp
 import com.bdalxy.edencourt.data.local.dao.CharacterCardDao
+import com.bdalxy.edencourt.data.local.dao.InteractionDao
+import com.bdalxy.edencourt.data.local.dao.UserIdentityDao
 import com.bdalxy.edencourt.data.local.entity.CharacterCardEntity
+import com.bdalxy.edencourt.data.local.entity.InteractionStatus
 import com.bdalxy.edencourt.data.local.entity.MemoryItem
 import com.bdalxy.edencourt.data.local.entity.Message
 import com.bdalxy.edencourt.data.local.entity.MessageStatus
+import com.bdalxy.edencourt.data.local.entity.ParticipantRole
 import com.bdalxy.edencourt.data.local.entity.Role
 import com.bdalxy.edencourt.data.remote.AiChatService
 import com.bdalxy.edencourt.data.remote.ApiErrorKind
@@ -37,6 +41,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -56,6 +61,14 @@ data class ChatError(
     val kind: ApiErrorKind,
 )
 
+/** 本会话参与的一场互动（v1.2b T8.11：互动面板「本会话互动记录」条目） */
+data class InteractionRecordItem(
+    val interactionId: Long,
+    val peerName: String,
+    val status: String,
+    val summary: String,
+)
+
 /**
  * 聊天页 ViewModel（T2.7 + T3.7 + T4.6 + T5.10 + T6.1）。
  * - 按 conversationId 观察该会话消息流与标题
@@ -73,6 +86,8 @@ class ChatViewModel(
     private val aiChatService: AiChatService,
     private val memoryRepository: MemoryRepository,
     private val crossSessionConsultService: CrossSessionConsultService,
+    private val interactionDao: InteractionDao,
+    private val userIdentityDao: UserIdentityDao,
 ) : ViewModel() {
 
     /** 该会话的消息流（按创建时间正序，数据库变化自动刷新） */
@@ -113,6 +128,91 @@ class ChatViewModel(
                 started = SharingStarted.WhileSubscribed(5_000),
                 initialValue = "默认助手",
             )
+
+    /** 本会话的未读互动数（v1.2b T8.11：聊天页顶部「互动」图标红点，进入互动中心后消除） */
+    val unreadInteractions: StateFlow<Int> =
+        interactionDao.observeForConversation(conversationId)
+            .map { parts -> parts.count { it.readAt == null } }
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(5_000),
+                initialValue = 0,
+            )
+
+    /** 标记本会话全部互动已读（v1.2b T8.11：进入会话/互动中心时消除红点） */
+    fun markInteractionsRead() {
+        viewModelScope.launch {
+            interactionDao.listParticipantsForConversation(conversationId)
+                .filter { it.readAt == null }
+                .forEach { interactionDao.markParticipantRead(it.id, System.currentTimeMillis()) }
+        }
+    }
+
+    /** 本会话是否开放角色间互动（v1.2b T8.7/T8.11：互动面板「开放互动开关」的实际状态） */
+    val interactionEnabled: StateFlow<Boolean> =
+        repository.observeConversation(conversationId)
+            .map { it?.interactionEnabled ?: false }
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(5_000),
+                initialValue = false,
+            )
+
+    /** 本会话的互动记录（v1.2b T8.11：互动面板「本会话互动记录」，含对方名 + 该会话视角摘要） */
+    val interactionRecords: StateFlow<List<InteractionRecordItem>> =
+        interactionDao.observeForConversation(conversationId)
+            .flatMapLatest { parts ->
+                // 一次性合成：每条参与行的互动主记录 + 对方会话名
+                flow {
+                    val items = mutableListOf<InteractionRecordItem>()
+                    for (p in parts) {
+                        val inter = interactionDao.getInteraction(p.interactionId) ?: continue
+                        // 对方 = 互动中除本会话外的参与者会话 id
+                        val peerConvId = if (p.convId == inter.initiatorConvId) inter.targetConvId else inter.initiatorConvId
+                        val peerName = resolvePeerName(peerConvId, inter.initiatorConvId, inter.targetConvId)
+                        items.add(
+                            InteractionRecordItem(
+                                interactionId = inter.id,
+                                peerName = peerName,
+                                status = inter.status,
+                                summary = p.summary.orEmpty(),
+                            ),
+                        )
+                    }
+                    emit(items)
+                }
+            }
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(5_000),
+                initialValue = emptyList(),
+            )
+
+    /** 切换本会话互动资格开关（v1.2b T8.7/T8.11：持久化到 conversations.interactionEnabled） */
+    fun setInteractionEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            val conv = repository.getConversation(conversationId) ?: return@launch
+            repository.updateConversation(conv.copy(interactionEnabled = enabled))
+        }
+    }
+
+    /** 解析对方会话显示名（用户定稿：会话备注优先，其次角色卡备注/名，兜底标题） */
+    private suspend fun resolvePeerName(peerConvId: Long, initConvId: Long, targetConvId: Long): String {
+        val peer = repository.getConversation(peerConvId) ?: return "其他会话"
+        // ① 用户给会话设置的备注最优先
+        if (peer.remark.isNotBlank()) return peer.remark
+        // ② 角色卡备注/名
+        val cardId = peer.characterCardId
+        if (cardId != null) {
+            val card = characterCardDao.getById(cardId)
+            if (card != null) {
+                val name = card.remark.ifBlank { card.name }
+                if (name.isNotBlank()) return name
+            }
+        }
+        // ③ 会话标题兜底
+        return peer.title.ifBlank { "其他会话" }
+    }
 
     /** 是否正在生成 AI 回复（UI 据此切换 停止/发送 按钮） */
     private val _isGenerating = MutableStateFlow(false)
@@ -525,7 +625,9 @@ class ChatViewModel(
      */
     private suspend fun currentSystemPrompt(): String {
         val card = boundCard() ?: return PromptBuilder.DEFAULT_SYSTEM_PROMPT
-        return PromptBuilder.buildCardSystemPrompt(card)
+        // T8.13：注入用户自设身份（所有角色统一称呼用户）
+        val identityText = userIdentityDao.get()?.let { PromptBuilder.buildUserIdentityPrompt(it) }.orEmpty()
+        return PromptBuilder.buildCardSystemPrompt(card, identityText)
     }
 
     /**
@@ -615,6 +717,8 @@ class ChatViewModel(
                         aiChatService = app.aiChatService,
                         memoryRepository = app.memoryRepository,
                         crossSessionConsultService = app.crossSessionConsultService,
+                        interactionDao = app.interactionDao,
+                        userIdentityDao = app.userIdentityDao,
                     )
                 }
             }
