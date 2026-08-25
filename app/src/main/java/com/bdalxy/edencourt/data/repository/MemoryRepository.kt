@@ -82,6 +82,9 @@ class MemoryRepository(
     /** 观察私密记忆数（T10.6 概览统计） */
     fun observePrivateCount(): Flow<Int> = dao.observePrivateCount()
 
+    /** 观察未删除记忆按更新时间降序（T10.7 时间轴） */
+    fun observeTimeline(): Flow<List<MemoryItem>> = dao.observeAllByUpdatedDesc()
+
     /** 检索未删除记忆（T5.4 生成前注入用，按关键词匹配 keywords/content） */
     suspend fun search(keyword: String): List<MemoryItem> = dao.searchByKeyword(keyword)
 

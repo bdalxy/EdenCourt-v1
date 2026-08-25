@@ -33,6 +33,10 @@ interface MemoryDao {
     @Query("SELECT * FROM memory_items WHERE isDeleted = 0 ORDER BY createdAt DESC")
     suspend fun getAllActive(): List<MemoryItem>
 
+    /** 观察未删除记忆按更新时间降序（T10.7 时间轴：展示记忆「演化」，最近更新的在前） */
+    @Query("SELECT * FROM memory_items WHERE isDeleted = 0 ORDER BY updatedAt DESC")
+    fun observeAllByUpdatedDesc(): Flow<List<MemoryItem>>
+
     /** 按 id 取单条记忆（管理页编辑/删除定位用） */
     @Query("SELECT * FROM memory_items WHERE id = :id")
     suspend fun getById(id: Long): MemoryItem?

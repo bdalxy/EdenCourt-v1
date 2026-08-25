@@ -24,6 +24,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -98,13 +99,18 @@ fun MemoryScreen(onBack: () -> Unit) {
     var pendingDelete by remember { mutableStateOf<MemoryItem?>(null) }
     // 手动添加对话框开关
     var showAddDialog by remember { mutableStateOf(false) }
-    // 当前正在查看详情的记忆 id（null=列表页；T10.4 点条目进详情）
+    // 当前正在查看详情的记忆 id（null=列表/时间轴；T10.4 点条目进详情）
     var detailId by remember { mutableStateOf<Long?>(null) }
+    // 是否显示时间轴视图（T10.7 顶栏入口切换，与详情/列表互斥）
+    var showTimeline by remember { mutableStateOf(false) }
 
     val detailIdValue = detailId
     if (detailIdValue != null) {
         // 详情页全屏覆盖（自身含 TopAppBar 返回）
         MemoryDetailScreen(memoryId = detailIdValue, onBack = { detailId = null })
+    } else if (showTimeline) {
+        // 时间轴视图（阶段二可视化 T10.7：按天分组的记忆演化）
+        TimelineScreen(onBack = { showTimeline = false })
     } else {
         Scaffold(
         topBar = {
@@ -113,6 +119,12 @@ fun MemoryScreen(onBack: () -> Unit) {
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                    }
+                },
+                actions = {
+                    // 时间轴入口（阶段二可视化 T10.7）
+                    IconButton(onClick = { showTimeline = true }) {
+                        Icon(Icons.Filled.DateRange, contentDescription = "时间轴")
                     }
                 },
             )
