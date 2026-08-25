@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -20,12 +21,14 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Switch
@@ -43,13 +46,16 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.bdalxy.edencourt.EdenCourtApp
 import com.bdalxy.edencourt.data.local.entity.Conversation
+import com.bdalxy.edencourt.data.local.entity.InteractionSource
 import com.bdalxy.edencourt.data.local.entity.InteractionStatus
 import com.bdalxy.edencourt.data.local.entity.InteractionTurn
+import kotlin.math.roundToInt
 
 /**
  * 互动中心（v1.2b 角色间互动，T8.11/T8.12）。
@@ -69,6 +75,7 @@ fun InteractionCenterScreen(
     val listItems by viewModel.listItems.collectAsStateWithLifecycle()
     val relationships by viewModel.relationships.collectAsStateWithLifecycle()
     val globalEnabled by viewModel.globalEnabled.collectAsStateWithLifecycle()
+    val autoConfig by viewModel.autoConfig.collectAsStateWithLifecycle()
     val selectable by viewModel.selectableConversations.collectAsStateWithLifecycle()
     val convNames by viewModel.convNames.collectAsStateWithLifecycle()
     val toast by viewModel.toast.collectAsStateWithLifecycle()
@@ -81,6 +88,10 @@ fun InteractionCenterScreen(
     val snackbarHost = remember { SnackbarHostState() }
     LaunchedEffect(toast) {
         toast?.let { snackbarHost.showSnackbar(it) }
+    }
+    // T11.7：自动驱动配置变化（开关/窗口/概率）→ 立即重排当日闹钟，修改即时生效
+    LaunchedEffect(autoConfig) {
+        app.interactionAutoScheduler.schedule(app)
     }
 
     Scaffold(
@@ -117,9 +128,17 @@ fun InteractionCenterScreen(
     ) { padding ->
         if (listItems.isEmpty()) {
             Column(
-                modifier = Modifier.fillMaxSize().padding(padding).padding(24.dp),
+                modifier = Modifier.fillMaxSize().padding(padding),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
+                // T11.7 自动驱动设置区（即便尚无互动记录也可先配置）
+                AutoDriveSection(
+                    autoConfig = autoConfig,
+                    onAutoEnabledChange = viewModel::setAutoEnabled,
+                    onWindowChange = viewModel::setAutoWindow,
+                    onProbabilityChange = viewModel::setAutoProbability,
+                )
+                HorizontalDivider(modifier = Modifier.padding(top = 6.dp, bottom = 2.dp))
                 Spacer(modifier = Modifier.size(40.dp))
                 Text("还没有角色互动", style = MaterialTheme.typography.titleMedium)
                 Spacer(modifier = Modifier.size(8.dp))
@@ -131,6 +150,16 @@ fun InteractionCenterScreen(
             }
         } else {
             LazyColumn(modifier = Modifier.fillMaxSize().padding(padding)) {
+                // T11.7 自动驱动设置区（置于列表最顶部）
+                item {
+                    AutoDriveSection(
+                        autoConfig = autoConfig,
+                        onAutoEnabledChange = viewModel::setAutoEnabled,
+                        onWindowChange = viewModel::setAutoWindow,
+                        onProbabilityChange = viewModel::setAutoProbability,
+                    )
+                }
+                item { HorizontalDivider(modifier = Modifier.padding(top = 6.dp, bottom = 2.dp)) }
                 // T11.6 关系一览：每对会话的好感度/档位/次数（置于互动列表顶部，随互动实时刷新）
                 if (relationships.isNotEmpty()) {
                     item {
@@ -169,6 +198,7 @@ fun InteractionCenterScreen(
                         title = item.title,
                         summary = item.summary,
                         status = item.interaction.status,
+                        isAuto = item.interaction.source == InteractionSource.AUTO.name,
                         unread = item.unread,
                         onClick = { viewModel.openDetail(item.interaction) },
                     )
@@ -254,12 +284,13 @@ private fun InteractionDetailSheet(
     )
 }
 
-/** 单场互动行：双方名 + 视角摘要 + 状态 + 未读红点；点击打开详情 */
+/** 单场互动行：双方名 + 视角摘要 + 状态（自动驱动场次带「自动」标记）+ 未读红点；点击打开详情 */
 @Composable
 private fun InteractionRow(
     title: String,
     summary: String,
     status: String,
+    isAuto: Boolean,
     unread: Boolean,
     onClick: () -> Unit,
 ) {
@@ -281,11 +312,22 @@ private fun InteractionRow(
                     overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                 )
             }
-            Text(
-                text = statusLabel(status),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.outline,
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = statusLabel(status),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.outline,
+                )
+                // T11.7：自动驱动场次标记（角色自发串门，非手动发起）
+                if (isAuto) {
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "· 自动",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
+            }
         }
         if (unread) {
             Spacer(modifier = Modifier.width(8.dp))
@@ -306,6 +348,121 @@ private fun statusLabel(status: String): String = when (status) {
     InteractionStatus.SKIPPED.name -> "已跳过"
     InteractionStatus.FAILED.name -> "未完成"
     else -> "待发起"
+}
+
+/** T11.7 小时选择目标：开始 / 结束 */
+private enum class WindowField { START, END }
+
+/** 分钟 → "HH:00" 文案（T11.7 自动窗口展示用） */
+private fun windowText(minute: Int): String = "%02d:00".format(minute.coerceIn(0, 1439) / 60)
+
+/**
+ * T11.7 互动自动驱动设置区：开关 + 说明 + 窗口 chips + 概率滑块。
+ * 配置变化由上层 LaunchedEffect(autoConfig) 监听并重排当日闹钟，修改即时生效。
+ */
+@Composable
+private fun AutoDriveSection(
+    autoConfig: AutoDriveConfig,
+    onAutoEnabledChange: (Boolean) -> Unit,
+    onWindowChange: (Int, Int) -> Unit,
+    onProbabilityChange: (Float) -> Unit,
+) {
+    // 当前正在编辑的窗口字段（null=未编辑）；概率滑块本地状态（拖动只改本地，抬起才写 store，避免拖动卡顿）
+    var editing by remember { mutableStateOf<WindowField?>(null) }
+    var prob by remember { mutableStateOf(autoConfig.probability) }
+    LaunchedEffect(autoConfig.probability) { prob = autoConfig.probability }
+
+    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+        // 标题 + 开关
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = "自动驱动",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.weight(1f),
+            )
+            Switch(checked = autoConfig.autoEnabled, onCheckedChange = onAutoEnabledChange)
+        }
+        // 说明
+        Text(
+            text = "每天 ${windowText(autoConfig.windowStartMinute)}–${windowText(autoConfig.windowEndMinute)} 角色们可能自发互相串门；自动互动同样计入好感度。",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(modifier = Modifier.height(6.dp))
+        // 窗口 chips（点开始/结束分别选小时）
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            AssistChip(onClick = { editing = WindowField.START }, label = { Text("开始 ${windowText(autoConfig.windowStartMinute)}") })
+            Spacer(modifier = Modifier.width(8.dp))
+            AssistChip(onClick = { editing = WindowField.END }, label = { Text("结束 ${windowText(autoConfig.windowEndMinute)}") })
+        }
+        Spacer(modifier = Modifier.height(4.dp))
+        // 概率滑块（0.1~1.0，默认 0.3）
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = "串门概率 ${(prob * 100).roundToInt()}%",
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.weight(1f),
+            )
+            Slider(
+                value = prob,
+                onValueChange = { prob = it },
+                onValueChangeFinished = { onProbabilityChange(prob) },
+                valueRange = 0.1f..1f,
+                modifier = Modifier.weight(1f),
+            )
+        }
+    }
+
+    // 小时选择弹窗
+    editing?.let { field ->
+        HourPickerDialog(
+            title = if (field == WindowField.START) "选择开始时间" else "选择结束时间",
+            currentMinute = if (field == WindowField.START) autoConfig.windowStartMinute else autoConfig.windowEndMinute,
+            onPick = { hour ->
+                val start = if (field == WindowField.START) hour * 60 else autoConfig.windowStartMinute
+                val end = if (field == WindowField.END) hour * 60 else autoConfig.windowEndMinute
+                onWindowChange(start, end)
+                editing = null
+            },
+            onDismiss = { editing = null },
+        )
+    }
+}
+
+/** 小时选择弹窗（0~23 时，T11.7 自动窗口时段设置；高亮当前值前置于列表可滚动选择） */
+@Composable
+private fun HourPickerDialog(
+    title: String,
+    currentMinute: Int,
+    onPick: (Int) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            LazyColumn(modifier = Modifier.heightIn(max = 420.dp)) {
+                items(24) { h ->
+                    TextButton(onClick = { onPick(h) }, modifier = Modifier.fillMaxWidth()) {
+                        Text(
+                            text = "%02d:00".format(h),
+                            color = if (h * 60 == currentMinute) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.onSurface
+                            },
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("取消") }
+        },
+    )
 }
 
 /** 会话选择弹窗：点选一个可互动会话（显示角色名，便于区分不同会话角色） */

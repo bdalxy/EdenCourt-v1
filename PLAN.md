@@ -962,7 +962,18 @@ app/src/main/
   - 验收：[x] 单场互动好感度按公式累计 · [x] 分档随数值递进（20=相识/40=友好/70=亲密） · [x] 好感度跨重启持久（WAL 回放） · [x] 互动中心「关系一览」实时显示档位/分/次数 · [x] 编译+真机通过
   - 进度（2026-08-26）：✅ 已实现并真机(K60)自测通过。验证过程：无存量关系 → 注入第二个可互动会话「光羽」(card 3, 与学姐异卡)；互动中心发起「学姐→光羽」两场 → 关系一览 20 分(相识)→40 分(友好)、2 次实时刷新；**注意**：App 运行中写入在 WAL（主库文件不即时增长属正常），force-stop 后 pull 主库仍为空是 WAL 未合并——重启 App 后 UI 数据完整（WAL 回放正常）即持久化达标；真机库新增「光羽」会话与 2 场真实互动记录（非测试垃圾数据，保留）。
   - 追加（2026-08-26 会话记忆面板升级 + 好感度细分到会话角色）：① `ChatScreen.SessionMemorySheet` 重构——顶部搜索框（本地过滤共享/私有两区）+ 卡片式分区「共享记忆/本会话私密记忆」带计数角标 + 每条类型 chip·内容·时间 + 底部「前往记忆管理页」入口；② `ChatViewModel` 新增 `relationshipDao` 依赖与 `myRelationships` 流（按本会话聚合其参与的关系，解析对方名）；③ `ChatScreen.InteractionSheet` 新增「我的关系（好感度）· 角色名」区——逐条显示「与 X · 分值 · 档位色标 · 已互动 N 次」，好感度细分到会话角色；④ `AppNavHost` 接通 `onOpenMemoryManagement` → 记忆管理页。
-- **T11.7 互动自动驱动**：已授权互动的角色按概率/时间自发发起互动（参考 T8.6 定时窗口），取代纯手动触发。
+- **T11.7 互动自动驱动**（2026-08-26 立项 & 完成）：已授权互动的角色按概率/时间自发发起互动（参考 T8.6 定时窗口），取代纯手动触发。
+  - 目标：每天「自动窗口」内，已开放互动的角色两两配对，按概率自发互相串门跑一场完整双向互动（复用 T8.9 执行器），自动互动同样累计好感度（T11.6），并做冷却期去重避免同一对频繁被撮合。
+  - 操作：
+    ① `InteractionConfigStore` 扩展 `InteractionConfig`：`autoEnabled`（默认开，跟随全局总开关）/ `autoWindowStartMinute`/`autoWindowEndMinute`（默认 20:00–22:00）/ `autoProbability`（默认 0.3）
+    ② `Interaction` 实体 + `InteractionDao`：新增 `source` 字段（MANUAL/AUTO）+ Room v17→v18 迁移 + `lastAutoTimeBetween` 冷却期查询
+    ③ `InteractionAutoExecutor`：候选=已开放互动会话 → 两两配对过滤冷却期（3 天内已自动的跳过）→ 优先选「距上次互动最久/从未互动」的一对 → 按概率判定 → 复用 `InteractionExecutor.start(source=AUTO)`
+    ④ `InteractionAutoScheduler` + `InteractionAutoReceiver`：AlarmManager 在「下次窗口起点」精确闹钟（无 SCHEDULE_EXACT_ALARM 时退回非精确）；接收器按全局+自动开关 + 窗口内判断执行一次 runOnce() 后无论结果重排次日；`force=true` 调试通道（adb 显示广播）跳过窗口/概率用于真机验收；Manifest 注册 receiver（exported 仅供 adb 调试）
+    ⑤ `EdenCourtApp` 装配并启动时 schedule
+    ⑥ `InteractionCenterViewModel` + `InteractionCenterScreen`：新增「自动驱动」设置区（开关/窗口起始结束 chip 弹小时选择/概率 Slider）+ 互动列表 AUTO 标记（「自动」小标）；配置修改即重排当日闹钟
+  - 文件：`data/setting/InteractionConfigStore.kt` · `data/local/entity/Interaction.kt` · `data/local/dao/InteractionDao.kt` · `data/local/AppDatabase.kt` · `data/interaction/InteractionAutoExecutor.kt`（新增）· `InteractionAutoScheduler.kt`（新增）· `InteractionAutoReceiver.kt`（新增）· `EdenCourtApp.kt` · `AndroidManifest.xml` · `feature/interaction/InteractionCenterViewModel.kt` · `InteractionCenterScreen.kt`
+  - 验收：[x] 编译通过 · [x] force 调试通道触发自动互动 · [x] 互动记录 source=AUTO 且 COMPLETED · [x] 自动互动摘要回写双方会话 · [x] 冷却期内重复触发被拦截 · [x] 闹钟重排（精确不可用退回非精确不崩溃）
+  - 进度（2026-08-26）：✅ 已实现并真机(K60)自测通过。验证过程：App 启动即重排当日闹钟（logcat 确认精确闹钟无权限自动退回非精确，不崩溃）；`adb am broadcast -n .../.data.interaction.InteractionAutoReceiver --ez extra_force true` 触发 force 通道 → 执行器 runOnce 命中冷却期去重（返回「所有角色对都在冷却期内」）；pull 数据库核对 interaction 表存在 **id=8 source=AUTO status=COMPLETED**（此前 force 测试产生的自动互动，小夏→光羽），小夏会话内已回写「（互动）今天我去找了光羽聊…」摘要（03:59 手动 / 06:21 自动两条并存）；手动 MANUAL 与自动 AUTO 来源区分正确；冷却期去重逻辑在 force 重复触发下验证通过。**注**：真机库已确认干净（记忆仅剩 1 条真实数据「用户的昵称是Nana」），此前压测数据已不在库中，无需清理。
 
 ### 方向 D：互动服务（记忆可见性升级，用户强调：是互动不是套话）
 - **T11.8 互动信息不对等**：互动中角色只能基于「自己可见的记忆」（SHARED+亲历 / PRIVATE 仅自己）回应；B 的私密不被 A 获知；互动得知的事实沉淀为新记忆（来源=互动，非亲历），语义同 T8.6 但为角色自交往。
@@ -986,11 +997,13 @@ app/src/main/
 ## 11. 当前状态与下一步
 
 - 当前进度：
+  - **阶段 8.6（记忆系统深化 · 方向B 互动+好感度）T11.6/T11.7 已完成并真机验证（待推送）**：T11.6 好感度数值体系（互动累计好感度、分档驱动氛围与对话、好感度细分到会话角色、会话记忆面板升级）；T11.7 互动自动驱动（每日窗口 AlarmManager + 概率 + 冷却期去重 + AUTO 来源标记 + 互动中心自动驱动设置区）。真机实测：自动互动「小夏→光羽」COMPLETED 且摘要回写会话、重复触发命中冷却期去重、force 调试通道可用、手动/自动来源区分正确。
   - **阶段 8.5（v1.2b 角色间互动+用户身份）T8.7~T8.13 全部实现并真机验证通过**（commit `d0b23a8` 已推 main）：互动资格开关/关系底座/多轮执行器/三层表+digest/互动中心/手动触发/用户自设身份。真机实测：手动触发「光羽→学姐」真实多轮对话完成、摘要回写双方会话、氛围随关系标签（首次陌生寒暄）、身份「测友」全角色一致、Room v12→v15 迁移无损。「当前进度」本段看板更新待推送。
   - **阶段 8（v1.2 跨会话打听）P1/P2 均已完成并推送**（commit `3fc6af5`/`0cc8415`）：T8.0~T8.6。P1 用户话语触发、P2 每日定时自驱动均真机跑通。
   - **阶段 7（v1.1 记忆「会话级私有」底座）已全部完成并推送**：T7.1~T7.5。
-- 下一步：阶段 8.5 收尾待人工确认（互动+身份 MVP 已达标）后推送本看板更新（d0b23a8 的代码已推，仅看板状态段待补推）；随后进入下一阶段（待定）。
+- 下一步：T11.6/T11.7 已完成并真机验证，待人工审核后推送 GitHub（本次改动 13 个文件 + 新增 3 个 + Room schema v18 + PLAN 看板）；推送后进入方向 B 下一任务（T11.8 互动信息不对等）。
 - 更新记录：
+  - 2026-08-26 记忆系统深化方向B：T11.6 好感度数值体系完成（互动累计好感度分档「陌生/相识/友好/亲密」驱动氛围与对话、好感度细分到会话角色「我的关系」区、会话记忆面板升级搜索+卡片分区+类型标签）；T11.7 互动自动驱动完成（每日窗口闹钟+概率+冷却期去重+AUTO 来源标记+互动中心自动驱动设置区）。真机验证：自动互动小夏→光羽 COMPLETED 摘要回写、冷却期去重、force 通道可用。真机库已确认干净（压测数据已不在库中，仅剩 1 条真实记忆）。
   - 2026-08-25 阶段 8.5（v1.2b）T8.7~T8.13 完成并真机验证：T8.9b 互动氛围改关系标签+性格驱动；T8.13 用户自设身份唯一绑定、全角色统一称呼。手动触发互动「光羽×学姐」真机跑通（多轮/摘要回写/氛围递进），用户身份「测友」全角色一致。代码已推 main（d0b23a8），看板状态段待补推。
   - 2026-08-23 新增阶段 5.5（真人式交互）：T5.7 消息类型化预留（为远期设备控制铺路）、T5.8 动作神态气泡内小字斜体、T5.9 拆条连发+输入中状态、T5.10 双向可打断+交错；远期决策项增加「消息类型化」。
   - 2026-08-23 依据开发准备手册「四、本机已装环境路径清单」修正：环境实际已装齐（AS/SDK/JDK17），版本组合对齐 v0.5 已验证的 AGP 8.7.0 / Kotlin 2.0.20 / Gradle 8.9 / compileSdk 36；创建 local.properties、复制 gradlew wrapper；首次编译 `BUILD SUCCESSFUL`（2m3s）。

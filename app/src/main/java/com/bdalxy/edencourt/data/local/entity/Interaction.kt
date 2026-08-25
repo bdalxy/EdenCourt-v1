@@ -12,6 +12,9 @@ enum class InteractionStatus {
 /** 参与者角色（v1.2b 互动系统，T8.10）：发起方 / 目标方 */
 enum class ParticipantRole { INITIATOR, TARGET }
 
+/** 互动来源（T11.7 自动驱动）：手动发起 / 角色自动驱动 */
+enum class InteractionSource { MANUAL, AUTO }
+
 /**
  * 互动主表 interaction（v1.2b 互动系统，T8.10）。
  * 记录一场「会话角色 A → B 的双向对话」的元信息：谁发起、谁目标、话题锚点、轮次与起止时间。
@@ -31,6 +34,8 @@ data class Interaction(
     val status: String = InteractionStatus.SCHEDULED.name,
     /** 本次互动话题锚点（A 的开场抛题，每轮携带防跑偏） */
     val topicSeed: String = "",
+    /** 互动来源（T11.7：InteractionSource.name，MANUAL=手动 / AUTO=自动驱动，默认手动） */
+    val source: String = InteractionSource.MANUAL.name,
     /** 开始时间 */
     val startedAt: Long? = null,
     /** 结束时间 */

@@ -10,6 +10,7 @@ import com.bdalxy.edencourt.data.local.entity.Conversation
 import com.bdalxy.edencourt.data.local.entity.ConversationRelationship
 import com.bdalxy.edencourt.data.local.entity.Interaction
 import com.bdalxy.edencourt.data.local.entity.InteractionParticipant
+import com.bdalxy.edencourt.data.local.entity.InteractionSource
 import com.bdalxy.edencourt.data.local.entity.InteractionStatus
 import com.bdalxy.edencourt.data.local.entity.InteractionTurn
 import com.bdalxy.edencourt.data.local.entity.Message
@@ -71,9 +72,14 @@ class InteractionExecutor(
 
     /**
      * 发起一场互动：initiator 主动找 target 双向聊。
+     * @param source 互动来源（T11.7）：MANUAL=手动 / AUTO=自动驱动，默认手动；写入互动主表便于区分/去重。
      * @return 成功则带 interactionId；失败返回 message 说明原因（供 UI 文案提示）。
      */
-    suspend fun start(initiatorConvId: Long, targetConvId: Long): InteractionOutcome {
+    suspend fun start(
+        initiatorConvId: Long,
+        targetConvId: Long,
+        source: InteractionSource = InteractionSource.MANUAL,
+    ): InteractionOutcome {
         // 1. 前置校验：全局开关 / API / 会话存在 / 双方均开放互动 / 非重复执行
         val cfg = interactionConfigStore.config.firstOrNull()
         if (cfg == null || !cfg.enabled) {
@@ -116,6 +122,7 @@ class InteractionExecutor(
                     initiatorConvId = a.id,
                     targetConvId = b.id,
                     status = InteractionStatus.RUNNING.name,
+                    source = source.name,
                     startedAt = now,
                 ),
             )
@@ -147,7 +154,7 @@ class InteractionExecutor(
                 interactionDao.updateInteraction(
                     Interaction(
                         id = interactionId, initiatorConvId = a.id, targetConvId = b.id,
-                        status = InteractionStatus.FAILED.name, startedAt = now, endedAt = now, turnCount = 0, createdAt = now,
+                        status = InteractionStatus.FAILED.name, source = source.name, startedAt = now, endedAt = now, turnCount = 0, createdAt = now,
                     ),
                 )
                 return InteractionOutcome(false, message = "聊不起来，双方没接上")
@@ -170,7 +177,7 @@ class InteractionExecutor(
             interactionDao.updateInteraction(
                 Interaction(
                     id = interactionId, initiatorConvId = a.id, targetConvId = b.id,
-                    status = InteractionStatus.COMPLETED.name, topicSeed = topicSeed,
+                    status = InteractionStatus.COMPLETED.name, topicSeed = topicSeed, source = source.name,
                     startedAt = now, endedAt = now, turnCount = turns.size, createdAt = now,
                 ),
             )

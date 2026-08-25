@@ -39,6 +39,13 @@
             </intent-filter>
         </receiver>
 
+        <!-- v1.2b（T11.7）：互动自动驱动窗口闹钟接收器。
+             此处 exported=true 仅为便于 adb 显示广播手动触发调试/验收；
+             系统 AlarmManager 的 PendingIntent 走同 app 组件投递不受此限制。勿改回 false -->
+        <receiver
+            android:name=".data.interaction.InteractionAutoReceiver"
+            android:exported="true" />
+
     </application>
 
 </manifest>

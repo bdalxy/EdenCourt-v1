@@ -51,6 +51,14 @@ data class RelationshipOverview(
     val interactionCount: Int,  // 互动次数
 )
 
+/** 互动自动驱动配置（T11.7：互动中心「自动驱动」设置区展示/修改，改后立即重排当日闹钟） */
+data class AutoDriveConfig(
+    val autoEnabled: Boolean,
+    val windowStartMinute: Int,
+    val windowEndMinute: Int,
+    val probability: Float,
+)
+
 /**
  * 互动中心 ViewModel（v1.2b，T8.11/T8.12）。
  * - 全部互动列表（双方名 + 视角摘要 + 未读红点）
@@ -70,6 +78,20 @@ class InteractionCenterViewModel(
     /** 全局总开关 */
     val globalEnabled: StateFlow<Boolean> = interactionConfigStore.config.map { it.enabled }
         .stateIn(viewModelScope, SharingStarted.Eagerly, true)
+
+    /** 互动自动驱动配置（T11.7：开关/窗口/概率，随配置变化实时刷新） */
+    val autoConfig: StateFlow<AutoDriveConfig> = interactionConfigStore.config.map { cfg ->
+        AutoDriveConfig(
+            autoEnabled = cfg.autoEnabled,
+            windowStartMinute = cfg.autoWindowStartMinute,
+            windowEndMinute = cfg.autoWindowEndMinute,
+            probability = cfg.autoProbability,
+        )
+    }.stateIn(
+        viewModelScope,
+        SharingStarted.Eagerly,
+        AutoDriveConfig(true, 20 * 60, 22 * 60, 0.3f),
+    )
 
     /** 全部互动（倒序） */
     private val interactions = interactionDao.observeAll()
@@ -173,6 +195,30 @@ class InteractionCenterViewModel(
     /** 切换全局总开关 */
     fun setGlobalEnabled(enabled: Boolean) {
         viewModelScope.launch { interactionConfigStore.setEnabled(enabled) }
+    }
+
+    /** T11.7：切换互动自动驱动开关 */
+    fun setAutoEnabled(enabled: Boolean) {
+        viewModelScope.launch { interactionConfigStore.update { it.copy(autoEnabled = enabled) } }
+    }
+
+    /** T11.7：设置自动驱动窗口（起止分钟），结束分钟不低于开始+1（避免空窗口） */
+    fun setAutoWindow(startMinute: Int, endMinute: Int) {
+        viewModelScope.launch {
+            interactionConfigStore.update {
+                it.copy(
+                    autoWindowStartMinute = startMinute.coerceIn(0, 23 * 60 + 59),
+                    autoWindowEndMinute = endMinute.coerceIn(startMinute + 1, 23 * 60 + 59),
+                )
+            }
+        }
+    }
+
+    /** T11.7：设置自动驱动概率（0.1~1.0） */
+    fun setAutoProbability(probability: Float) {
+        viewModelScope.launch {
+            interactionConfigStore.update { it.copy(autoProbability = probability.coerceIn(0.1f, 1f)) }
+        }
     }
 
     /** 发起一场互动：A（发起方）→ B（目标） */

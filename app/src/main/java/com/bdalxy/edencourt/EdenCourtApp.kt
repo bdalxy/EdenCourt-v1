@@ -13,6 +13,8 @@ import com.bdalxy.edencourt.data.remote.RemoteApiChatService
 import com.bdalxy.edencourt.data.search.MemorySearchService
 import com.bdalxy.edencourt.data.consult.DailyConsultExecutor
 import com.bdalxy.edencourt.data.consult.DailyConsultScheduler
+import com.bdalxy.edencourt.data.interaction.InteractionAutoExecutor
+import com.bdalxy.edencourt.data.interaction.InteractionAutoScheduler
 import com.bdalxy.edencourt.data.interaction.InteractionExecutor
 import com.bdalxy.edencourt.data.repository.ChatRepository
 import com.bdalxy.edencourt.data.repository.CrossSessionConsultService
@@ -36,6 +38,10 @@ class EdenCourtApp : Application() {
         // 首次启动播种内置角色卡（幂等，已存在则跳过；T4.4）
         applicationScope.launch {
             BuiltInCards.seed(characterCardDao)
+        }
+        // T11.7 互动自动驱动：App 启动即安排当日自动窗口闹钟（总开关/自动开关任一关闭时自动取消）
+        applicationScope.launch {
+            interactionAutoScheduler.schedule(this@EdenCourtApp)
         }
     }
 
@@ -162,5 +168,21 @@ class EdenCourtApp : Application() {
             aiChatService = aiChatService,
             userIdentityDao = userIdentityDao,
         )
+    }
+
+    /** 互动自动驱动执行器单例（v1.2b，T11.7：窗口内选对+概率→复用 interactionExecutor 跑互动） */
+    val interactionAutoExecutor: InteractionAutoExecutor by lazy {
+        InteractionAutoExecutor(
+            conversationDao = conversationDao,
+            interactionDao = interactionDao,
+            relationshipDao = relationshipDao,
+            interactionConfigStore = interactionConfigStore,
+            interactionExecutor = interactionExecutor,
+        )
+    }
+
+    /** 互动自动驱动定时调度器单例（v1.2b，T11.7：AlarmManager 每日自动窗口） */
+    val interactionAutoScheduler: InteractionAutoScheduler by lazy {
+        InteractionAutoScheduler(interactionConfigStore)
     }
 }

@@ -75,4 +75,12 @@ interface InteractionDao {
     /** 标记参与者已读（红点消除） */
     @Query("UPDATE interaction_participant SET readAt = :at WHERE id = :id")
     suspend fun markParticipantRead(id: Long, at: Long)
+
+    /** 某对会话最近一次【自动驱动】互动的创建时间（T11.7 冷却期去重：从未自动互动过则 null） */
+    @Query(
+        "SELECT MAX(createdAt) FROM interaction " +
+            "WHERE source = 'AUTO' " +
+            "AND ((initiatorConvId = :a AND targetConvId = :b) OR (initiatorConvId = :b AND targetConvId = :a))",
+    )
+    suspend fun lastAutoTimeBetween(a: Long, b: Long): Long?
 }
