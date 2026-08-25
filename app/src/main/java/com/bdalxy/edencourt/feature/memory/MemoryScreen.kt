@@ -25,6 +25,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -103,6 +104,8 @@ fun MemoryScreen(onBack: () -> Unit) {
     var detailId by remember { mutableStateOf<Long?>(null) }
     // 是否显示时间轴视图（T10.7 顶栏入口切换，与详情/列表互斥）
     var showTimeline by remember { mutableStateOf(false) }
+    // 是否显示共现热词页（阶段三 T11.1 顶栏入口切换）
+    var showHotwords by remember { mutableStateOf(false) }
 
     val detailIdValue = detailId
     if (detailIdValue != null) {
@@ -111,6 +114,9 @@ fun MemoryScreen(onBack: () -> Unit) {
     } else if (showTimeline) {
         // 时间轴视图（阶段二可视化 T10.7：按天分组的记忆演化）
         TimelineScreen(onBack = { showTimeline = false })
+    } else if (showHotwords) {
+        // 共现热词页（阶段三 T11.1：关键词排行 → 筛相关记忆）
+        HotwordScreen(onBack = { showHotwords = false })
     } else {
         Scaffold(
         topBar = {
@@ -125,6 +131,10 @@ fun MemoryScreen(onBack: () -> Unit) {
                     // 时间轴入口（阶段二可视化 T10.7）
                     IconButton(onClick = { showTimeline = true }) {
                         Icon(Icons.Filled.DateRange, contentDescription = "时间轴")
+                    }
+                    // 共现热词入口（阶段三 T11.1）
+                    IconButton(onClick = { showHotwords = true }) {
+                        Icon(Icons.Filled.Star, contentDescription = "共现热词")
                     }
                 },
             )
