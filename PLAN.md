@@ -931,7 +931,15 @@ app/src/main/
   - 文件：`data/local/dao/MemoryDao.kt` · `data/repository/MemoryRepository.kt` · `feature/memory/MemoryViewModel.kt` · `feature/memory/MemoryScreen.kt`
   - 验收：[x] 长按进入多选 · [x] 点选追加/取消勾选 · [x] 全选/全不选 · [x] 批量设重要/置顶数据正确 · [x] 批量删除二次确认 · [x] 操作后退出多选 · [x] 返回键退出多选 · [x] 编译+真机通过
   - 进度（2026-08-26）：✅ 已实现并真机(K60)自测通过。验证过程：ADB `input swipe` 原地长按 900ms 可稳定触发 `onLongClick`（此前 motionevent/drag 均失败）；多选勾选/取消/全选正常；批量「设重要」概览重要 40→42、批量「取消置顶」置顶 5→3、批量删除 5001→5000 数据均正确；**期间发现并修复 UX 问题**：批量删除已退出多选但「更多操作」4 项未退出 → 4 处 DropdownMenuItem 补齐退出逻辑。
-- **T11.4 记忆导入导出**：导出为 JSON（备份，存 Download 目录）；导入（SAF 选文件，校验后入库，保留类型/角色归属/可见性）。
+- **T11.4 记忆导入导出**（2026-08-26 立项 & 完成）：
+  - 目标：记忆一键备份（导出 JSON）与恢复（从 JSON 导入），跨设备迁移不丢类型/角色归属/可见性/置顶/重要等字段
+  - 操作：
+    ① `MemoryRepository` 定义备份 DTO（`BackupMemory`/`MemoryBackup`，version 字段供格式演进）；`buildBackupJson` 序列化全部未删记忆（角色归属记录为「显示名 remark>name」，跨设备导入按名匹配现有角色卡）；`importBackupJson` 反序列化并逐条入库（校验 kind=memory_backup、跳过空内容条、字段值解析失败回落默认）
+    ② `MemoryViewModel` 新增 `exportBackup`（构建 JSON 回传）与 `importBackup`（解析入库后刷新列表，回传成功条数）
+    ③ `MemoryScreen` 顶栏「备份/恢复」菜单（导出走 SAF CreateDocument 写 JSON 到 Download；导入走 SAF OpenDocument 读文件，成功后 Toast 提示条数）
+  - 文件：`data/repository/MemoryRepository.kt` · `feature/memory/MemoryViewModel.kt` · `feature/memory/MemoryScreen.kt`
+  - 验收：[x] 导出生成 JSON 备份文件 · [x] 导入 3 条测试记忆入库且类型/角色归属/可见性/置顶/重要/私密/短期/过期时间全保留 · [x] 列表展示正确（角色 Tab/分类 Tab 联动）· [x] 非法/空文件有提示 · [x] 编译+真机通过
+  - 进度（2026-08-26）：✅ 已实现并真机(K60)自测通过。导出经 SAF 写入 Download（`EdenCourt-记忆备份-*.json`）；测试导入 `import_test.json`（含小夏/阿杰/无归属 3 条，覆盖置顶+重要、私密+绝密+短期、无归属三类）→ 概览 4920→4923、置顶/重要/私密 0→1、小夏/阿杰 +1，列表项「📌置顶·⭐重要」「⏰短期」「手动/未归属」展示全部正确；**测试过程发现**：SAF 文件选择器搜不到 adb push 的文件 → 需先 `content call --method scan_file/scan_volume` 触发媒体扫描；搜索框注入中文用 ADBKeyboard B64、ASCII 下划线 `_` 会被 `input text` 转成全角破折号（改用 B64）；测试后已批量删除 3 条测试数据恢复 4920。
 - **T11.5 关系图谱**：按关键词共现/关联构建节点-边图（记忆→图谱可视化），复用 T11.1 共现词。
 
 ### 方向 B：互动 + 好感度（角色自交往）

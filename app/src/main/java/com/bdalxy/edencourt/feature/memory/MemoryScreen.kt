@@ -1,7 +1,10 @@
 package com.bdalxy.edencourt.feature.memory
 
 import android.util.Log
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -126,6 +129,44 @@ fun MemoryScreen(onBack: () -> Unit) {
     var pendingBatchDelete by remember { mutableStateOf(false) }
     // 「更多操作」菜单开关（T11.3：设重要/取消重要/置顶/取消置顶）
     var moreMenuExpanded by remember { mutableStateOf(false) }
+    // 「备份/恢复」菜单开关（T11.4：导出/导入记忆 JSON）
+    var backupMenuExpanded by remember { mutableStateOf(false) }
+
+    // 导出：SAF 让用户选保存位置（默认 Download），写记忆备份 JSON 文件（T11.4）
+    val exportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/json"),
+    ) { uri ->
+        if (uri != null) {
+            viewModel.exportBackup { json ->
+                val ok = runCatching {
+                    context.contentResolver.openOutputStream(uri)?.use { it.write(json.toByteArray(Charsets.UTF_8)) }
+                }.isSuccess
+                Toast.makeText(context, if (ok) "记忆已导出" else "导出失败", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    // 导入：SAF 选备份 JSON 文件，解析入库并刷新列表（T11.4）
+    val importLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri != null) {
+            val text = runCatching {
+                context.contentResolver.openInputStream(uri)?.use { it.bufferedReader(Charsets.UTF_8).readText() }
+            }.getOrNull()
+            if (text.isNullOrBlank()) {
+                Toast.makeText(context, "读取文件失败或为空", Toast.LENGTH_SHORT).show()
+            } else {
+                viewModel.importBackup(text) { count ->
+                    Toast.makeText(
+                        context,
+                        if (count > 0) "成功导入 $count 条记忆" else "未导入：文件为空或格式不对",
+                        Toast.LENGTH_SHORT,
+                    ).show()
+                }
+            }
+        }
+    }
 
     // 多选模式：系统返回键退出多选（T11.3，避免误回上一页）
     BackHandler(enabled = selectionMode) {
@@ -228,6 +269,33 @@ fun MemoryScreen(onBack: () -> Unit) {
                     navigationIcon = {
                         IconButton(onClick = onBack) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                        }
+                    },
+                    // T11.4 备份/恢复：导出记忆为 JSON、从 JSON 导入记忆
+                    actions = {
+                        Box {
+                            IconButton(onClick = { backupMenuExpanded = true }) {
+                                Icon(Icons.Filled.MoreVert, contentDescription = "备份/恢复")
+                            }
+                            DropdownMenu(
+                                expanded = backupMenuExpanded,
+                                onDismissRequest = { backupMenuExpanded = false },
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text("导出记忆（备份 JSON）") },
+                                    onClick = {
+                                        backupMenuExpanded = false
+                                        exportLauncher.launch("EdenCourt-记忆备份-${System.currentTimeMillis()}.json")
+                                    },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("导入记忆（从 JSON 恢复）") },
+                                    onClick = {
+                                        backupMenuExpanded = false
+                                        importLauncher.launch(arrayOf("application/json", "text/plain", "*/*"))
+                                    },
+                                )
+                            }
                         }
                     },
                 )

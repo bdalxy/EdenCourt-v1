@@ -1,9 +1,11 @@
 package com.bdalxy.edencourt.data.repository
 
 import com.bdalxy.edencourt.data.local.dao.MemoryDao
+import com.bdalxy.edencourt.data.local.entity.MemoryImportance
 import com.bdalxy.edencourt.data.local.entity.MemoryItem
 import com.bdalxy.edencourt.data.local.entity.MemoryType
 import com.bdalxy.edencourt.data.local.entity.MemoryVisibility
+import com.bdalxy.edencourt.data.local.entity.TimeScope
 import com.bdalxy.edencourt.data.remote.AiChatService
 import com.bdalxy.edencourt.data.remote.ChatMessage
 import com.bdalxy.edencourt.data.setting.ApiConfigStore
@@ -13,6 +15,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
 /**
@@ -44,6 +47,36 @@ class MemoryRepository(
 
     /** 提取 JSON 解析器：忽略未知字段，容忍 AI 输出不规范 */
     private val json = Json { ignoreUnknownKeys = true }
+
+    /** T11.4 记忆导入导出：单条记忆的备份 DTO（不含自增 id，跨设备恢复时重新分配） */
+    @Serializable
+    private data class BackupMemory(
+        @SerialName("type") val type: String = "OTHER",
+        @SerialName("content") val content: String = "",
+        @SerialName("keywords") val keywords: String = "",
+        @SerialName("confidence") val confidence: Float = 1f,
+        // 归属角色「显示名」（remark>name），用于跨设备导入时按名匹配现有角色卡；无归属=null
+        @SerialName("characterName") val characterName: String? = null,
+        @SerialName("visibility") val visibility: String = "SHARED",
+        @SerialName("isTopSecret") val isTopSecret: Boolean = false,
+        @SerialName("timeScope") val timeScope: String = "LONG_TERM",
+        @SerialName("expiresAt") val expiresAt: Long? = null,
+        @SerialName("isPinned") val isPinned: Boolean = false,
+        @SerialName("importance") val importance: String = "NORMAL",
+        @SerialName("locked") val locked: Boolean = false,
+        @SerialName("createdAt") val createdAt: Long = System.currentTimeMillis(),
+        @SerialName("updatedAt") val updatedAt: Long = System.currentTimeMillis(),
+    )
+
+    /** T11.4 记忆导入导出：备份文件根结构（version 供将来格式演进兼容） */
+    @Serializable
+    private data class MemoryBackup(
+        @SerialName("app") val app: String = "EdenCourt",
+        @SerialName("kind") val kind: String = "memory_backup",
+        @SerialName("version") val version: Int = 1,
+        @SerialName("exportedAt") val exportedAt: Long = System.currentTimeMillis(),
+        @SerialName("memories") val memories: List<BackupMemory> = emptyList(),
+    )
 
     /** 记忆类型中文标签（提取 prompt 中展示已有记忆类型用） */
     private val MemoryType.label: String
@@ -216,6 +249,82 @@ class MemoryRepository(
     /** 更新单条记忆（详情页编辑/置顶/重要/锁定/可见性切换；自动刷新 updatedAt，T10.1） */
     suspend fun updateMemory(item: MemoryItem) {
         dao.update(item.copy(updatedAt = System.currentTimeMillis()))
+    }
+
+    /**
+     * T11.4 记忆导出：把全部未删除记忆序列化为备份 JSON（供 SAF 写文件）。
+     * @param nameOf 角色卡 id → 显示名（remark>name）的映射，用于跨设备恢复归属；无归属返回 null
+     * @return 格式化备份 JSON 字符串
+     */
+    suspend fun buildBackupJson(nameOf: (Long?) -> String?): String {
+        val backup = MemoryBackup(
+            memories = dao.getAllActive().map { m ->
+                BackupMemory(
+                    type = m.type.name,
+                    content = m.content,
+                    keywords = m.keywords,
+                    confidence = m.confidence,
+                    characterName = nameOf(m.characterCardId),
+                    visibility = m.visibility.name,
+                    isTopSecret = m.isTopSecret,
+                    timeScope = m.timeScope.name,
+                    expiresAt = m.expiresAt,
+                    isPinned = m.isPinned,
+                    importance = m.importance.name,
+                    locked = m.locked,
+                    createdAt = m.createdAt,
+                    updatedAt = m.updatedAt,
+                )
+            },
+        )
+        return Json { ignoreUnknownKeys = true; prettyPrint = true }.encodeToString<MemoryBackup>(backup)
+    }
+
+    /**
+     * T11.4 记忆导入：解析备份 JSON 并逐条入库（保留类型/角色归属/可见性/置顶/重要等字段）。
+     * @param text 备份 JSON 文本
+     * @param cardIdOfName 角色显示名 → 角色卡 id 的映射（匹配不到返回 null=不归属）
+     * @return 成功导入条数（解析失败或空内容条被跳过）
+     */
+    suspend fun importBackupJson(text: String, cardIdOfName: (String?) -> Long?): Int {
+        val backup = runCatching { json.decodeFromString<MemoryBackup>(text) }
+            .getOrElse { e ->
+                Log.w(TAG, "记忆导入失败：JSON 解析异常 ${e.message}")
+                return 0
+            }
+        if (backup.kind != "memory_backup") {
+            Log.w(TAG, "记忆导入失败：非记忆备份文件 kind=${backup.kind}")
+            return 0
+        }
+        var count = 0
+        backup.memories.forEach { bm ->
+            val content = bm.content.trim()
+            if (content.isBlank()) return@forEach
+            val type = runCatching { MemoryType.valueOf(bm.type.uppercase()) }.getOrDefault(MemoryType.OTHER)
+            val visibility = runCatching { MemoryVisibility.valueOf(bm.visibility.uppercase()) }.getOrDefault(MemoryVisibility.SHARED)
+            val timeScope = runCatching { TimeScope.valueOf(bm.timeScope.uppercase()) }.getOrDefault(TimeScope.LONG_TERM)
+            val importance = runCatching { MemoryImportance.valueOf(bm.importance.uppercase()) }.getOrDefault(MemoryImportance.NORMAL)
+            dao.insert(
+                MemoryItem(
+                    type = type,
+                    content = content,
+                    keywords = bm.keywords,
+                    confidence = bm.confidence,
+                    characterCardId = cardIdOfName(bm.characterName),
+                    visibility = visibility,
+                    isTopSecret = bm.isTopSecret,
+                    timeScope = timeScope,
+                    expiresAt = bm.expiresAt,
+                    isPinned = bm.isPinned,
+                    importance = importance,
+                    locked = bm.locked,
+                    createdAt = bm.createdAt,
+                    updatedAt = bm.updatedAt,
+                ),
+            )
+            count++
+        }
+        return count
     }
 
     // ---------- 提取（T5.3） ----------

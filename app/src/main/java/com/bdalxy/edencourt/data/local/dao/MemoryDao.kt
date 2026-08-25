@@ -21,6 +21,10 @@ interface MemoryDao {
     @Insert
     suspend fun insert(item: MemoryItem): Long
 
+    /** 批量新增（T11.4 记忆导入：一次事务插入多条，返回各条生成的 id） */
+    @Insert
+    suspend fun insertAll(items: List<MemoryItem>): List<Long>
+
     /** 更新记忆条目（编辑内容/置信度/软删除标记时使用） */
     @Update
     suspend fun update(item: MemoryItem)

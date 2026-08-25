@@ -227,6 +227,37 @@ class MemoryViewModel(
         }
     }
 
+    /**
+     * T11.4 记忆导出：构建备份 JSON（角色归属记录为「显示名 remark>name」，跨设备导入时按名匹配）。
+     * @param onDone 构建完成后回调（回调在 ViewModel 协程，写文件在调用方）
+     */
+    fun exportBackup(onDone: (String) -> Unit) {
+        viewModelScope.launch {
+            val nameOf: (Long?) -> String? = { cardId ->
+                cardId?.let { id ->
+                    characters.value.firstOrNull { it.id == id }?.let { it.remark.ifBlank { it.name } }
+                }
+            }
+            onDone(repository.buildBackupJson(nameOf))
+        }
+    }
+
+    /**
+     * T11.4 记忆导入：解析备份 JSON 入库（角色归属按显示名匹配现有角色卡，匹配不到=不归属），完成后刷新列表。
+     * @param onDone 导入完成回调，参数=成功导入条数
+     */
+    fun importBackup(text: String, onDone: (Int) -> Unit) {
+        viewModelScope.launch {
+            val cardIdOfName: (String?) -> Long? = { name ->
+                if (name.isNullOrBlank()) null
+                else characters.value.firstOrNull { it.remark == name || it.name == name }?.id
+            }
+            val count = repository.importBackupJson(text, cardIdOfName)
+            reloadFirstPage()
+            onDone(count)
+        }
+    }
+
     /** 重置到第一页重查：加载首页 + 总数 + 各分类计数 */
     private suspend fun reloadFirstPage() {
         val (manual, card) = resolveCardFilter()
