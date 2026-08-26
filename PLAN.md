@@ -1033,13 +1033,14 @@ app/src/main/
     ① 新增关系事件实体（`relationship_event`：关系对+场景/主题/氛围/要点/时间）与迁移；`InteractionExecutor` 互动成功后沉淀事件
     ② `InteractionCenterViewModel/Screen` 新增「关系故事」区（时间线里程碑）
     ③ `PromptBuilder` 事件注入（让对话有「我们经历过」的连续性）
-  - 文件：`data/local/entity/RelationshipEvent.kt`（新增）· `data/local/dao/RelationshipDao.kt` · `AppDatabase.kt`（迁移）· `data/interaction/InteractionExecutor.kt` · `feature/interaction/InteractionCenterViewModel.kt` · `InteractionCenterScreen.kt` · `domain/PromptBuilder.kt`
+  - 文件：`data/local/entity/RelationshipEvent.kt`（新增）· `data/local/dao/RelationshipDao.kt` · `AppDatabase.kt`（迁移）· `data/interaction/InteractionExecutor.kt` · `feature/interaction/InteractionCenterViewModel.kt` · `InteractionCenterScreen.kt` · `domain/PromptBuilder.kt` · `feature/settings/SettingsScreen.kt`（互动中心入口，T11.13 补）
   - 验收：[x] 每场互动沉淀事件 · [x] 关系故事区展示里程碑叙事 · [x] 好感度数值仍显示并累计（不冲突） · [x] 编译+真机通过
   - 实现（2026-08-26）：
     - ① 新增 `RelationshipEvent` 实体（relationship_event 表，convAId<convBId 规范化；scene/topic/mood/points/source/happenedAt）；`RelationshipDao` 加 insertEvent/observeAllEvents/observeEventsBetween/recentEventsForConversation；`AppDatabase` v21→v22 迁移建表+索引；`InteractionExecutor.start()` 互动成功后沉淀事件：场景=因由（motive 非空记「因为「…」」否则「日常」）、主题=话题锚点、氛围=互动前好感度档位、要点=双方视角摘要合并
     - ② 互动中心「关系故事（共同经历）」区：位于关系一览下方、互动列表上方，时间线倒序展示（双方名+氛围档位+自动标记+场景/主题+要点2行+时间）
     - ③ `PromptBuilder.build` 新增 `relationshipEventsText` 注入；`ChatViewModel.buildPrompt` 组装本会话最近 3 条共同经历事件片段（「你和{对方}一起…」），让角色记得「我们共同经历过」，对话有连续性
-  - 真机验证（K60）：v22 迁移成功（user_version=22，relationship_event 表结构正确）；force 触发互动 #12 后沉淀事件（scene=日常、topic=「光羽，最近降温啦…」、mood=亲密、points=双方摘要、source=AUTO）✓；好感度数值/档位/次数仍展示（关系一览未动）✓；编译通过 ✓
+    - ④ 设置页新增「互动中心」入口卡（T11.13 补，用户需求）：紧凑导航卡置于角色作息之后，点击跳转互动中心（AppNavHost 传 onOpenInteraction）
+  - 真机验证（K60）：v22 迁移成功（user_version=22，relationship_event 表结构正确）；force 触发互动 #12 后沉淀事件（scene=日常、topic=「光羽，最近降温啦…」、mood=亲密、points=双方摘要、source=AUTO）✓；好感度数值/档位/次数仍展示（关系一览「亲密 · 140 分 · 7 次」未受影响）✓；设置页→互动中心入口点击跳转成功（uiautomator 验证 UI 渲染：关系故事时间线完整显示）✓；编译通过 ✓
 - **T11.16 共同内容会话「一起看 v1」（N5，2026-08-26 用户新增）**：
   - 依赖：T11.13（关系事件沉淀）、T2.4（聊天流式）
   - 目标：用户**主动分享**内容（粘贴一段文字/小说段落/截图说明/说"我在看 XX"）→ 角色进入「陪看模式」：讨论剧情、吐槽、猜后续、回应进度；陪看完沉淀为「共同经历」关系事件（主题/讨论/氛围）进关系故事区，并喂给自发动机（T11.12 的"因事而起"素材）。**红线：绝不读取用户设备上在放什么**（前台 App/剪贴板监控=越权），只处理用户主动发来的内容

@@ -14,12 +14,16 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.Alignment
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -70,10 +74,14 @@ private val MODEL_PRESETS = listOf(
     "deepseek-reasoner",
 )
 
-/** 设置页：AI API 配置 + 我的身份 + 角色作息（T3.3 + T8.13 + T11.10，参考企划书 5.3.5） */
+/** 设置页：AI API 配置 + 我的身份 + 角色作息 + 互动中心入口（T3.3 + T8.13 + T11.10 + T11.13，参考企划书 5.3.5） */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsScreen(onBack: () -> Unit) {
+fun SettingsScreen(
+    onBack: () -> Unit,
+    // T11.13：互动中心入口（从设置页也能进入）
+    onOpenInteraction: () -> Unit,
+) {
     val context = LocalContext.current.applicationContext as Application
     val viewModel: SettingsViewModel = viewModel(factory = SettingsViewModel.factory(context))
 
@@ -100,6 +108,8 @@ fun SettingsScreen(onBack: () -> Unit) {
             item { IdentitySettingsSection(viewModel = viewModel) }
             // 第 3 区：角色作息（T11.10，可调，即时生效）
             item { ScheduleSettingsSection(viewModel = viewModel) }
+            // 第 4 区：互动中心入口（T11.13，从设置页也能进入：查看/发起互动、自动驱动、关系故事）
+            item { InteractionCenterSection(onOpenInteraction = onOpenInteraction) }
         }
     }
 }
@@ -547,6 +557,57 @@ private fun PresetOutlinedTextField(
                     },
                 )
             }
+        }
+    }
+}
+
+/**
+ * 第 4 区：互动中心入口（T11.13，从设置页也能进入）。
+ * 紧凑导航卡：点击跳转互动中心（查看/发起角色互动、自动驱动设置、关系故事时间线）。
+ * 做成单行入口而非展开大区块，保持设置页清爽不杂乱。
+ */
+@Composable
+private fun InteractionCenterSection(onOpenInteraction: () -> Unit) {
+    Card(
+        onClick = onOpenInteraction,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+        ),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                imageVector = Icons.Filled.Star,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(20.dp),
+            )
+            Spacer(modifier = Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "互动中心",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                )
+                Text(
+                    text = "查看与发起角色互动、自动驱动、关系故事（共同经历）",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Text(
+                text = "›",
+                style = MaterialTheme.typography.titleLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }

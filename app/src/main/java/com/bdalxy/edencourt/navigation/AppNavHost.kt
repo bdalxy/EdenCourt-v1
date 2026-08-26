@@ -53,7 +53,11 @@ fun AppRoot() {
             MemoryScreen(onBack = { navController.popBackStack() })
         }
         composable(NavRoutes.SETTINGS) {
-            SettingsScreen(onBack = { navController.popBackStack() })
+            SettingsScreen(
+                onBack = { navController.popBackStack() },
+                // T11.13：设置页也能进入互动中心
+                onOpenInteraction = { navController.navigate(NavRoutes.INTERACTION_CENTER) },
+            )
         }
         composable(NavRoutes.ABOUT) {
             AboutScreen(onBack = { navController.popBackStack() })
