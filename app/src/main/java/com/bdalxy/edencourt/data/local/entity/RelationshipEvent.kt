@@ -17,9 +17,9 @@ import androidx.room.PrimaryKey
 data class RelationshipEvent(
     @PrimaryKey(autoGenerate = true)
     val id: Long = 0L,
-    /** 会话 A（小 id） */
+    /** 会话 A（小 id）；用户共同观看事件时=本角色会话 */
     val convAId: Long,
-    /** 会话 B（大 id） */
+    /** 会话 B（大 id）；用户共同观看事件时=0（表示用户侧，T11.16） */
     val convBId: Long,
     /** 场景（T11.13）：这场互动发生在什么情境下——事件驱动时记「因为「{因由}」」，否则「日常」 */
     val scene: String = "",
@@ -31,6 +31,15 @@ data class RelationshipEvent(
     val points: String = "",
     /** 互动来源（InteractionSource.name：MANUAL=手动 / AUTO=自动驱动） */
     val source: String = InteractionSource.MANUAL.name,
+    /** 事件类型（T11.16）：INTERACTION=角色间互动共同经历 / WATCH=用户共同观看（你主动分享内容后一起看） */
+    val type: String = TYPE_INTERACTION,
     /** 发生时间 */
     val happenedAt: Long = System.currentTimeMillis(),
-)
+) {
+    companion object {
+        /** 角色间互动共同经历（默认，T11.13） */
+        const val TYPE_INTERACTION = "INTERACTION"
+        /** 用户共同观看：你主动分享内容（粘贴/截图说明/「我在看XX」）→ 角色陪看，T11.16 */
+        const val TYPE_WATCH = "WATCH"
+    }
+}

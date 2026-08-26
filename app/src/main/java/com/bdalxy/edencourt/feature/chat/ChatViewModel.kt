@@ -19,6 +19,7 @@ import com.bdalxy.edencourt.data.local.entity.MemoryItem
 import com.bdalxy.edencourt.data.local.entity.Message
 import com.bdalxy.edencourt.data.local.entity.MessageStatus
 import com.bdalxy.edencourt.data.local.entity.ParticipantRole
+import com.bdalxy.edencourt.data.local.entity.RelationshipEvent
 import com.bdalxy.edencourt.data.local.entity.Role
 import com.bdalxy.edencourt.data.remote.AiChatService
 import com.bdalxy.edencourt.data.remote.ApiErrorKind
@@ -338,6 +339,20 @@ class ChatViewModel(
      */
     private var generationCounter = 0L
 
+    // ===== T11.16 共同内容会话「一起看」：用户主动分享内容 → 角色陪看 =====
+
+    /** 本次待沉淀的共同观看事件（发送时检测到分享 → AI 回复完成后沉淀，T11.16） */
+    private var pendingWatch: WatchShare? = null
+
+    /** 最近一次沉淀「共同观看」事件的时间戳（本会话，防同一次陪看刷多事件） */
+    private var lastWatchEventAt: Long = 0L
+
+    /** 一次用户分享 + 角色陪看回复（沉淀为共同经历事件用） */
+    private data class WatchShare(
+        val topic: String,      // 内容主题（提取自分享语句）
+        val userContent: String, // 用户分享的原文（作为讨论要点素材）
+    )
+
     init {
         viewModelScope.launch {
             // 空会话时插入欢迎语：绑定角色卡且有开场白则用角色开场白，否则用默认助手欢迎语（T4.6）
@@ -383,6 +398,8 @@ class ChatViewModel(
                 return@launch
             }
             // 4. 否则走正常流程：确保回复泵在跑（生成中连发的消息已入库，泵下轮循环自动取到并攒批回复）
+            // T11.16：检测用户是否在分享内容（陪看模式），命中则记录待沉淀主题（含原文作讨论要点素材）
+            pendingWatch = detectWatchContent(content)?.let { WatchShare(it, content) }
             ensureReplyPumpRunning()
         }
     }
@@ -420,6 +437,84 @@ class ChatViewModel(
         var question = text.replace(trigger, "").trim()
         matchedName?.let { question = question.replace(it, "").trim() }
         return ConsultRequest(targetConversationId = targetId, question = question.ifBlank { text })
+    }
+
+    // ===== T11.16 共同内容会话「一起看」：分享内容检测 =====
+
+    /** 陪看触发词：明确表达「我在看/分享」意图的短语（命中即视为分享内容） */
+    private val watchTriggers = listOf(
+        "我在看", "在追", "刚看完", "看完了", "追到", "更新了", "新出了", "出新",
+        "分享", "发你", "给你看", "一起看", "这段剧情", "这个剧情", "这段",
+        "这部", "这篇", "这个番", "这本小说", "这本漫画", "最新章节", "最新一集",
+        "看到第", "看到哪", "看到这里",
+    )
+
+    /** 粘贴正文判定阈值：无明确触发词但消息超长（如整段粘贴的小说/剧情文字）也视为分享 */
+    private val WATCH_PASTE_MIN_LENGTH = 60
+
+    /** 同一次陪看沉淀冷却（毫秒）：10 分钟内不重复沉淀，避免连发刷多事件 */
+    private val WATCH_EVENT_COOLDOWN_MS = 10 * 60 * 1000L
+
+    /**
+     * 检测用户消息是否为「分享内容」→ 进入陪看模式（T11.16）。
+     * - 规则 1：命中陪看触发词（我在看 XX / 分享 / 这段剧情…）→ 提取触发词后的内容为主题；
+     * - 规则 2：无触发词但文本超长（粘贴整段正文/小说/截图说明）→ 取开头片段为主题。
+     * 红线：只处理用户**主动发来**的消息，绝不读取设备上正在看什么（前台 App/剪贴板监控=越权）。
+     * @return 检测到分享则返回主题（供 prompt 注入与事件 topic），否则 null
+     */
+    private fun detectWatchContent(text: String): String? {
+        val trigger = watchTriggers.firstOrNull { text.contains(it) }
+        if (trigger != null) {
+            // 规则 1：主题 = 触发词后的内容（如「我在看 海贼王」→「海贼王」）
+            val after = text.substringAfter(trigger, "").trim().trimStart('：', ':', '，', ',', ' ')
+            return extractWatchTopic(after.ifBlank { text })
+        }
+        // 规则 2：超长粘贴正文视为分享内容
+        if (text.length >= WATCH_PASTE_MIN_LENGTH) return extractWatchTopic(text)
+        return null
+    }
+
+    /** 提取分享内容主题：取文本前 20 字并去掉结尾标点（用于 prompt/事件 topic 的简洁锚点） */
+    private fun extractWatchTopic(text: String): String {
+        val head = text.trim().replace('\n', ' ').take(20)
+            .trimEnd('。', '！', '？', '，', '；', '…', '!', '?', '.', ' ')
+        return head.ifBlank { "你分享的内容" }
+    }
+
+    /** 陪看模式注入片段（T11.16）：让角色以陪看口吻回应讨论/吐槽/猜后续 */
+    private fun buildWatchModeText(topic: String): String =
+        "【陪看模式】用户正在和你分享内容、一起看「$topic」。" +
+            "请像朋友一起追番追文那样回应：可以讨论剧情、吐槽角色、分享感想、猜后续发展，" +
+            "并自然追问「看到哪了」「看完一定要告诉我结局」之类的跟进话。" +
+            "记住你们是在一起看的同伴，不是你在单向解说，要像真人一样有来有回。"
+
+    /**
+     * T11.16：AI 回复完成后，把本次「用户分享 + 角色陪看」沉淀为「共同经历」关系事件。
+     * - 复用 T11.13 关系事件表，type=WATCH（共同观看），convAId=本角色会话、convBId=0（用户侧）；
+     * - 要点 = 用户分享原文摘要 + 角色陪看回复摘要；
+     * - 冷却期内不重复沉淀（同一次陪看不刷多事件），每次新分享会覆盖待沉淀主题。
+     */
+    private suspend fun settleWatchEvent(aiContent: String) {
+        val share = pendingWatch ?: return
+        pendingWatch = null // 立即消费，避免本次回复只沉淀一次
+        val now = System.currentTimeMillis()
+        if (now - lastWatchEventAt < WATCH_EVENT_COOLDOWN_MS) return // 冷却期内跳过
+        lastWatchEventAt = now
+        relationshipDao.insertEvent(
+            RelationshipEvent(
+                convAId = conversationId,
+                convBId = 0, // 0 = 用户侧（T11.16 共同观看，区别于角色间互动）
+                scene = "你分享内容，一起看「${share.topic.take(12)}」",
+                topic = share.topic.take(40),
+                mood = "一起看",
+                points = buildString {
+                    append("你分享：").append(share.userContent.replace('\n', ' ').take(60))
+                    if (aiContent.isNotBlank()) append("\n").append("角色回应：").append(aiContent.replace('\n', ' ').take(60))
+                },
+                type = RelationshipEvent.TYPE_WATCH,
+                happenedAt = now,
+            ),
+        )
     }
 
     /**
@@ -609,6 +704,8 @@ class ChatViewModel(
 
     /** 失败处理：记录错误提示 + 将 AI 消息标记 FAILED（T3.8） */
     private suspend fun markFailed(aiId: Long, kind: ApiErrorKind) {
+        // T11.16：生成失败则作废本次陪看待沉淀状态，避免残留注入到下次普通消息
+        pendingWatch = null
         val text = when (kind) {
             ApiErrorKind.NETWORK -> "网络不可用，请检查网络后重试"
             ApiErrorKind.AUTH -> "API Key 无效，请到设置页检查"
@@ -637,6 +734,8 @@ class ChatViewModel(
         val current = repository.getMessage(aiId) ?: return
         // 记忆提取基于完整回复内容（不受拆条影响，T5.3）
         extractMemoryAsync(current.copy(content = finalContent))
+        // T11.16：若本次发送检测到「分享内容」，AI 回复完成后沉淀为「共同经历」关系事件（进关系故事区）
+        settleWatchEvent(finalContent)
 
         // 拆条连发：第一条复用占位消息（保持原 id，避免 UI key 突变），后续逐条插入
         val chunks = MessageSplitter.split(finalContent)
@@ -744,6 +843,8 @@ class ChatViewModel(
             lifeStateText = currentLifeStateText(),
             // T11.13：注入「共同经历事件」——角色记得自己和其他会话角色共同经历过的事，对话有连续性
             relationshipEventsText = buildRelationshipEventFragment(),
+            // T11.16：注入「陪看模式」——用户正在分享内容，角色以陪看口吻回应（未触发则为空）
+            watchModeText = pendingWatch?.let { buildWatchModeText(it.topic) } ?: "",
         )
     }
 

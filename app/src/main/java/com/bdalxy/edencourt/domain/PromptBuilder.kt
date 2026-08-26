@@ -85,6 +85,7 @@ object PromptBuilder {
      * @param lifeStateText 当前角色生活状态注入片段（T11.11：睡眠/晨起/活跃/晚间，影响语气与内容；为空则不注入）
      * @param relationshipEventsText 共同经历事件注入片段（T11.13：本会话与其他会话角色共同经历过的事，
      *   让对话有「我们经历过」的连续性；为空则不注入）
+     * @param watchModeText 陪看模式注入片段（T11.16：用户主动分享内容时，角色以陪看口吻回应；为空则不注入）
      */
     fun build(
         history: List<Message>,
@@ -95,6 +96,7 @@ object PromptBuilder {
         userBatchCount: Int = 1,
         lifeStateText: String = "",
         relationshipEventsText: String = "",
+        watchModeText: String = "",
     ): List<ChatMessage> {
         // 1. system 消息（角色卡或默认助手）+ 当前时间注入（T6.11）+ 长期记忆（T5.4）+ 攒批提示（T6.9）
         val finalSystem = buildString {
@@ -108,6 +110,10 @@ object PromptBuilder {
             // T11.13：注入共同经历事件——角色记得自己和其他会话角色共同经历过的事（关系连续性）
             if (relationshipEventsText.isNotBlank()) {
                 append("\n\n").append(relationshipEventsText)
+            }
+            // T11.16：注入陪看模式——用户主动分享内容时，角色以陪看口吻回应（讨论/吐槽/猜后续）
+            if (watchModeText.isNotBlank()) {
+                append("\n\n").append(watchModeText)
             }
             if (longTermMemories.isNotBlank()) {
                 append("\n\n").append(longTermMemories)

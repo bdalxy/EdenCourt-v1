@@ -55,6 +55,7 @@ import com.bdalxy.edencourt.data.local.entity.Conversation
 import com.bdalxy.edencourt.data.local.entity.InteractionSource
 import com.bdalxy.edencourt.data.local.entity.InteractionStatus
 import com.bdalxy.edencourt.data.local.entity.InteractionTurn
+import com.bdalxy.edencourt.data.local.entity.RelationshipEvent
 import kotlin.math.roundToInt
 
 /**
@@ -129,7 +130,11 @@ fun InteractionCenterScreen(
     ) { padding ->
         if (listItems.isEmpty()) {
             Column(
-                modifier = Modifier.fillMaxSize().padding(padding),
+                // 内容可能超过一屏（自动驱动 + 关系故事 + 空态文案），需可滚动查看（T11.16）
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding)
+                    .verticalScroll(rememberScrollState()),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 // T11.7 自动驱动设置区（即便尚无互动记录也可先配置）
@@ -140,6 +145,11 @@ fun InteractionCenterScreen(
                     onProbabilityChange = viewModel::setAutoProbability,
                 )
                 HorizontalDivider(modifier = Modifier.padding(top = 6.dp, bottom = 2.dp))
+                // T11.16：暂无角色互动时，已有共同经历（含用户共同观看）仍应可见
+                if (relationshipEvents.isNotEmpty()) {
+                    RelationshipStorySection(events = relationshipEvents)
+                    HorizontalDivider(modifier = Modifier.padding(top = 6.dp, bottom = 2.dp))
+                }
                 Spacer(modifier = Modifier.size(40.dp))
                 Text("还没有角色互动", style = MaterialTheme.typography.titleMedium)
                 Spacer(modifier = Modifier.size(8.dp))
@@ -196,18 +206,7 @@ fun InteractionCenterScreen(
                 }
                 // T11.13 关系故事：共同经历事件时间线（里程碑叙事，不替代好感度数值，置于关系一览下方）
                 if (relationshipEvents.isNotEmpty()) {
-                    item {
-                        Text(
-                            text = "关系故事（共同经历）",
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                        )
-                    }
-                    items(relationshipEvents.size) { i ->
-                        RelationshipEventRow(event = relationshipEvents[i])
-                    }
+                    item { RelationshipStorySection(events = relationshipEvents) }
                     item { HorizontalDivider(modifier = Modifier.padding(top = 6.dp, bottom = 2.dp)) }
                 }
                 items(listItems, key = { it.interaction.id }) { item ->
@@ -368,8 +367,25 @@ private fun statusLabel(status: String): String = when (status) {
 }
 
 /**
+ * T11.13 关系故事区：共同经历事件时间线（标题 + 事件行）。
+ * 抽成独立组件，让「暂无角色互动但已有共同经历（含 T11.16 用户共同观看）」时也能展示，
+ * 而不是被互动列表是否为空所遮挡。
+ */
+@Composable
+private fun RelationshipStorySection(events: List<RelationshipEventOverview>) {
+    Text(
+        text = "关系故事（共同经历）",
+        style = MaterialTheme.typography.titleSmall,
+        fontWeight = FontWeight.Bold,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+    )
+    events.forEach { RelationshipEventRow(event = it) }
+}
+
+/**
  * T11.13 关系故事时间线行：一场「共同经历事件」的里程碑叙事。
- * 展示 双方名 + 氛围档位（+ 自动标记）+ 场景/主题 + 要点（2 行截断）+ 时间。
+ * 展示 双方名 + 氛围档位（+ 一起看/自动标记）+ 场景/主题 + 要点（2 行截断）+ 时间。
  */
 @Composable
 private fun RelationshipEventRow(event: RelationshipEventOverview) {
@@ -390,6 +406,15 @@ private fun RelationshipEventRow(event: RelationshipEventOverview) {
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.primary,
             )
+            // T11.16：共同观看事件标记「一起看」
+            if (event.type == RelationshipEvent.TYPE_WATCH) {
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = "· 一起看",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.tertiary,
+                )
+            }
             if (event.source == InteractionSource.AUTO.name) {
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(

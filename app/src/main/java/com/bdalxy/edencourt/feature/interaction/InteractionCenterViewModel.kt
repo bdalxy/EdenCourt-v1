@@ -53,12 +53,13 @@ data class RelationshipOverview(
 
 /** 一条「共同经历事件」的时间线展示（T11.13 关系故事区：场景/主题/氛围/要点/时间） */
 data class RelationshipEventOverview(
-    val title: String,      // "A × B"
-    val scene: String,      // 场景（事件驱动=因由「因为…」，否则「日常」）
+    val title: String,      // "A × B"；共同观看事件为「A × 你」
+    val scene: String,      // 场景（事件驱动=因由「因为…」，否则「日常」；共同观看=分享场景）
     val topic: String,      // 主题（话题锚点）
-    val mood: String,       // 氛围档位（陌生/相识/友好/亲密）
+    val mood: String,       // 氛围档位（陌生/相识/友好/亲密；共同观看=「一起看」）
     val points: String,     // 要点（双方视角摘要）
     val source: String,     // MANUAL / AUTO
+    val type: String,       // INTERACTION=角色间互动 / WATCH=用户共同观看（T11.16）
     val happenedAt: Long,   // 发生时间
 )
 
@@ -175,13 +176,15 @@ class InteractionCenterViewModel(
                     title = buildString {
                         append(names[e.convAId] ?: "会话")
                         append(" × ")
-                        append(names[e.convBId] ?: "会话")
+                        // T11.16：共同观看事件 convBId=0 表示用户侧，显示「你」
+                        append(if (e.convBId == 0L) "你" else (names[e.convBId] ?: "会话"))
                     },
                     scene = e.scene,
                     topic = e.topic,
                     mood = e.mood,
                     points = e.points,
                     source = e.source,
+                    type = e.type,
                     happenedAt = e.happenedAt,
                 )
             }
