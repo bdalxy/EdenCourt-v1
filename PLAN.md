@@ -1058,14 +1058,14 @@ app/src/main/
     ② 各页空态引导文案（会话列表/记忆的友好引导语；互动中心既有文案已达标保留）
   - 文件：`MainActivity.kt` · `feature/onboarding/OnboardingGate.kt`（新增）· `data/setting/OnboardingConfigStore.kt`（新增）· `feature/conversationlist/ConversationListScreen.kt` · `feature/memory/MemoryScreen.kt`
   - 验收：[x] 首启出现引导且可跳过（K60 实测 3 步「你是谁/她们是谁/能做什么」全通，下一步/跳过可用）· [x] 空态文案友好且不指向未完成功能（会话列表「还没有对话…」+记忆页「还没有记忆…」增强，仅指向已有功能）· [x] 编译+真机通过（assembleDebug SUCCESS；K60 安装启动无崩溃，点「开始使用」进入会话列表，重启不再弹引导，seen 持久化生效）
-- **T11.15 完整引导 + 入口提级（N4 第二步，A/C 落地后）**：
+- **T11.15 完整引导 + 入口提级（N4 第二步，A/C 落地后）** ✅ 2026-08-27 完成：
   - 依赖：T11.10、T11.13（引导要指向已落地的新功能）
   - 目标：把「入口提级」与「完整引导」补齐——互动中心/记忆可视化/自动驱动不再藏在二级入口；引导补充指向角色状态/关系故事等新能力
   - 操作：
-    ① 入口提级：会话列表角色卡片显示状态；顶栏/首页宫格加「互动中心」「记忆」直达入口
-    ② 首启引导增强：补充指向「此刻状态/关系故事/自动驱动」的引导步
-  - 文件：`feature/conversationlist/ConversationListScreen.kt` · `MainActivity.kt` · `navigation/AppNavHost.kt` · `feature/memory/MemoryScreen.kt` · `feature/interaction/InteractionCenterScreen.kt`
-  - 验收：[ ] 互动/记忆入口一屏可见 · [ ] 引导指向新功能且实际可进入 · [ ] 编译+真机通过
+    ① 入口提级：会话列表顶栏加「记忆」「互动中心」直达图标（一屏可见，`Icons.Star/Favorite`；角色卡「此刻状态」T11.10 已落地无需重复）
+    ② 首启引导增强：OnboardingGate 增第 4 步「她们有自己的节奏」——指向此刻状态/自动驱动/关系故事（均为已落地功能）
+  - 文件：`feature/conversationlist/ConversationListScreen.kt` · `navigation/AppNavHost.kt` · `feature/onboarding/OnboardingGate.kt`
+  - 验收：[x] 互动/记忆入口一屏可见（K60 顶栏三图标「记忆/互动中心/菜单」走查通过，点图标分别直达记忆页/互动中心）· [x] 引导指向新功能且实际可进入（第 4 步「她们有自己的节奏」指向此刻状态/自动驱动/关系故事，点「开始使用」正常进入）· [x] 编译+真机通过（assembleDebug SUCCESS；K60 安装启动无崩溃，仅删 onboarding 标记文件验证引导，未动数据库）
 
 ### 方向 D：互动服务（记忆可见性升级，用户强调：是互动不是套话）
 - **T11.8 互动信息不对等**：互动中角色只能基于「自己可见的记忆」（SHARED+亲历 / PRIVATE 仅自己）回应；B 的私密不被 A 获知；互动得知的事实沉淀为新记忆（来源=互动，非亲历），语义同 T8.6 但为角色自交往。

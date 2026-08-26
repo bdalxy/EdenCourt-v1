@@ -20,7 +20,9 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -81,6 +83,8 @@ fun ConversationListScreen(
     onNavigateToChat: (Long) -> Unit,
     onOpenCharacter: () -> Unit,
     onOpenMemory: () -> Unit,
+    // T11.15：互动中心直达入口（不再藏二级菜单/设置页）
+    onOpenInteraction: () -> Unit,
     onOpenSettings: () -> Unit,
     onOpenAbout: () -> Unit,
 ) {
@@ -109,6 +113,13 @@ fun ConversationListScreen(
             TopAppBar(
                 title = { Text("对话") },
                 actions = {
+                    // T11.15 入口提级：记忆/互动中心顶栏直达（一屏可见，不再藏二级菜单）
+                    IconButton(onClick = onOpenMemory) {
+                        Icon(Icons.Filled.Star, contentDescription = "记忆管理")
+                    }
+                    IconButton(onClick = onOpenInteraction) {
+                        Icon(Icons.Filled.Favorite, contentDescription = "互动中心")
+                    }
                     IconButton(onClick = { menuExpanded = true }) {
                         Icon(Icons.Filled.MoreVert, contentDescription = "菜单")
                     }

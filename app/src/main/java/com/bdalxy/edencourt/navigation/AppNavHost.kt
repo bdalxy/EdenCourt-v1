@@ -23,6 +23,8 @@ fun AppRoot() {
                 onNavigateToChat = { id -> navController.navigate(NavRoutes.chat(id)) },
                 onOpenCharacter = { navController.navigate(NavRoutes.CHARACTER_CARDS) },
                 onOpenMemory = { navController.navigate(NavRoutes.MEMORY_LIST) },
+                // T11.15：会话列表顶栏「互动中心」直达
+                onOpenInteraction = { navController.navigate(NavRoutes.INTERACTION_CENTER) },
                 onOpenSettings = { navController.navigate(NavRoutes.SETTINGS) },
                 onOpenAbout = { navController.navigate(NavRoutes.ABOUT) },
             )

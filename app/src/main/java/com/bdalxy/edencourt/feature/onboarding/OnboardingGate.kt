@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.Button
@@ -47,7 +48,7 @@ private data class OnboardingStep(
     val body: String,
 )
 
-/** 三步步文案：你是谁 → 她们是谁 → 能做什么（均为已落地能力） */
+/** 引导步骤：你是谁 → 她们是谁 → 能做什么 → 她们的节奏（T11.15 增补：指向已落地的此刻状态/自动驱动/关系故事） */
 private val ONBOARDING_STEPS = listOf(
     OnboardingStep(
         icon = Icons.Filled.Person,
@@ -63,6 +64,11 @@ private val ONBOARDING_STEPS = listOf(
         icon = Icons.Filled.Favorite,
         title = "能做什么",
         body = "她们会记住你说过的话，可在「记忆管理」查看；\n没有你时，她们之间也会自然往来，可在「互动中心」回顾。",
+    ),
+    OnboardingStep(
+        icon = Icons.Filled.Home,
+        title = "她们有自己的节奏",
+        body = "她们会按时起床入睡、工作小憩，「此刻状态」写在会话卡片上；\n你不在时，她们也会彼此走动（互动中心可设「自动驱动」），共同经历会记进「关系故事」。",
     ),
 )
 
