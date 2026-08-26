@@ -83,6 +83,8 @@ object PromptBuilder {
      * @param userBatchCount 本次来信合并的用户消息条数（>1 表示连发攒批，
      *   在 system 中提示 AI 按性格决定逐条/综合/分组回应，T6.9）
      * @param lifeStateText 当前角色生活状态注入片段（T11.11：睡眠/晨起/活跃/晚间，影响语气与内容；为空则不注入）
+     * @param relationshipEventsText 共同经历事件注入片段（T11.13：本会话与其他会话角色共同经历过的事，
+     *   让对话有「我们经历过」的连续性；为空则不注入）
      */
     fun build(
         history: List<Message>,
@@ -92,6 +94,7 @@ object PromptBuilder {
         longTermMemories: String = "",
         userBatchCount: Int = 1,
         lifeStateText: String = "",
+        relationshipEventsText: String = "",
     ): List<ChatMessage> {
         // 1. system 消息（角色卡或默认助手）+ 当前时间注入（T6.11）+ 长期记忆（T5.4）+ 攒批提示（T6.9）
         val finalSystem = buildString {
@@ -101,6 +104,10 @@ object PromptBuilder {
             // T11.11：注入当前角色生活状态，让 AI 按状态调整语气与内容（深夜被叫醒会困倦、忙碌时简短等）
             if (lifeStateText.isNotBlank()) {
                 append("\n\n【当前角色状态】").append(lifeStateText)
+            }
+            // T11.13：注入共同经历事件——角色记得自己和其他会话角色共同经历过的事（关系连续性）
+            if (relationshipEventsText.isNotBlank()) {
+                append("\n\n").append(relationshipEventsText)
             }
             if (longTermMemories.isNotBlank()) {
                 append("\n\n").append(longTermMemories)

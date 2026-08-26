@@ -51,6 +51,17 @@ data class RelationshipOverview(
     val interactionCount: Int,  // 互动次数
 )
 
+/** 一条「共同经历事件」的时间线展示（T11.13 关系故事区：场景/主题/氛围/要点/时间） */
+data class RelationshipEventOverview(
+    val title: String,      // "A × B"
+    val scene: String,      // 场景（事件驱动=因由「因为…」，否则「日常」）
+    val topic: String,      // 主题（话题锚点）
+    val mood: String,       // 氛围档位（陌生/相识/友好/亲密）
+    val points: String,     // 要点（双方视角摘要）
+    val source: String,     // MANUAL / AUTO
+    val happenedAt: Long,   // 发生时间
+)
+
 /** 互动自动驱动配置（T11.7：互动中心「自动驱动」设置区展示/修改，改后立即重排当日闹钟） */
 data class AutoDriveConfig(
     val autoEnabled: Boolean,
@@ -151,6 +162,27 @@ class InteractionCenterViewModel(
                     affinityScore = r.affinityScore,
                     tierLabel = ConversationRelationship.affinityTierLabel(r.affinityScore),
                     interactionCount = r.interactionCount,
+                )
+            }
+        }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    /** 关系故事时间线（T11.13：全部共同经历事件倒序，随互动实时刷新，供互动中心「关系故事」区展示里程碑） */
+    val relationshipEvents: StateFlow<List<RelationshipEventOverview>> = relationshipDao.observeAllEvents()
+        .combine(convNames) { events, names ->
+            events.map { e ->
+                RelationshipEventOverview(
+                    title = buildString {
+                        append(names[e.convAId] ?: "会话")
+                        append(" × ")
+                        append(names[e.convBId] ?: "会话")
+                    },
+                    scene = e.scene,
+                    topic = e.topic,
+                    mood = e.mood,
+                    points = e.points,
+                    source = e.source,
+                    happenedAt = e.happenedAt,
                 )
             }
         }

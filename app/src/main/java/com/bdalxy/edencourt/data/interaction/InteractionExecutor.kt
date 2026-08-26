@@ -17,6 +17,7 @@ import com.bdalxy.edencourt.data.local.entity.Message
 import com.bdalxy.edencourt.data.local.entity.MessageType
 import com.bdalxy.edencourt.data.local.entity.ParticipantRole
 import com.bdalxy.edencourt.data.local.entity.RelationStatus
+import com.bdalxy.edencourt.data.local.entity.RelationshipEvent
 import com.bdalxy.edencourt.data.local.entity.Role
 import com.bdalxy.edencourt.data.remote.AiChatService
 import com.bdalxy.edencourt.data.remote.ChatMessage
@@ -186,6 +187,24 @@ class InteractionExecutor(
             )
             chatRepository.insertMessage(Message(conversationId = a.id, role = Role.ASSISTANT, type = MessageType.INTERACTION_DIGEST, content = aSummary))
             chatRepository.insertMessage(Message(conversationId = b.id, role = Role.ASSISTANT, type = MessageType.INTERACTION_DIGEST, content = bSummary))
+
+            // 8. T11.13：互动沉淀为「共同经历事件」——关系故事叙事素材（场景=因由/日常，主题=话题锚点，氛围=当前档位，要点=双方摘要）
+            val eventMood = ConversationRelationship.affinityTierLabel(affinityScore)
+            val eventScene = if (motive.isNullOrBlank()) "日常" else "因为「${motive.take(20)}」"
+            relationshipDao.insertEvent(
+                RelationshipEvent(
+                    convAId = minOf(a.id, b.id), convBId = maxOf(a.id, b.id),
+                    scene = eventScene,
+                    topic = topicSeed.trim().take(40),
+                    mood = eventMood,
+                    points = buildString {
+                        append(aSummary)
+                        if (bSummary.isNotBlank()) append("\n").append(bSummary)
+                    },
+                    source = source.name,
+                    happenedAt = now,
+                ),
+            )
 
             Log.d(TAG, "互动完成 #$interactionId：A(${a.id}) × B(${b.id}) 共 ${turns.size} 句，话题=${topicSeed.take(20)}")
             return InteractionOutcome(true, interactionId, "互动完成")

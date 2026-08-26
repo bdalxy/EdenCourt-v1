@@ -74,6 +74,7 @@ fun InteractionCenterScreen(
     )
     val listItems by viewModel.listItems.collectAsStateWithLifecycle()
     val relationships by viewModel.relationships.collectAsStateWithLifecycle()
+    val relationshipEvents by viewModel.relationshipEvents.collectAsStateWithLifecycle()
     val globalEnabled by viewModel.globalEnabled.collectAsStateWithLifecycle()
     val autoConfig by viewModel.autoConfig.collectAsStateWithLifecycle()
     val selectable by viewModel.selectableConversations.collectAsStateWithLifecycle()
@@ -190,6 +191,22 @@ fun InteractionCenterScreen(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
+                    }
+                    item { HorizontalDivider(modifier = Modifier.padding(top = 6.dp, bottom = 2.dp)) }
+                }
+                // T11.13 关系故事：共同经历事件时间线（里程碑叙事，不替代好感度数值，置于关系一览下方）
+                if (relationshipEvents.isNotEmpty()) {
+                    item {
+                        Text(
+                            text = "关系故事（共同经历）",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                        )
+                    }
+                    items(relationshipEvents.size) { i ->
+                        RelationshipEventRow(event = relationshipEvents[i])
                     }
                     item { HorizontalDivider(modifier = Modifier.padding(top = 6.dp, bottom = 2.dp)) }
                 }
@@ -348,6 +365,75 @@ private fun statusLabel(status: String): String = when (status) {
     InteractionStatus.SKIPPED.name -> "已跳过"
     InteractionStatus.FAILED.name -> "未完成"
     else -> "待发起"
+}
+
+/**
+ * T11.13 关系故事时间线行：一场「共同经历事件」的里程碑叙事。
+ * 展示 双方名 + 氛围档位（+ 自动标记）+ 场景/主题 + 要点（2 行截断）+ 时间。
+ */
+@Composable
+private fun RelationshipEventRow(event: RelationshipEventOverview) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 6.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = event.title,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                text = event.mood,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            if (event.source == InteractionSource.AUTO.name) {
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = "· 自动",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+        }
+        // 场景 + 主题（一行，超长截断）
+        val headline = buildString {
+            append(event.scene)
+            if (event.topic.isNotBlank()) append("：").append(event.topic)
+        }
+        Text(
+            text = headline,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        // 要点（双方视角摘要，最多 2 行）
+        if (event.points.isNotBlank()) {
+            Text(
+                text = event.points.replace('\n', ' '),
+                style = MaterialTheme.typography.bodySmall,
+                maxLines = 2,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+        Text(
+            text = eventTimeText(event.happenedAt),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.outline,
+        )
+    }
+}
+
+/** 事件时间文案（T11.13）：「8月26日 23:30」 */
+private fun eventTimeText(ts: Long): String {
+    val fmt = java.text.SimpleDateFormat("M月d日 HH:mm", java.util.Locale.CHINESE)
+    return fmt.format(java.util.Date(ts))
 }
 
 /** T11.7 小时选择目标：开始 / 结束 */

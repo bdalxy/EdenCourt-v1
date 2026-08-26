@@ -742,7 +742,38 @@ class ChatViewModel(
             userBatchCount = userBatchCount,
             // T11.11：注入当前角色生活状态，让 AI 按状态调整语气与内容
             lifeStateText = currentLifeStateText(),
+            // T11.13：注入「共同经历事件」——角色记得自己和其他会话角色共同经历过的事，对话有连续性
+            relationshipEventsText = buildRelationshipEventFragment(),
         )
+    }
+
+    /**
+     * T11.13：本会话最近参与的「共同经历事件」注入片段（最多 3 条，含与其他会话角色的自动/手动互动）。
+     * 让角色记得「我们共同经历过什么」，对话时自然带出，形成关系连续性。
+     */
+    private suspend fun buildRelationshipEventFragment(): String {
+        val events = relationshipDao.recentEventsForConversation(conversationId, 3)
+        if (events.isEmpty()) return ""
+        return buildString {
+            append("【你和朋友们共同经历过的事】\n")
+            events.forEach { e ->
+                val peerId = if (e.convAId == conversationId) e.convBId else e.convAId
+                val peer = repository.getConversation(peerId) ?: return@forEach
+                val peerName = peerDisplayName(peer)
+                append("- 你和").append(peerName).append("一起")
+                if (e.scene.isNotBlank()) append(e.scene)
+                if (e.topic.isNotBlank()) append("「").append(e.topic.take(20)).append("」")
+                append("。\n")
+            }
+        }.trim()
+    }
+
+    /** T11.13：解析共同经历对方会话的显示名（会话备注优先，其次角色卡备注/名，兜底标题） */
+    private suspend fun peerDisplayName(peer: Conversation): String {
+        if (peer.remark.isNotBlank()) return peer.remark
+        val cardId = peer.characterCardId ?: return peer.title.ifBlank { "朋友" }
+        val card = characterCardDao.getById(cardId) ?: return peer.title.ifBlank { "朋友" }
+        return card.remark.ifBlank { card.name }
     }
 
     /**
