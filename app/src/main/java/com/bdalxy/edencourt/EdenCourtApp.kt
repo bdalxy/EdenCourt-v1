@@ -22,6 +22,7 @@ import com.bdalxy.edencourt.data.repository.MemoryRepository
 import com.bdalxy.edencourt.data.setting.ApiConfigStore
 import com.bdalxy.edencourt.data.setting.DailyConsultConfigStore
 import com.bdalxy.edencourt.data.setting.InteractionConfigStore
+import com.bdalxy.edencourt.data.setting.OnboardingConfigStore
 import com.bdalxy.edencourt.data.setting.ScheduleConfigStore
 import com.bdalxy.edencourt.domain.BuiltInCards
 import kotlinx.coroutines.CoroutineScope
@@ -195,5 +196,10 @@ class EdenCourtApp : Application() {
     /** 角色生活作息配置存储单例（v1.2b，T11.10：起床/入睡/工作/午休时刻，驱动「此刻状态」） */
     val scheduleConfigStore: ScheduleConfigStore by lazy {
         ScheduleConfigStore(this)
+    }
+
+    /** 首启引导状态存储单例（T11.14：是否已看过新手指引，跳过或看完都记「已看过」） */
+    val onboardingConfigStore: OnboardingConfigStore by lazy {
+        OnboardingConfigStore(this)
     }
 }

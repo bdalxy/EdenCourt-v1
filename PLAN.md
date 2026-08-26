@@ -1050,14 +1050,14 @@ app/src/main/
     ③ 关键讨论可选提取为角色记忆
   - 文件：`domain/PromptBuilder.kt` · `feature/chat/ChatViewModel.kt` · `data/interaction/InteractionExecutor.kt`（或共用陪看沉淀逻辑）· `data/local/dao/RelationshipDao.kt` · `feature/interaction/InteractionCenterViewModel.kt` · `InteractionCenterScreen.kt`（关系故事区展示共同经历）
   - 验收：[ ] 用户粘贴内容后角色以陪看口吻讨论 · [ ] 陪看后生成「共同经历」关系事件且在关系故事区可见 · [ ] 断言不采集设备上用户在看什么（红线） · [ ] 编译+真机通过
-- **T11.14 新手上手引导·轻量版（N4 第一步）**：
+- **T11.14 新手上手引导·轻量版（N4 第一步）** ✅ 2026-08-27 完成：
   - 依赖：无（可先行/并行）
   - 目标：新用户 3 分钟内建立「活在手机上的真人」心智的**基础版**——仅做首启引导与空态文案，**只指向已有功能**，不承诺未落地能力（避免"功能没做完就教用户用"）
   - 操作：
-    ① 首启引导 2~3 步（你是谁→她们是谁→能做什么，可跳过、可记住"已看过"）
-    ② 各页空态引导文案（会话列表/记忆/互动中心的友好引导语）
-  - 文件：`MainActivity.kt` · `feature/conversationlist/ConversationListScreen.kt` · `feature/memory/MemoryScreen.kt` · `feature/interaction/InteractionCenterScreen.kt`
-  - 验收：[ ] 首启出现引导且可跳过 · [ ] 空态文案友好且不指向未完成功能 · [ ] 编译+真机通过
+    ① 首启引导 2~3 步（你是谁→她们是谁→能做什么，可跳过、可记住"已看过"）——`OnboardingConfigStore`(DataStore 记 seen) + `OnboardingGate`(全屏 3 步引导) 挂在 MainActivity 根节点
+    ② 各页空态引导文案（会话列表/记忆的友好引导语；互动中心既有文案已达标保留）
+  - 文件：`MainActivity.kt` · `feature/onboarding/OnboardingGate.kt`（新增）· `data/setting/OnboardingConfigStore.kt`（新增）· `feature/conversationlist/ConversationListScreen.kt` · `feature/memory/MemoryScreen.kt`
+  - 验收：[x] 首启出现引导且可跳过（K60 实测 3 步「你是谁/她们是谁/能做什么」全通，下一步/跳过可用）· [x] 空态文案友好且不指向未完成功能（会话列表「还没有对话…」+记忆页「还没有记忆…」增强，仅指向已有功能）· [x] 编译+真机通过（assembleDebug SUCCESS；K60 安装启动无崩溃，点「开始使用」进入会话列表，重启不再弹引导，seen 持久化生效）
 - **T11.15 完整引导 + 入口提级（N4 第二步，A/C 落地后）**：
   - 依赖：T11.10、T11.13（引导要指向已落地的新功能）
   - 目标：把「入口提级」与「完整引导」补齐——互动中心/记忆可视化/自动驱动不再藏在二级入口；引导补充指向角色状态/关系故事等新能力

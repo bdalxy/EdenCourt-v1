@@ -69,6 +69,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -373,15 +374,26 @@ fun MemoryScreen(onBack: () -> Unit) {
             )
 
             if (totalCount == 0) {
-                // 空状态：有搜索词则提示无结果，否则提示暂无记忆（企划书 5.5.2）
-                Box(
+                // 空状态：有搜索词则提示无结果，否则提示暂无记忆（企划书 5.5.2 / T11.14 增强引导）
+                Column(
                     modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center,
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center,
                 ) {
                     Text(
-                        text = if (searchQuery.isNotBlank()) "没有匹配的记忆" else "暂无记忆，AI 会在对话中自动提取",
+                        text = if (searchQuery.isNotBlank()) "没有匹配的记忆" else "还没有记忆",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.titleMedium,
                     )
+                    if (searchQuery.isBlank()) {
+                        Spacer(modifier = Modifier.size(8.dp))
+                        Text(
+                            text = "AI 会在对话中自动提取你们的经历，\n一起聊过的事都会在这里被记住。",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center,
+                        )
+                    }
                 }
             } else {
                 // 滚动监听：接近末尾且还有下一页 → 追加加载（T9.5）

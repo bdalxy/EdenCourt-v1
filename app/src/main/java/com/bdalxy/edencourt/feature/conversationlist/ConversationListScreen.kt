@@ -3,6 +3,7 @@ package com.bdalxy.edencourt.feature.conversationlist
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -48,6 +49,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -151,12 +153,23 @@ fun ConversationListScreen(
                 CircularProgressIndicator()
             }
         } else if (conversations.isEmpty()) {
-            // 空状态：无会话提示
-            Box(
+            // 空状态：无会话，友好引导（T11.14：只指向已有功能「右下角 + 建对话」）
+            Column(
                 modifier = Modifier.fillMaxSize().padding(innerPadding),
-                contentAlignment = Alignment.Center,
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
             ) {
-                Text("还没有对话，点击右下角开始")
+                Text(
+                    text = "还没有对话",
+                    style = MaterialTheme.typography.titleMedium,
+                )
+                Spacer(modifier = Modifier.size(8.dp))
+                Text(
+                    text = "点击右下角「+」，选择一位角色，\n开启你们的第一段对话。",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                )
             }
         } else {
             LazyColumn(

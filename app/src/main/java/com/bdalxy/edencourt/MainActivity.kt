@@ -5,6 +5,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import com.bdalxy.edencourt.core.ui.theme.EdenCourtTheme
+import com.bdalxy.edencourt.feature.onboarding.OnboardingGate
 import com.bdalxy.edencourt.navigation.AppRoot
 
 class MainActivity : ComponentActivity() {
@@ -13,7 +14,10 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             EdenCourtTheme {
-                AppRoot()
+                // T11.14：首启引导门——首次启动先展示 2~3 步引导，看完/跳过后再进入主界面
+                OnboardingGate {
+                    AppRoot()
+                }
             }
         }
     }
