@@ -1060,16 +1060,24 @@ private fun LifeScheduleSheet(
 private fun TimeSlider(
     label: String,
     minute: Int,
-    range: IntRange,
+    range: IntRange, // 分钟范围（起点为整点，如 4*60..10*60）
     onValueChange: (Int) -> Unit,
 ) {
+    // T11.10 优化：从整点起每 5 分钟一格。用「格索引」作为滑块值（离散、无 steps 细分），
+    // 拖动顺滑且每次变化都精确落在整点+5分钟倍数的格点上，不再大量 steps 导致卡顿。
+    val start = range.first
+    val slotMin = 5
+    val maxSlot = (range.last - range.first) / slotMin
+    // 当前分钟值吸附到最近的 5 分钟格索引（用于滑块定位）
+    val currentSlot = ((minute - start).coerceIn(0, range.last - range.first) + slotMin / 2) / slotMin
+
     Column(modifier = Modifier.fillMaxWidth()) {
         Text("$label：${formatMinute(minute)}")
         Slider(
-            value = minute.toFloat(),
-            onValueChange = { onValueChange(it.toInt()) },
-            valueRange = range.first.toFloat()..range.last.toFloat(),
-            steps = (range.last - range.first) / 5 - 1, // 5 分钟一档
+            value = currentSlot.toFloat(),
+            onValueChange = { onValueChange(start + it.toInt() * slotMin) },
+            valueRange = 0f..maxSlot.toFloat(),
+            steps = 0,
             modifier = Modifier.fillMaxWidth(),
         )
     }

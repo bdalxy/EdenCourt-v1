@@ -1000,6 +1000,7 @@ app/src/main/
     - ⑤ **聊天页顶部入口**：顶部状态标签/提示可点击 → `LifeScheduleSheet`（会话开关 + 起床/入睡 2 滑杆 + 恢复默认/取消/保存）
   - 文件（简化）：`data/setting/ScheduleConfigStore.kt`（2 时刻+全局开关）· `data/schedule/CharacterSchedule.kt`（4 态+跨天+resolveConfig 会话级）· `data/local/entity/CharacterCardEntity.kt`·`Conversation.kt`（会话级字段）· `AppDatabase.kt`（v19→v20）· `feature/chat/ChatScreen.kt`（LifeScheduleSheet+TimeSlider）·`ChatViewModel.kt` · `feature/conversationlist/ConversationListScreen.kt`·`ConversationListViewModel.kt`（两级开关+会话级解析）· `feature/settings/SettingsScreen.kt`（全局开关+2 滑杆）· `feature/character/CharacterScreen.kt`（恢复默认修复+2 滑杆）· `core/ui/LifeStateIndicator.kt`（4 态配色）
   - 验收（简化）：[x] 恢复默认显示派生值（阿杰夜型 10:00→09:00、入睡次日 01:00） · [x] 入睡支持跨天次日 · [x] 两级开关控制显示（全局开+会话开才显示） · [x] 聊天页顶部作息面板滑杆保存生效 · [x] 会话列表/聊天页状态随会话作息实时计算（21:34 晚间放松） · [x] 编译+真机通过
+  - **滑杆体验优化（2026-08-26，用户：「滑动卡卡的、不支持准确到分钟，从整点开始每五分钟一格也好」）**：三处 TimeSlider（设置页/角色卡详情/聊天页作息面板）由「分钟连续值 + 70+ steps 细分」改为「整点起每 5 分钟一格的格索引」离散实现——Slider value 为格索引（steps=0，无大量细分节点 → 拖动顺滑），`onValueChange = 起点 + 格索引*5` 保证每次变化精确落在整点+5分钟倍数。真机拖动起床滑杆 07:00→08:25（5 分钟格吸附精确）。验收：[x] 拖动顺滑 · [x] 吸附 5 分钟格 · [x] 编译+真机通过
 - **T11.11 状态驱动对话与互动调度（N1 深化）**：
   - 依赖：T11.10、T11.7
   - 目标：生活状态真实影响角色行为——深夜被叫醒会困倦、工作时段回复更简短；睡眠窗口不发起自动互动
