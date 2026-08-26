@@ -82,6 +82,7 @@ object PromptBuilder {
      *   拼接到 system 末尾供 AI 自然提及；为空则不影响，默认空串，T5.4）
      * @param userBatchCount 本次来信合并的用户消息条数（>1 表示连发攒批，
      *   在 system 中提示 AI 按性格决定逐条/综合/分组回应，T6.9）
+     * @param lifeStateText 当前角色生活状态注入片段（T11.11：睡眠/晨起/活跃/晚间，影响语气与内容；为空则不注入）
      */
     fun build(
         history: List<Message>,
@@ -90,12 +91,17 @@ object PromptBuilder {
         systemPrompt: String = DEFAULT_SYSTEM_PROMPT,
         longTermMemories: String = "",
         userBatchCount: Int = 1,
+        lifeStateText: String = "",
     ): List<ChatMessage> {
         // 1. system 消息（角色卡或默认助手）+ 当前时间注入（T6.11）+ 长期记忆（T5.4）+ 攒批提示（T6.9）
         val finalSystem = buildString {
             // T6.11：注入当前现实时间，让 AI 明确感知三次元时间（每次发送时刷新）
             append("【当前现实时间】").append(currentTimeText()).append("\n\n")
             append(systemPrompt)
+            // T11.11：注入当前角色生活状态，让 AI 按状态调整语气与内容（深夜被叫醒会困倦、忙碌时简短等）
+            if (lifeStateText.isNotBlank()) {
+                append("\n\n【当前角色状态】").append(lifeStateText)
+            }
             if (longTermMemories.isNotBlank()) {
                 append("\n\n").append(longTermMemories)
             }

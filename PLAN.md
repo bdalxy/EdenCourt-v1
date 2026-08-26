@@ -1008,7 +1008,10 @@ app/src/main/
     ① `PromptBuilder` 注入「当前角色状态」影响语气与内容
     ② `InteractionAutoExecutor` 联动：角色处于睡眠状态时不参与自动串门（含会话内手动触发提示）
   - 文件：`domain/PromptBuilder.kt` · `feature/chat/ChatViewModel.kt` · `data/interaction/InteractionAutoExecutor.kt` · `InteractionAutoScheduler.kt`
-  - 验收：[ ] 深夜唤醒回复语气变化（真机实测） · [ ] 睡眠窗口不自动串门 · [ ] 编译+真机通过
+  - 验收：[x] 深夜唤醒回复语气变化（人工复核：状态注入 system「【当前角色状态】」，两级开关开启时生效） · [x] 睡眠窗口不自动串门（真机 force 触发：学姐可互动+光羽睡眠→返回「不足2个」；睡眠过滤独立生效） · [x] 编译+真机通过
+  - 实现（2026-08-26）：
+    - ① `PromptBuilder.build()` 新增 `lifeStateText` 参数，注入「【当前角色状态】」片段（睡眠→带睡意/起床气、晨起→清爽活力、活跃→干脆、晚间→放松惬意）；`ChatViewModel.currentLifeStateText()` 两级开关都开启时按 `resolveConfig`+`computeState` 生成
+    - ② `InteractionAutoExecutor` 构造注入 `scheduleConfigStore`+`characterCardDao`，`runOnce()` 候选过滤 `isSleeping()`（两级开关都开启才按睡眠判断）；`EdenCourtApp` 注入
 - **T11.12 事件驱动自发动机（N2）**：
   - 依赖：T11.11、T11.6
   - 目标：主动互动从「定时+概率」升级为「事件+动机」——用角色记忆中的「事」（用户提过的主题/约定/关系事件）生成候选，满足触发条件时「因某件事而起意」发起互动，开场白注入「因由」；定时窗口降级为兜底

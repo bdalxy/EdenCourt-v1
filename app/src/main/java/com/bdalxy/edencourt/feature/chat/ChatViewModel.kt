@@ -25,6 +25,10 @@ import com.bdalxy.edencourt.data.remote.ApiErrorKind
 import com.bdalxy.edencourt.data.remote.ApiException
 import com.bdalxy.edencourt.data.local.entity.Conversation
 import com.bdalxy.edencourt.data.remote.ChatMessage
+import com.bdalxy.edencourt.data.schedule.CharacterSchedule
+import com.bdalxy.edencourt.data.schedule.LifeState
+import com.bdalxy.edencourt.data.schedule.scheduleTrait
+import java.time.LocalTime
 import com.bdalxy.edencourt.data.repository.ChatRepository
 import com.bdalxy.edencourt.data.repository.CrossSessionConsultService
 import com.bdalxy.edencourt.data.repository.MemoryRepository
@@ -736,7 +740,28 @@ class ChatViewModel(
             systemPrompt = currentSystemPrompt(),
             longTermMemories = memoryFragment,
             userBatchCount = userBatchCount,
+            // T11.11：注入当前角色生活状态，让 AI 按状态调整语气与内容
+            lifeStateText = currentLifeStateText(),
         )
+    }
+
+    /**
+     * 取当前角色「此刻状态」注入文本（T11.11：状态驱动对话）。
+     * 两级开关（全局 + 本会话）都开启才注入，否则状态体系未生效、不给 AI 塞无意义状态；
+     * 生效作息按 resolveConfig 会话级解析（会话自定义 > 角色自定义 > 个性派生 > 基础）。
+     */
+    private suspend fun currentLifeStateText(): String {
+        if (!scheduleEnabled.value) return ""
+        val conv = repository.getConversation(conversationId) ?: return ""
+        if (!conv.lifeEnabled) return ""
+        val cardEntity = conv.characterCardId?.let { characterCardDao.getById(it) } ?: return ""
+        val cfg = CharacterSchedule.resolveConfig(scheduleConfig.value, cardEntity, conv)
+        return when (CharacterSchedule.computeState(cfg, LocalTime.now())) {
+            LifeState.SLEEPING -> "你此刻正在睡眠中，被吵醒了会带着睡意和起床气，说话迷迷糊糊、懒洋洋的。"
+            LifeState.WAKING -> "你此刻刚起床不久，精神正在恢复，回复带着清晨的清爽与活力。"
+            LifeState.ACTIVE -> "你此刻正处于活跃时段，精力充沛，回复干脆利落、不拖沓。"
+            LifeState.EVENING -> "你此刻正处在晚间放松时段，语气放松惬意，像忙完一天后的闲聊。"
+        }
     }
 
     /**

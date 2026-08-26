@@ -1,12 +1,19 @@
 package com.bdalxy.edencourt.data.interaction
 
 import android.util.Log
+import com.bdalxy.edencourt.data.local.dao.CharacterCardDao
 import com.bdalxy.edencourt.data.local.dao.ConversationDao
 import com.bdalxy.edencourt.data.local.dao.InteractionDao
 import com.bdalxy.edencourt.data.local.dao.RelationshipDao
+import com.bdalxy.edencourt.data.local.entity.Conversation
 import com.bdalxy.edencourt.data.local.entity.InteractionSource
+import com.bdalxy.edencourt.data.schedule.CharacterSchedule
+import com.bdalxy.edencourt.data.schedule.LifeState
+import com.bdalxy.edencourt.data.schedule.scheduleTrait
 import com.bdalxy.edencourt.data.setting.InteractionConfigStore
+import com.bdalxy.edencourt.data.setting.ScheduleConfigStore
 import kotlinx.coroutines.flow.first
+import java.time.LocalTime
 import kotlin.random.Random
 
 /**
@@ -14,6 +21,7 @@ import kotlin.random.Random
  * 在每日窗口内被定时广播触发：从「已开放互动」的会话中两两配对，
  * 过滤掉冷却期内已自动互动过的对，优先选「距上次互动最久 / 从未互动」的一对（像角色忽然想起久未联系的朋友），
  * 按配置概率决定是否执行，最终复用 InteractionExecutor.start() 跑一场完整双向互动。
+ * T11.11：角色当前处于「睡眠中」时不参与自动串门（真人深夜也不会去串门）。
  * - 用户角度：不打扰（无 push/不注入正文打断），结果沉淀为互动记录 + 双方会话各一条摘要 + 好感度照常累计（T11.6）。
  */
 class InteractionAutoExecutor(
@@ -22,6 +30,9 @@ class InteractionAutoExecutor(
     private val relationshipDao: RelationshipDao,
     private val interactionConfigStore: InteractionConfigStore,
     private val interactionExecutor: InteractionExecutor,
+    // T11.11：作息配置存储 + 角色卡 DAO，用于判断角色是否处于睡眠状态
+    private val scheduleConfigStore: ScheduleConfigStore,
+    private val characterCardDao: CharacterCardDao,
 ) {
 
     /** 同一对会话自动互动的最小间隔（天）：避免同一对角色频繁被自动撮合，显机械 */
@@ -39,8 +50,11 @@ class InteractionAutoExecutor(
      */
     suspend fun runOnce(forcedProbability: Float? = null): AutoOutcome {
         // 1. 候选：已开放互动的会话（interactionEnabled=true，T8.7 资格开关）
-        val convs = conversationDao.observeAll().first().filter { it.interactionEnabled }
-        if (convs.size < 2) return AutoOutcome(false, "可互动会话不足 2 个，暂无法自动串门")
+        //    T11.11：过滤掉「此刻正在睡觉」的角色（睡眠中不串门）
+        val convs = conversationDao.observeAll().first()
+            .filter { it.interactionEnabled }
+            .filterNot { isSleeping(it) }
+        if (convs.size < 2) return AutoOutcome(false, "可互动会话不足 2 个，或角色们此刻都在休息，暂无法自动串门")
         val now = System.currentTimeMillis()
         val cooldownBefore = now - cooldownDays * 24L * 3600_000L
 
@@ -78,6 +92,19 @@ class InteractionAutoExecutor(
                 AutoOutcome(false, it.message)
             }
         }
+    }
+
+    /**
+     * 判断会话绑定的角色当前是否处于「睡眠中」（T11.11）。
+     * 需两级开关（全局 + 本会话）都开启才按作息判断，否则状态体系未生效、不算睡眠；
+     * 生效作息按 resolveConfig 会话级解析，与聊天页「此刻状态」一致。
+     */
+    private suspend fun isSleeping(conv: Conversation): Boolean {
+        if (!scheduleConfigStore.enabled.first()) return false
+        if (!conv.lifeEnabled) return false
+        val card = conv.characterCardId?.let { characterCardDao.getById(it) } ?: return false
+        val cfg = CharacterSchedule.resolveConfig(scheduleConfigStore.config.first(), card, conv)
+        return CharacterSchedule.computeState(cfg, LocalTime.now()) == LifeState.SLEEPING
     }
 
     private companion object {
