@@ -73,12 +73,14 @@ class InteractionExecutor(
     /**
      * 发起一场互动：initiator 主动找 target 双向聊。
      * @param source 互动来源（T11.7）：MANUAL=手动 / AUTO=自动驱动，默认手动；写入互动主表便于区分/去重。
+     * @param motive 本次互动的「因由」（T11.12 事件驱动）：角色因哪件事/主题而起意来找对方；开场白会自然地从这个由头说起，并写入主表用于去重。
      * @return 成功则带 interactionId；失败返回 message 说明原因（供 UI 文案提示）。
      */
     suspend fun start(
         initiatorConvId: Long,
         targetConvId: Long,
         source: InteractionSource = InteractionSource.MANUAL,
+        motive: String? = null,
     ): InteractionOutcome {
         // 1. 前置校验：全局开关 / API / 会话存在 / 双方均开放互动 / 非重复执行
         val cfg = interactionConfigStore.config.firstOrNull()
@@ -123,6 +125,7 @@ class InteractionExecutor(
                     targetConvId = b.id,
                     status = InteractionStatus.RUNNING.name,
                     source = source.name,
+                    motive = motive, // T11.12：记录本次互动的「因由」（事件驱动用）
                     startedAt = now,
                 ),
             )
@@ -140,7 +143,7 @@ class InteractionExecutor(
             var ended = false
             for (i in 0 until maxTurns) {
                 if (ended) break
-                val line = requestLine(config, a, b, aIdentity, bIdentity, speaker, turns, topicSeed, isOpening = i == 0 && speaker.id == a.id, isSameCard = isSameCard, relationStatus = relationStatus, affinityScore = affinityScore, sameCardName = sameCardName)
+                val line = requestLine(config, a, b, aIdentity, bIdentity, speaker, turns, topicSeed, isOpening = i == 0 && speaker.id == a.id, isSameCard = isSameCard, relationStatus = relationStatus, affinityScore = affinityScore, sameCardName = sameCardName, motive = motive)
                 if (line.isBlank()) { ended = true; break }
                 if (i == 0 && speaker.id == a.id) topicSeed = line // 第一句 A 的开场即话题锚点
                 turns.add(speaker.id.let { if (it == a.id) aIdentity else bIdentity } to line)
@@ -154,7 +157,7 @@ class InteractionExecutor(
                 interactionDao.updateInteraction(
                     Interaction(
                         id = interactionId, initiatorConvId = a.id, targetConvId = b.id,
-                        status = InteractionStatus.FAILED.name, source = source.name, startedAt = now, endedAt = now, turnCount = 0, createdAt = now,
+                        status = InteractionStatus.FAILED.name, source = source.name, motive = motive, startedAt = now, endedAt = now, turnCount = 0, createdAt = now,
                     ),
                 )
                 return InteractionOutcome(false, message = "聊不起来，双方没接上")
@@ -177,7 +180,7 @@ class InteractionExecutor(
             interactionDao.updateInteraction(
                 Interaction(
                     id = interactionId, initiatorConvId = a.id, targetConvId = b.id,
-                    status = InteractionStatus.COMPLETED.name, topicSeed = topicSeed, source = source.name,
+                    status = InteractionStatus.COMPLETED.name, topicSeed = topicSeed, source = source.name, motive = motive,
                     startedAt = now, endedAt = now, turnCount = turns.size, createdAt = now,
                 ),
             )
@@ -204,6 +207,7 @@ class InteractionExecutor(
         relationStatus: String,
         affinityScore: Int,
         sameCardName: String,
+        motive: String? = null, // T11.12：本次互动的「因由」，开场者以此为由头自然起话
     ): String {
         val speakerName = if (speaker.id == a.id) aName else bName
         val otherName = if (speaker.id == a.id) bName else aName
@@ -231,7 +235,13 @@ class InteractionExecutor(
             append("5) 说话用「我」自称，称呼对方用「你」；不要用「另一个XX」之类的说法；按你自己的性格自然地对待你们的关系；\n")
             append("6) 不要复述或模仿对方刚说过的话，按你自己的记忆和性格自然地回应；\n")
             if (isOpening) {
-                append("7) 你是开场者：请主动抛出一个自然、你真心想和对方聊的话题（你的见闻/好奇/关心），作为这句台词。\n")
+                // T11.12：事件驱动时有「因由」——开场者因这件事而起意来找对方，自然地从这个由头说起（可解释「因为…」）
+                if (motive.isNullOrBlank()) {
+                    append("7) 你是开场者：请主动抛出一个自然、你真心想和对方聊的话题（你的见闻/好奇/关心），作为这句台词。\n")
+                } else {
+                    append("7) 你是开场者：你这次来找对方，是因为「").append(motive)
+                    append("」这件事——请自然地从这个由头聊起（不必照搬原文，用自己的话自然展开），作为你这句台词。\n")
+                }
             } else {
                 append("7) 若觉得聊得差不多、无话可说，用「（话题到此）」结尾并自然收场；若还有兴致就自然地接下去。\n")
             }

@@ -83,4 +83,15 @@ interface InteractionDao {
             "AND ((initiatorConvId = :a AND targetConvId = :b) OR (initiatorConvId = :b AND targetConvId = :a))",
     )
     suspend fun lastAutoTimeBetween(a: Long, b: Long): Long?
+
+    /**
+     * 某对会话在 :since 之后是否已用同一个「因由」驱动过自动互动（T11.12 事件驱动去重）。
+     * motive 来自同一记忆条目（内容文本稳定一致），精确匹配即可避免同一件事在冷却期内被反复当由头。
+     */
+    @Query(
+        "SELECT COUNT(*) FROM interaction " +
+            "WHERE source = 'AUTO' AND motive = :motive AND createdAt >= :since " +
+            "AND ((initiatorConvId = :a AND targetConvId = :b) OR (initiatorConvId = :b AND targetConvId = :a))",
+    )
+    suspend fun countMotiveUsedBetween(a: Long, b: Long, motive: String, since: Long): Int
 }

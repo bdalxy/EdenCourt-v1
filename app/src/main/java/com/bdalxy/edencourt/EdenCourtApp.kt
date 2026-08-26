@@ -182,6 +182,8 @@ class EdenCourtApp : Application() {
             // T11.11：注入作息存储 + 角色卡 DAO，用于「睡眠中不串门」判断
             scheduleConfigStore = scheduleConfigStore,
             characterCardDao = characterCardDao,
+            // T11.12：注入记忆仓库，用于挑选「因由」事件候选
+            memoryRepository = memoryRepository,
         )
     }
 
