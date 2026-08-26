@@ -9,6 +9,8 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import com.bdalxy.edencourt.EdenCourtApp
 import com.bdalxy.edencourt.data.local.dao.CharacterCardDao
 import com.bdalxy.edencourt.data.local.entity.CharacterCardEntity
+import com.bdalxy.edencourt.data.setting.ScheduleConfig
+import com.bdalxy.edencourt.data.setting.ScheduleConfigStore
 import com.bdalxy.edencourt.domain.CharacterCard
 import com.bdalxy.edencourt.domain.CharacterCardParser
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -24,6 +26,7 @@ import kotlinx.coroutines.launch
  */
 class CharacterViewModel(
     private val dao: CharacterCardDao,
+    private val scheduleConfigStore: ScheduleConfigStore,
 ) : ViewModel() {
 
     /** 角色卡列表（内置卡优先，再按创建时间降序，数据库自动维护） */
@@ -34,6 +37,14 @@ class CharacterViewModel(
                 started = SharingStarted.WhileSubscribed(5_000),
                 initialValue = emptyList(),
             )
+
+    /** 全局基础作息（T11.10 深化：角色详情页「基于基础作息单独调节」的起点） */
+    val scheduleConfig: StateFlow<ScheduleConfig> = scheduleConfigStore.config
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = ScheduleConfig(),
+        )
 
     /** 导入中标志（控制 FAB 加载态，防止重复导入） */
     private val _importing = MutableStateFlow(false)
@@ -158,12 +169,29 @@ class CharacterViewModel(
         }
     }
 
+    /**
+     * 设置/清除该角色自定义作息（T11.10 深化：基于基础作息单独调节，全简化版仅起床+入睡）。
+     * @param card 当前角色卡
+     * @param cfg 自定义作息；传 null 表示清除自定义，恢复「跟随默认」（基础作息+个性偏移）
+     */
+    fun updateSchedule(card: CharacterCardEntity, cfg: ScheduleConfig?) {
+        viewModelScope.launch {
+            dao.update(
+                card.copy(
+                    scheduleWakeUpMinute = cfg?.wakeUpMinute,
+                    scheduleSleepMinute = cfg?.sleepMinute,
+                    updatedAt = System.currentTimeMillis(),
+                ),
+            )
+        }
+    }
+
     companion object {
         /** 工厂：从 Application 中取 CharacterCardDao 单例 */
         fun factory(application: Application): ViewModelProvider.Factory = viewModelFactory {
             initializer {
                 val app = this[ViewModelProvider.AndroidViewModelFactory.APPLICATION_KEY] as EdenCourtApp
-                CharacterViewModel(dao = app.characterCardDao)
+                CharacterViewModel(dao = app.characterCardDao, scheduleConfigStore = app.scheduleConfigStore)
             }
         }
     }

@@ -3,6 +3,7 @@ package com.bdalxy.edencourt.data.local.entity
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
+import com.bdalxy.edencourt.data.setting.ScheduleConfig
 
 /**
  * 生成会话/角色卡的全局唯一随机短码（v1.2 会话唯一身份底座，T8.0）。
@@ -44,4 +45,31 @@ data class CharacterCardEntity(
     val createdAt: Long = System.currentTimeMillis(),
     /** 更新时间（毫秒时间戳，编辑后刷新） */
     val updatedAt: Long = System.currentTimeMillis(),
-)
+    /** 自定义作息·起床时刻（T11.10 深化；null=跟随默认，见 customSchedule） */
+    val scheduleWakeUpMinute: Int? = null,
+    /** 自定义作息·入睡时刻 */
+    val scheduleSleepMinute: Int? = null,
+    /** 自定义作息·工作开始时刻 */
+    val scheduleWorkStartMinute: Int? = null,
+    /** 自定义作息·工作结束时刻 */
+    val scheduleWorkEndMinute: Int? = null,
+    /** 自定义作息·午休开始时刻 */
+    val scheduleBreakStartMinute: Int? = null,
+    /** 自定义作息·午休结束时刻 */
+    val scheduleBreakEndMinute: Int? = null,
+) {
+    /**
+     * 该角色手动设置的自定义作息（T11.10 深化：全简化版，仅起床+入睡两列）。
+     * 两列全为 null = 未单独设置（返回 null，跟随默认：基础作息+个性偏移）；
+     * 否则用已设置时刻 + 默认值兜底构造成完整 ScheduleConfig。
+     */
+    val customSchedule: ScheduleConfig?
+        get() = if (scheduleWakeUpMinute == null && scheduleSleepMinute == null) {
+            null
+        } else {
+            ScheduleConfig(
+                wakeUpMinute = scheduleWakeUpMinute ?: ScheduleConfig.DEFAULT_WAKE_UP,
+                sleepMinute = scheduleSleepMinute ?: ScheduleConfig.DEFAULT_SLEEP,
+            )
+        }
+}

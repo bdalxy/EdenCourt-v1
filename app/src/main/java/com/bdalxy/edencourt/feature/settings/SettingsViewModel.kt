@@ -7,17 +7,25 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.bdalxy.edencourt.EdenCourtApp
+import com.bdalxy.edencourt.data.local.dao.CharacterCardDao
 import com.bdalxy.edencourt.data.local.dao.UserIdentityDao
+import com.bdalxy.edencourt.data.local.entity.CharacterCardEntity
 import com.bdalxy.edencourt.data.local.entity.UserIdentity
 import com.bdalxy.edencourt.data.remote.AiChatService
 import com.bdalxy.edencourt.data.remote.ApiErrorKind
 import com.bdalxy.edencourt.data.remote.ApiException
+import com.bdalxy.edencourt.data.schedule.CharacterSchedule
+import com.bdalxy.edencourt.data.schedule.ScheduleTrait
+import com.bdalxy.edencourt.data.schedule.scheduleTrait
 import com.bdalxy.edencourt.data.setting.ApiConfig
 import com.bdalxy.edencourt.data.setting.ApiConfigStore
+import com.bdalxy.edencourt.data.setting.ScheduleConfig
+import com.bdalxy.edencourt.data.setting.ScheduleConfigStore
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -37,10 +45,31 @@ sealed interface TestState {
     data class Error(val message: String) : TestState
 }
 
+/**
+ * 单个角色个性作息概览（设置页「角色作息」区只读展示，T11.10 深化）。
+ * 由基础作息 + 该角色的作息特征（trait）/自定义作息派生；让用户直观看到「每个角色作息不同」。
+ */
+data class CharacterSchedulePreview(
+    /** 角色展示名（备注优先） */
+    val name: String,
+    /** 角色头像路径（可空，无图用首字色块） */
+    val avatar: String?,
+    /** 作息特征（标准/晨型/夜型） */
+    val trait: ScheduleTrait,
+    /** 是否手动设置过自定义作息（true=覆盖了默认派生，设置页打「自定义」标记） */
+    val isCustom: Boolean,
+    /** 起床时刻（HH:mm） */
+    val wakeUp: String,
+    /** 入睡时刻（HH:mm） */
+    val sleep: String,
+)
+
 class SettingsViewModel(
     private val apiConfigStore: ApiConfigStore,
     private val aiChatService: AiChatService,
     private val userIdentityDao: UserIdentityDao,
+    private val scheduleConfigStore: ScheduleConfigStore,
+    private val characterCardDao: CharacterCardDao,
 ) : ViewModel() {
 
     /** API 配置流（温度滑块等连续控件直接绑定此值） */
@@ -50,6 +79,48 @@ class SettingsViewModel(
             started = SharingStarted.WhileSubscribed(5_000),
             initialValue = ApiConfig(),
         )
+
+    /** 角色生活作息配置流（T11.10：起床/入睡滑杆绑定，会话列表/聊天页状态实时联动） */
+    val scheduleConfig: StateFlow<ScheduleConfig> = scheduleConfigStore.config
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = ScheduleConfig(),
+        )
+
+    /** 角色作息功能总开关（T11.10 深化两级开关第一级；默认关闭，需手动开启后才会在各会话显示「此刻状态」） */
+    val scheduleEnabled: StateFlow<Boolean> = scheduleConfigStore.enabled
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = false,
+        )
+
+    /**
+     * 各角色个性作息概览（T11.10 深化：基础作息 + 角色个性派生）。
+     * 角色卡列表与基础作息任一变化即重算；空列表时 UI 显示空态文案。
+     */
+    val characterSchedulePreviews: StateFlow<List<CharacterSchedulePreview>> =
+        characterCardDao.observeAll()
+            .combine(scheduleConfig) { cards, config ->
+                cards.map { card ->
+                    // 解析该角色生效作息（自定义 > 个性派生 > 基础），trait 标签单独展示
+                    val cfg = CharacterSchedule.resolveConfig(config, card)
+                    CharacterSchedulePreview(
+                        name = card.remark.ifBlank { card.name },
+                        avatar = card.avatar,
+                        trait = card.scheduleTrait(),
+                        isCustom = card.customSchedule != null,
+                        wakeUp = formatMinute(cfg.wakeUpMinute),
+                        sleep = formatMinute(cfg.sleepMinute),
+                    )
+                }
+            }
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(5_000),
+                initialValue = emptyList(),
+            )
 
     /** 用户自设身份流（T8.13：无则 null，UI 显示默认值） */
     val userIdentity: StateFlow<UserIdentity?> = userIdentityDao.observe()
@@ -104,6 +175,21 @@ class SettingsViewModel(
         )
     }
 
+    /** 设置角色作息功能总开关（T11.10 深化两级开关第一级） */
+    fun setScheduleEnabled(value: Boolean) = viewModelScope.launch {
+        scheduleConfigStore.setEnabled(value)
+    }
+
+    /** 更新角色生活作息（T11.10：滑杆即时保存，会话列表/聊天页状态实时联动） */
+    fun updateScheduleConfig(transform: (ScheduleConfig) -> ScheduleConfig) = viewModelScope.launch {
+        scheduleConfigStore.update(transform)
+    }
+
+    /** 恢复默认作息（T11.10） */
+    fun resetScheduleConfig() = viewModelScope.launch {
+        scheduleConfigStore.reset()
+    }
+
     /** 测试连接：发最小 stream=false 请求，按结果更新状态（T3.9） */
     fun testConnection() {
         if (_testState.value == TestState.Loading) return
@@ -138,8 +224,17 @@ class SettingsViewModel(
                     apiConfigStore = app.apiConfigStore,
                     aiChatService = app.aiChatService,
                     userIdentityDao = app.userIdentityDao,
+                    scheduleConfigStore = app.scheduleConfigStore,
+                    characterCardDao = app.characterCardDao,
                 )
             }
         }
     }
+}
+
+/** 分钟数 → HH:mm（设置页各角色个性作息概览展示） */
+private fun formatMinute(minute: Int): String {
+    val h = minute / 60
+    val m = minute % 60
+    return "%02d:%02d".format(h, m)
 }

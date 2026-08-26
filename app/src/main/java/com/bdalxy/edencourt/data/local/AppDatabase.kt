@@ -27,12 +27,12 @@ import com.bdalxy.edencourt.data.local.entity.UserIdentity
 /**
  * 本地数据库单例（企划书 3.3.2 / T2.4）。
  * - 挂载：Conversation、Message、CharacterCardEntity、MemoryItem 四个实体与对应 DAO
- * - version=15：v5→v6 character_cards 加 avatar；v6→v7 memory_items 加 characterCardId；v7→v8 character_cards/conversations 加 remark（T6.14）；v8→v9 memory_items 加 visibility（共享/私有，T7.1）；v9→v10 character_cards/conversations 加 code（会话唯一身份，T8.0）；v10→v11 memory_items 加 isTopSecret（绝密兜底，T8.2）；v11→v12 conversations 加 interactionEnabled（互动资格开关，T8.7）；v12→v13 新增 conv_relationship 关系表（互动关系底座，T8.8）；v13→v14 新增 interaction/interaction_participant/interaction_turn 三层互动表（T8.10）；v14→v15 新增 user_identity 用户自设身份表（T8.13）
+ * - version=20：v5→v6 character_cards 加 avatar；v6→v7 memory_items 加 characterCardId；v7→v8 character_cards/conversations 加 remark（T6.14）；v8→v9 memory_items 加 visibility（共享/私有，T7.1）；v9→v10 character_cards/conversations 加 code（会话唯一身份，T8.0）；v10→v11 memory_items 加 isTopSecret（绝密兜底，T8.2）；v11→v12 conversations 加 interactionEnabled（互动资格开关，T8.7）；v12→v13 新增 conv_relationship 关系表（互动关系底座，T8.8）；v13→v14 新增 interaction/interaction_participant/interaction_turn 三层互动表（T8.10）；v14→v15 新增 user_identity 用户自设身份表（T8.13）；v15→v16 memory_items 补多类型管理字段；v16→v17 新增 FTS4 记忆检索虚拟表；v17→v18 interaction 加 source 列；v18→v19 character_cards 加自定义作息 6 列；v19→v20 conversations 加会话作息 3 列（lifeEnabled+起床/入睡，T11.10 深化：每个会话角色单独调整）
  * - schema 已导出到 app/schemas（企划书 4.1.5）
  */
 @Database(
     entities = [Conversation::class, Message::class, CharacterCardEntity::class, MemoryItem::class, ConversationRelationship::class, Interaction::class, InteractionParticipant::class, InteractionTurn::class, UserIdentity::class],
-    version = 18,
+    version = 20,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -250,6 +250,27 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /** v18→v19：character_cards 表加自定义作息 6 列（T11.10 深化：角色可基于基础作息单独调节）。全为 NULL=跟随默认，故均不加默认值 */
+        private val MIGRATION_18_19 = object : Migration(18, 19) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE character_cards ADD COLUMN scheduleWakeUpMinute INTEGER")
+                db.execSQL("ALTER TABLE character_cards ADD COLUMN scheduleSleepMinute INTEGER")
+                db.execSQL("ALTER TABLE character_cards ADD COLUMN scheduleWorkStartMinute INTEGER")
+                db.execSQL("ALTER TABLE character_cards ADD COLUMN scheduleWorkEndMinute INTEGER")
+                db.execSQL("ALTER TABLE character_cards ADD COLUMN scheduleBreakStartMinute INTEGER")
+                db.execSQL("ALTER TABLE character_cards ADD COLUMN scheduleBreakEndMinute INTEGER")
+            }
+        }
+
+        /** v19→v20：conversations 表加会话作息 3 列（T11.10 深化：每个会话角色单独调整）。lifeEnabled 默认 0（关），作息两列可空（NULL=跟随角色卡/默认） */
+        private val MIGRATION_19_20 = object : Migration(19, 20) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE conversations ADD COLUMN lifeEnabled INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE conversations ADD COLUMN scheduleWakeUpMinute INTEGER")
+                db.execSQL("ALTER TABLE conversations ADD COLUMN scheduleSleepMinute INTEGER")
+            }
+        }
+
         /** v1→v2：messages 表新增 reasoning 列，默认空串（兼容旧数据） */
         private val MIGRATION_1_2 = object : Migration(1, 2) {
             override fun migrate(db: SupportSQLiteDatabase) {
@@ -340,7 +361,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "edencourt.db",
                 ).addMigrations(
-                    MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18,
+                    MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20,
                 ).build().also { INSTANCE = it }
             }
     }

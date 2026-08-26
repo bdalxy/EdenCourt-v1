@@ -29,6 +29,8 @@ import com.bdalxy.edencourt.data.repository.ChatRepository
 import com.bdalxy.edencourt.data.repository.CrossSessionConsultService
 import com.bdalxy.edencourt.data.repository.MemoryRepository
 import com.bdalxy.edencourt.data.setting.ApiConfigStore
+import com.bdalxy.edencourt.data.setting.ScheduleConfig
+import com.bdalxy.edencourt.data.setting.ScheduleConfigStore
 import com.bdalxy.edencourt.domain.CharacterCard
 import com.bdalxy.edencourt.domain.CharacterCardParser
 import com.bdalxy.edencourt.domain.PromptBuilder
@@ -99,6 +101,7 @@ class ChatViewModel(
     private val interactionDao: InteractionDao,
     private val relationshipDao: RelationshipDao,
     private val userIdentityDao: UserIdentityDao,
+    private val scheduleConfigStore: ScheduleConfigStore,
 ) : ViewModel() {
 
     /** 该会话的消息流（按创建时间正序，数据库变化自动刷新） */
@@ -139,6 +142,30 @@ class ChatViewModel(
                 started = SharingStarted.WhileSubscribed(5_000),
                 initialValue = "默认助手",
             )
+
+    /** 角色生活作息配置（T11.10：聊天页顶部「此刻状态」按此计算，设置页改动实时联动） */
+    val scheduleConfig: StateFlow<ScheduleConfig> = scheduleConfigStore.config
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = ScheduleConfig(),
+        )
+
+    /** 角色作息功能总开关（T11.10 深化两级开关第一级；默认关闭） */
+    val scheduleEnabled: StateFlow<Boolean> = scheduleConfigStore.enabled
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = false,
+        )
+
+    /** 本会话实体（T11.10 深化：聊天页顶部作息面板读取会话级开关/自定义作息） */
+    val conversation: StateFlow<Conversation?> = repository.observeConversation(conversationId)
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = null,
+        )
 
     /** 本会话的未读互动数（v1.2b T8.11：聊天页顶部「互动」图标红点，进入互动中心后消除） */
     val unreadInteractions: StateFlow<Int> =
@@ -204,6 +231,36 @@ class ChatViewModel(
         viewModelScope.launch {
             val conv = repository.getConversation(conversationId) ?: return@launch
             repository.updateConversation(conv.copy(interactionEnabled = enabled))
+        }
+    }
+
+    /** 切换本会话角色作息开关（T11.10 深化两级开关第二级：聊天页顶部作息面板） */
+    fun setConversationLife(enabled: Boolean) {
+        viewModelScope.launch {
+            val conv = repository.getConversation(conversationId) ?: return@launch
+            repository.updateConversation(
+                conv.copy(
+                    lifeEnabled = enabled,
+                    updatedAt = System.currentTimeMillis(),
+                ),
+            )
+        }
+    }
+
+    /**
+     * 设置/清除本会话角色自定义作息（T11.10 深化：每个会话角色单独调整）。
+     * @param cfg 自定义作息（起床+入睡）；传 null 表示清除自定义，恢复跟随角色卡/默认
+     */
+    fun updateConversationLifeSchedule(cfg: ScheduleConfig?) {
+        viewModelScope.launch {
+            val conv = repository.getConversation(conversationId) ?: return@launch
+            repository.updateConversation(
+                conv.copy(
+                    scheduleWakeUpMinute = cfg?.wakeUpMinute,
+                    scheduleSleepMinute = cfg?.sleepMinute,
+                    updatedAt = System.currentTimeMillis(),
+                ),
+            )
         }
     }
 
@@ -755,6 +812,7 @@ class ChatViewModel(
                         interactionDao = app.interactionDao,
                         relationshipDao = app.relationshipDao,
                         userIdentityDao = app.userIdentityDao,
+                        scheduleConfigStore = app.scheduleConfigStore,
                     )
                 }
             }

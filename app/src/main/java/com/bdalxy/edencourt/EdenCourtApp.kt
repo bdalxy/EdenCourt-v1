@@ -22,6 +22,7 @@ import com.bdalxy.edencourt.data.repository.MemoryRepository
 import com.bdalxy.edencourt.data.setting.ApiConfigStore
 import com.bdalxy.edencourt.data.setting.DailyConsultConfigStore
 import com.bdalxy.edencourt.data.setting.InteractionConfigStore
+import com.bdalxy.edencourt.data.setting.ScheduleConfigStore
 import com.bdalxy.edencourt.domain.BuiltInCards
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -184,5 +185,10 @@ class EdenCourtApp : Application() {
     /** 互动自动驱动定时调度器单例（v1.2b，T11.7：AlarmManager 每日自动窗口） */
     val interactionAutoScheduler: InteractionAutoScheduler by lazy {
         InteractionAutoScheduler(interactionConfigStore)
+    }
+
+    /** 角色生活作息配置存储单例（v1.2b，T11.10：起床/入睡/工作/午休时刻，驱动「此刻状态」） */
+    val scheduleConfigStore: ScheduleConfigStore by lazy {
+        ScheduleConfigStore(this)
     }
 }

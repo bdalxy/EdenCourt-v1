@@ -11,6 +11,8 @@ import com.bdalxy.edencourt.data.local.dao.CharacterCardDao
 import com.bdalxy.edencourt.data.local.entity.CharacterCardEntity
 import com.bdalxy.edencourt.data.local.entity.Conversation
 import com.bdalxy.edencourt.data.repository.ChatRepository
+import com.bdalxy.edencourt.data.setting.ScheduleConfig
+import com.bdalxy.edencourt.data.setting.ScheduleConfigStore
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -28,6 +30,7 @@ import kotlinx.coroutines.launch
 class ConversationListViewModel(
     private val repository: ChatRepository,
     private val characterCardDao: CharacterCardDao,
+    private val scheduleConfigStore: ScheduleConfigStore,
 ) : ViewModel() {
 
     /** 会话列表 UI 状态（按更新时间降序，数据库自动维护） */
@@ -38,6 +41,22 @@ class ConversationListViewModel(
                 started = SharingStarted.WhileSubscribed(5_000),
                 initialValue = emptyList(),
             )
+
+    /** 角色生活作息配置（T11.10：会话列表角色卡片「此刻状态」按此计算） */
+    val scheduleConfig: StateFlow<ScheduleConfig> = scheduleConfigStore.config
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = ScheduleConfig(),
+        )
+
+    /** 角色作息全局开关（T11.10 深化两级开关第一级：关闭时会话列表/聊天页均不显示状态） */
+    val scheduleEnabled: StateFlow<Boolean> = scheduleConfigStore.enabled
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = false,
+        )
 
     /** 首次加载是否完成（T6.1：首帧前显示进度圈，避免空状态闪烁，企划书 5.5.1） */
     private val _isLoading = MutableStateFlow(true)
@@ -107,6 +126,7 @@ class ConversationListViewModel(
                 ConversationListViewModel(
                     repository = app.chatRepository,
                     characterCardDao = app.characterCardDao,
+                    scheduleConfigStore = app.scheduleConfigStore,
                 )
             }
         }

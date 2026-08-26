@@ -984,8 +984,22 @@ app/src/main/
   - 操作：
     ① 新增 `data/schedule/CharacterSchedule.kt`（状态机+按真实时间计算）与 `data/setting/ScheduleConfigStore.kt`（作息配置，DataStore）
     ② 会话列表角色卡片 + 聊天页顶部显示多态「此刻状态」（含状态小图标/文案）
-  - 文件：`data/schedule/CharacterSchedule.kt`（新增）· `data/setting/ScheduleConfigStore.kt`（新增）· `feature/conversationlist/ConversationListScreen.kt` · `feature/chat/ChatScreen.kt` · 相关 ViewModel
-  - 验收：[ ] 角色卡片/聊天页按时段显示正确状态 · [ ] 作息配置可调且即时生效 · [ ] 编译+真机通过
+    ③ 设置页新增「角色作息」配置区：起床/入睡/工作开始/工作结束/午休开始/午休结束 6 个滑杆 + 「恢复默认作息」，拖动即时生效并联动会话列表/聊天页状态
+  - 文件：`data/schedule/CharacterSchedule.kt`（新增）· `data/setting/ScheduleConfigStore.kt`（新增）· `core/ui/LifeStateIndicator.kt`（新增）· `feature/conversationlist/ConversationListScreen.kt` · `feature/chat/ChatScreen.kt` · `feature/settings/SettingsScreen.kt` · `SettingsViewModel.kt` · 相关 ViewModel
+  - 验收：[x] 角色卡片/聊天页按时段显示正确状态 · [x] 作息配置可调且即时生效 · [x] 编译+真机通过
+  - **深化（2026-08-26，用户：「时间安排不应该每个都不太一样吗」→「角色卡处基于一个基础单独调节，不然默认」）**：
+    - ① **个性作息派生**：`CharacterSchedule` 新增 `ScheduleTrait`（标准/晨型/夜型）关键词规则派生 + `applyTrait` 整体偏移（晨型-1h/夜型+2h），会话列表/聊天页按各自作息算「此刻状态」，设置页「各角色作息」区只读概览
+    - ② **每角色手动覆盖**（本次）：`character_cards` 加 6 个可空自定义作息列（Room v19 迁移）；`CharacterSchedule.resolveConfig` 统一解析「自定义 > 个性派生 > 基础」；角色卡详情对话框新增「作息设置」区（6 滑杆 + 恢复跟随默认），未设置自动跟随默认
+  - 文件（深化）：`data/schedule/CharacterSchedule.kt`（ScheduleTrait/resolveConfig）· `data/local/entity/CharacterCardEntity.kt`（自定义作息字段）· `AppDatabase.kt`（v18→v19）· `feature/character/CharacterScreen.kt`·`CharacterViewModel.kt` · `feature/settings/SettingsScreen.kt`·`SettingsViewModel.kt` · `feature/conversationlist/ConversationListScreen.kt` · `feature/chat/ChatScreen.kt`
+  - 验收（深化）：[x] 三角色作息不同（晨型/夜型/标准） · [x] 角色详情可单独调节并生效 · [x] 未调节跟随默认 · [x] 编译+真机通过
+  - **深化②全简化版（2026-08-26，用户：「改成只有起床和睡觉时间吧」「全部角色卡支持自定义，每个会话角色都支持单独调整」+ 修复「恢复默认还是10」与「最晚才12点睡」）**：
+    - ① **作息简化 2 时刻**：`ScheduleConfig` 只保留起床+入睡（入睡支持跨天，最晚次日 01:59，`MAX_SLEEP_MINUTE`）；状态机简化为 4 态（睡眠/晨起/活跃/晚间放松），固定规则划分（入睡~起床=睡眠 → 起床后 1h=晨起 → 21:00 前=活跃 → 入睡前=晚间放松），以起床为 0 点归一化坐标系支持跨天入睡
+    - ② **两级自定义**：`character_cards` 自定义作息改 2 列（起床/入睡）；`conversations` 新增会话级作息（lifeEnabled + 起床/入睡，Room v20 迁移）；`resolveConfig` 优先级=会话自定义 > 角色自定义 > 个性派生 > 基础
+    - ③ **两级开关**：设置页全局开关（DataStore `schedule_enabled`）默认关 + 聊天页顶部作息面板会话级开关（`lifeEnabled`）默认关；都开启才显示「此刻状态」
+    - ④ **修复「恢复默认还是10」**：角色卡详情默认值改走 `applyTrait`（基础+个性偏移）而非 `resolveConfig`（含自定义），恢复默认后滑杆正确显示派生值；**修复「最晚才12点睡」**：入睡支持跨天次日凌晨
+    - ⑤ **聊天页顶部入口**：顶部状态标签/提示可点击 → `LifeScheduleSheet`（会话开关 + 起床/入睡 2 滑杆 + 恢复默认/取消/保存）
+  - 文件（简化）：`data/setting/ScheduleConfigStore.kt`（2 时刻+全局开关）· `data/schedule/CharacterSchedule.kt`（4 态+跨天+resolveConfig 会话级）· `data/local/entity/CharacterCardEntity.kt`·`Conversation.kt`（会话级字段）· `AppDatabase.kt`（v19→v20）· `feature/chat/ChatScreen.kt`（LifeScheduleSheet+TimeSlider）·`ChatViewModel.kt` · `feature/conversationlist/ConversationListScreen.kt`·`ConversationListViewModel.kt`（两级开关+会话级解析）· `feature/settings/SettingsScreen.kt`（全局开关+2 滑杆）· `feature/character/CharacterScreen.kt`（恢复默认修复+2 滑杆）· `core/ui/LifeStateIndicator.kt`（4 态配色）
+  - 验收（简化）：[x] 恢复默认显示派生值（阿杰夜型 10:00→09:00、入睡次日 01:00） · [x] 入睡支持跨天次日 · [x] 两级开关控制显示（全局开+会话开才显示） · [x] 聊天页顶部作息面板滑杆保存生效 · [x] 会话列表/聊天页状态随会话作息实时计算（21:34 晚间放松） · [x] 编译+真机通过
 - **T11.11 状态驱动对话与互动调度（N1 深化）**：
   - 依赖：T11.10、T11.7
   - 目标：生活状态真实影响角色行为——深夜被叫醒会困倦、工作时段回复更简短；睡眠窗口不发起自动互动

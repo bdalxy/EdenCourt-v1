@@ -39,6 +39,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -53,10 +54,16 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.bdalxy.edencourt.EdenCourtApp
 import com.bdalxy.edencourt.core.ui.CharacterAvatar
+import com.bdalxy.edencourt.core.ui.LifeStateIndicator
 import com.bdalxy.edencourt.data.local.entity.CharacterCardEntity
 import com.bdalxy.edencourt.data.local.entity.Conversation
+import com.bdalxy.edencourt.data.schedule.CharacterSchedule
+import com.bdalxy.edencourt.data.schedule.LifeState
+import com.bdalxy.edencourt.data.setting.ScheduleConfig
+import kotlinx.coroutines.delay
 import java.time.Instant
 import java.time.LocalDate
+import java.time.LocalTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
@@ -81,6 +88,10 @@ fun ConversationListScreen(
     val conversations by viewModel.conversations.collectAsStateWithLifecycle()
     val characterCards by viewModel.characterCards.collectAsStateWithLifecycle()
     val isLoading by viewModel.isLoading.collectAsStateWithLifecycle()
+    // T11.10：作息配置 + 角色「此刻状态」（每分钟刷新，会话列表角色卡片显示）
+    val scheduleConfig by viewModel.scheduleConfig.collectAsStateWithLifecycle()
+    // T11.10 深化：全局开关（两级开关第一级：关闭则不显示任何状态）
+    val scheduleEnabled by viewModel.scheduleEnabled.collectAsStateWithLifecycle()
 
     var menuExpanded by remember { mutableStateOf(false) }
     var pendingDelete by remember { mutableStateOf<Conversation?>(null) }
@@ -152,10 +163,20 @@ fun ConversationListScreen(
                 modifier = Modifier.fillMaxSize().padding(innerPadding),
             ) {
                 items(items = conversations, key = { it.id }) { conversation ->
+                    // 会话绑定的角色卡（未绑定为 null → 显示默认助手，T6.2A）
+                    val card = characterCards.firstOrNull { it.id == conversation.characterCardId }
                     ConversationListItem(
                         conversation = conversation,
-                        // 取会话绑定的角色卡（未绑定为 null → 显示默认助手，T6.2A）
-                        card = characterCards.firstOrNull { it.id == conversation.characterCardId },
+                        card = card,
+                        // T11.10 深化：两级开关（全局 && 会话）都开启才显示「此刻状态」；
+                        // 生效作息按 resolveConfig 会话级解析（会话自定义 > 角色自定义 > 个性偏移 > 基础）
+                        lifeState = if (scheduleEnabled && conversation.lifeEnabled && conversation.characterCardId != null) {
+                            rememberRoleLifeState(
+                                CharacterSchedule.resolveConfig(scheduleConfig, card, conversation),
+                            )
+                        } else {
+                            null
+                        },
                         onClick = { onNavigateToChat(conversation.id) },
                         // T6.10：长按改为弹操作菜单（置顶/取消置顶、删除），不再直接弹删除确认
                         onLongClick = { actionTarget = conversation },
@@ -316,6 +337,7 @@ fun ConversationListScreen(
 private fun ConversationListItem(
     conversation: Conversation,
     card: CharacterCardEntity?,
+    lifeState: LifeState?,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
 ) {
@@ -366,6 +388,11 @@ private fun ConversationListItem(
                 )
             }
             Spacer(modifier = Modifier.height(2.dp))
+            // T11.10：绑定角色卡的会话显示多态「此刻状态」（睡眠中/晨起/专注中…）
+            if (lifeState != null) {
+                LifeStateIndicator(state = lifeState)
+                Spacer(modifier = Modifier.height(2.dp))
+            }
             Text(
                 text = conversation.lastMessagePreview.ifEmpty { "暂无消息" },
                 style = MaterialTheme.typography.bodyMedium,
@@ -423,6 +450,22 @@ private fun formatTime(timestamp: Long): String {
         today.minusDays(1) -> "昨天"
         else -> zoned.format(DateTimeFormatter.ofPattern("yyyy-MM-dd"))
     }
+}
+
+/**
+ * 角色「此刻状态」（T11.10）：按角色生效作息 + 真实时间计算多态生活状态，每分钟刷新一次。
+ * T11.10 深化：传入的 config 已是该角色解析后的生效作息（自定义优先，其次个性偏移）。
+ */
+@Composable
+private fun rememberRoleLifeState(config: ScheduleConfig): LifeState {
+    var state by remember { mutableStateOf(CharacterSchedule.computeState(config, LocalTime.now())) }
+    LaunchedEffect(config) {
+        while (true) {
+            state = CharacterSchedule.computeState(config, LocalTime.now())
+            delay(60_000L)
+        }
+    }
+    return state
 }
 
 /** 角色卡选择项（T4.7）：圆形头像（自定义图片/首字）+ 名称 + 简介，点击回调（T6.12 头像改 CharacterAvatar） */

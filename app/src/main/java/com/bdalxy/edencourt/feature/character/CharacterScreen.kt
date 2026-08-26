@@ -35,6 +35,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
@@ -61,6 +62,9 @@ import com.bdalxy.edencourt.EdenCourtApp
 import com.bdalxy.edencourt.core.ui.CharacterAvatar
 import com.bdalxy.edencourt.core.ui.saveAvatarFromUri
 import com.bdalxy.edencourt.data.local.entity.CharacterCardEntity
+import com.bdalxy.edencourt.data.schedule.CharacterSchedule
+import com.bdalxy.edencourt.data.schedule.scheduleTrait
+import com.bdalxy.edencourt.data.setting.ScheduleConfig
 import kotlinx.coroutines.launch
 
 /**
@@ -78,6 +82,8 @@ fun CharacterScreen(onBack: () -> Unit) {
     val viewModel: CharacterViewModel = viewModel(factory = CharacterViewModel.factory(app))
     val cards by viewModel.cards.collectAsStateWithLifecycle()
     val importing by viewModel.importing.collectAsStateWithLifecycle()
+    // T11.10 深化：全局基础作息（角色详情页「基于基础作息单独调节」的起点）
+    val scheduleConfig by viewModel.scheduleConfig.collectAsStateWithLifecycle()
 
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
@@ -221,8 +227,11 @@ fun CharacterScreen(onBack: () -> Unit) {
         val liveCard = cards.firstOrNull { it.id == card.id } ?: card
         CharacterDetailDialog(
             card = liveCard,
-            onSave = { name, description, remark ->
+            scheduleConfig = scheduleConfig,
+            onSave = { name, description, remark, schedule ->
                 viewModel.updateCardInfo(liveCard, name, description, remark)
+                // 作息单独写库（schedule=null 表示恢复跟随默认；未改动时等价重写，幂等无害）
+                viewModel.updateSchedule(liveCard, schedule)
                 editingCard = null
             },
             onPickAvatar = {
@@ -437,11 +446,13 @@ private fun CharacterCardListItem(
 /**
  * 详情编辑对话框（企划书 5.3.3）：
  * 头像（可更换/恢复默认，T6.2B）+ 备注/名称/简介可编辑并保存；JSON 内容只读滚动展示。
+ * T11.10 深化：新增「作息设置」区——基于基础作息单独调节该角色，未调节跟随默认。
  */
 @Composable
 private fun CharacterDetailDialog(
     card: CharacterCardEntity,
-    onSave: (name: String, description: String, remark: String) -> Unit,
+    scheduleConfig: ScheduleConfig,
+    onSave: (name: String, description: String, remark: String, schedule: ScheduleConfig?) -> Unit,
     onPickAvatar: () -> Unit,
     onClearAvatar: () -> Unit,
     onDismiss: () -> Unit,
@@ -449,6 +460,15 @@ private fun CharacterDetailDialog(
     var name by remember(card.id) { mutableStateOf(card.name) }
     var description by remember(card.id) { mutableStateOf(card.description) }
     var remark by remember(card.id) { mutableStateOf(card.remark) }
+    // 作息调节区（T11.10 深化）：
+    // 生效默认作息 = 基础作息 + 个性偏移（「跟随默认」时的展示值）。
+    // 注意：必须用 applyTrait 而非 resolveConfig——resolveConfig 在角色已有自定义时返回自定义，
+    // 会导致「恢复跟随默认」后滑杆仍显示旧自定义值（历史 bug）。
+    val defaultCfg = CharacterSchedule.applyTrait(scheduleConfig, card.scheduleTrait())
+    // 当前自定义作息（null=跟随默认）；拖动滑杆暂存，点「保存」一并写库
+    var customCfg by remember(card.id) { mutableStateOf(card.customSchedule) }
+    // 滑杆展示值：自定义优先，否则生效默认
+    val shownCfg = customCfg ?: defaultCfg
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -502,6 +522,54 @@ private fun CharacterDetailDialog(
                     label = { Text("简介") },
                     modifier = Modifier.fillMaxWidth(),
                 )
+                // 作息设置区（T11.10 深化）：基于基础作息单独调节，未调节跟随默认
+                Spacer(modifier = Modifier.height(12.dp))
+                HorizontalDivider()
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = "作息设置",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier.weight(1f),
+                    )
+                    // 当前模式标签：跟随默认（含特征）或自定义
+                    Text(
+                        text = if (customCfg == null) "跟随默认·${card.scheduleTrait().label}" else "已自定义",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (customCfg == null) {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        } else {
+                            MaterialTheme.colorScheme.primary
+                        },
+                    )
+                }
+                Text(
+                    text = "拖动下方滑杆即可单独设置该角色的起床/入睡，不设置自动跟随默认。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                TimeSlider(
+                    label = "起床",
+                    minute = shownCfg.wakeUpMinute,
+                    range = 4 * 60..10 * 60,
+                    onValueChange = { v -> customCfg = (customCfg ?: defaultCfg).copy(wakeUpMinute = v) },
+                )
+                TimeSlider(
+                    label = "入睡",
+                    minute = shownCfg.sleepMinute,
+                    range = 20 * 60..ScheduleConfig.MAX_SLEEP_MINUTE,
+                    onValueChange = { v -> customCfg = (customCfg ?: defaultCfg).copy(sleepMinute = v) },
+                )
+                // 恢复跟随默认（清除自定义作息）
+                if (customCfg != null) {
+                    TextButton(
+                        onClick = { customCfg = null },
+                        modifier = Modifier.align(Alignment.End),
+                    ) {
+                        Text("恢复跟随默认")
+                    }
+                }
                 Spacer(modifier = Modifier.height(12.dp))
                 Text(
                     text = "JSON（只读）",
@@ -528,7 +596,7 @@ private fun CharacterDetailDialog(
                 onClick = {
                     // 名称不允许为空，空则提示不保存
                     if (name.isBlank()) return@TextButton
-                    onSave(name.trim(), description.trim(), remark.trim())
+                    onSave(name.trim(), description.trim(), remark.trim(), customCfg)
                 },
             ) { Text("保存") }
         },
@@ -536,4 +604,40 @@ private fun CharacterDetailDialog(
             TextButton(onClick = onDismiss) { Text("取消") }
         },
     )
+}
+
+/**
+ * 作息时间滑杆（T11.10 深化，风格对齐设置页 TimeSlider）：
+ * 显示 HH:mm，拖动即时回调更新该角色自定义作息。
+ * @param minute 当前分钟数（0~1439）
+ * @param range 可调范围（分钟）
+ */
+@Composable
+private fun TimeSlider(
+    label: String,
+    minute: Int,
+    range: IntRange,
+    onValueChange: (Int) -> Unit,
+) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Text("$label：${formatMinute(minute)}")
+        Slider(
+            value = minute.toFloat(),
+            onValueChange = { onValueChange(it.toInt()) },
+            valueRange = range.first.toFloat()..range.last.toFloat(),
+            steps = (range.last - range.first) / 5 - 1, // 5 分钟一档
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
+}
+
+/** 分钟数 → HH:mm（T11.10 深化：作息滑杆标签显示；>=24 点表示为次日，如 25:00→次日 01:00） */
+private fun formatMinute(minute: Int): String {
+    val h = minute / 60
+    val m = minute % 60
+    return if (h >= 24) {
+        "次日 %02d:%02d".format(h - 24, m)
+    } else {
+        "%02d:%02d".format(h, m)
+    }
 }

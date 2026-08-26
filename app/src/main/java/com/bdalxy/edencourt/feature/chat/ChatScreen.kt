@@ -1,5 +1,6 @@
 package com.bdalxy.edencourt.feature.chat
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -45,6 +46,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -70,6 +72,13 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.bdalxy.edencourt.EdenCourtApp
 import com.bdalxy.edencourt.core.ui.CharacterAvatar
+import com.bdalxy.edencourt.core.ui.LifeStateIndicator
+import com.bdalxy.edencourt.data.local.entity.CharacterCardEntity
+import com.bdalxy.edencourt.data.local.entity.Conversation
+import com.bdalxy.edencourt.data.schedule.CharacterSchedule
+import com.bdalxy.edencourt.data.schedule.LifeState
+import com.bdalxy.edencourt.data.schedule.ScheduleTrait
+import com.bdalxy.edencourt.data.schedule.scheduleTrait
 import com.bdalxy.edencourt.data.local.entity.InteractionStatus
 import com.bdalxy.edencourt.data.local.entity.MemoryItem
 import com.bdalxy.edencourt.data.local.entity.MemoryType
@@ -78,8 +87,10 @@ import com.bdalxy.edencourt.data.local.entity.MessageStatus
 import com.bdalxy.edencourt.data.local.entity.MessageType
 import com.bdalxy.edencourt.data.local.entity.Role
 import com.bdalxy.edencourt.data.remote.ApiErrorKind
+import com.bdalxy.edencourt.data.setting.ScheduleConfig
 import kotlinx.coroutines.delay
 import java.time.Instant
+import java.util.Locale
 import java.time.LocalTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -110,6 +121,11 @@ fun ChatScreen(
     val roleName by viewModel.roleName.collectAsStateWithLifecycle()
     val isGenerating by viewModel.isGenerating.collectAsStateWithLifecycle()
     val errorMessages by viewModel.errorMessages.collectAsStateWithLifecycle()
+    // T11.10：角色生活作息配置（顶部「此刻状态」按此计算，设置页改动实时联动）
+    val scheduleConfig by viewModel.scheduleConfig.collectAsStateWithLifecycle()
+    // T11.10 深化：全局作息开关 + 本会话实体（作息面板/状态显示条件）
+    val scheduleEnabled by viewModel.scheduleEnabled.collectAsStateWithLifecycle()
+    val conversation by viewModel.conversation.collectAsStateWithLifecycle()
     // v1.2b T8.11：顶部「互动」图标未读红点
     val unreadInteractions by viewModel.unreadInteractions.collectAsStateWithLifecycle()
 
@@ -117,6 +133,9 @@ fun ChatScreen(
     LaunchedEffect(conversationId) {
         viewModel.markInteractionsRead()
     }
+
+    // T11.10 深化：聊天页顶部作息面板（开启该会话角色作息 + 单独调节起床/入睡）
+    var showLifeSheet by rememberSaveable { mutableStateOf(false) }
 
     // 输入框内容状态（旋转/重建后保留）
     var input by rememberSaveable { mutableStateOf("") }
@@ -168,14 +187,37 @@ fun ChatScreen(
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(roleName, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
-                        // T6.8：生成中显示「正在输入…」，否则显示角色当前状态（在线/睡觉中，轻量版）
-                        Text(
-                            text = if (isGenerating) "正在输入…" else roleStatusText(),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.outline,
-                            maxLines = 1,
-                            modifier = Modifier.padding(start = 40.dp),
-                        )
+                        // T6.8 + T11.10：生成中显示「正在输入…」，否则显示角色作息状态（或未开启提示）
+                        if (isGenerating) {
+                            Text(
+                                text = "正在输入…",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.outline,
+                                maxLines = 1,
+                                modifier = Modifier.padding(start = 40.dp),
+                            )
+                        } else if (roleCard != null) {
+                            // T11.10 深化：全局开关 && 会话开关都开启才显示「此刻状态」；否则提示未开启，点击进入作息面板
+                            val lifeOn = scheduleEnabled && conversation?.lifeEnabled == true
+                            if (lifeOn) {
+                                LifeStateIndicator(
+                                    state = roleLifeState(scheduleConfig, roleCard, conversation),
+                                    modifier = Modifier
+                                        .padding(start = 40.dp)
+                                        .clickable { showLifeSheet = true },
+                                )
+                            } else {
+                                Text(
+                                    text = if (scheduleEnabled) "作息未开启 · 点此开启" else "角色作息未开启",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.outline,
+                                    maxLines = 1,
+                                    modifier = Modifier
+                                        .padding(start = 40.dp)
+                                        .clickable { showLifeSheet = true },
+                                )
+                            }
+                        }
                     }
                 },
                 navigationIcon = {
@@ -270,6 +312,20 @@ fun ChatScreen(
                 onOpenInteraction()
             },
             onDismiss = { showInteractionSheet = false },
+        )
+    }
+    // T11.10 深化：作息面板（开启该会话角色作息 + 单独调节起床/入睡）
+    if (showLifeSheet) {
+        LifeScheduleSheet(
+            roleName = roleName,
+            globalEnabled = scheduleEnabled,
+            enabled = conversation?.lifeEnabled == true,
+            onEnabledChange = { viewModel.setConversationLife(it) },
+            scheduleConfig = scheduleConfig,
+            card = roleCard,
+            conv = conversation,
+            onScheduleChange = { viewModel.updateConversationLifeSchedule(it) },
+            onDismiss = { showLifeSheet = false },
         )
     }
 }
@@ -473,26 +529,22 @@ private fun formatTime(timestamp: Long): String =
         .format(DateTimeFormatter.ofPattern("HH:mm"))
 
 /**
- * 角色当前状态文本（T6.8 轻量版，用户需求「角色状态（在线/睡觉中）」）。
- * 按时间段自动切换：6:00~22:59 为「在线」，其余为「睡觉中」；每分钟刷新一次。
- * 后续深入开发时可改为随性格/对话/角色卡属性驱动。
+ * 角色「此刻状态」（T11.10 替代 T6.8 的「在线/睡觉中」二分标签）。
+ * 按角色生效作息（ScheduleConfig）+ 真实时间计算多态生活状态；每分钟刷新一次。
+ * T11.10 深化：经 resolveConfig 解析生效作息（会话自定义 > 角色自定义 > 个性偏移 > 基础）。
  */
 @Composable
-private fun roleStatusText(): String {
-    var text by remember { mutableStateOf(currentRoleStatus()) }
-    LaunchedEffect(Unit) {
+private fun roleLifeState(config: ScheduleConfig, card: CharacterCardEntity?, conv: Conversation?): LifeState {
+    // 解析该角色最终生效作息（会话自定义 > 角色自定义 > 个性偏移 > 基础），保证与会话列表一致
+    val resolved = CharacterSchedule.resolveConfig(config, card, conv)
+    var state by remember { mutableStateOf(CharacterSchedule.computeState(resolved, LocalTime.now())) }
+    LaunchedEffect(config, card, conv) {
         while (true) {
+            state = CharacterSchedule.computeState(resolved, LocalTime.now())
             delay(60_000L)
-            text = currentRoleStatus()
         }
     }
-    return text
-}
-
-/** 计算当前角色状态：白天在线、深夜睡觉中（T6.8 轻量规则） */
-private fun currentRoleStatus(): String {
-    val hour = LocalTime.now().hour
-    return if (hour in 6..22) "在线" else "睡觉中"
+    return state
 }
 
 /** 底部输入栏：多行输入框（1~5 行自动扩展）+ 发送按钮；生成中额外显示停止按钮（T5.10） */
@@ -888,3 +940,148 @@ private fun formatMemoryTime(timestamp: Long): String =
     Instant.ofEpochMilli(timestamp)
         .atZone(ZoneId.systemDefault())
         .format(DateTimeFormatter.ofPattern("MM-dd HH:mm"))
+
+/**
+ * 聊天页顶部作息调节面板（T11.10 深化：每个会话角色单独调整）。
+ * - 会话级开关：控制本会话是否显示角色「此刻状态」（第二级开关，需全局开关开启）
+ * - 起床/入睡两个滑杆：单独调节本会话角色的作息，保存后覆盖角色卡/基础作息
+ * - 「恢复默认」：清除会话级自定义，回到跟随默认（基础作息 + 个性偏移）
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun LifeScheduleSheet(
+    roleName: String,
+    globalEnabled: Boolean,
+    enabled: Boolean,
+    onEnabledChange: (Boolean) -> Unit,
+    scheduleConfig: ScheduleConfig,
+    card: CharacterCardEntity?,
+    conv: Conversation?,
+    onScheduleChange: (ScheduleConfig?) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    // 跟随默认时的展示作息 = 基础作息 + 角色个性偏移（用于滑杆初始值 / 恢复默认）
+    val baseCfg = CharacterSchedule.applyTrait(scheduleConfig, card?.scheduleTrait() ?: ScheduleTrait.NORMAL)
+    // 会话级自定义作息（null=未单独设置）
+    val convCfg = conv?.customSchedule
+    var wakeUp by remember { mutableStateOf(convCfg?.wakeUpMinute ?: baseCfg.wakeUpMinute) }
+    var sleep by remember { mutableStateOf(convCfg?.sleepMinute ?: baseCfg.sleepMinute) }
+    val isCustom = convCfg != null
+
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+        ) {
+            Text(
+                text = "${roleName}的作息设置",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            // 会话级开关（第二级开关）
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("开启本会话作息", style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        text = if (globalEnabled) "开启后顶部显示「此刻状态」" else "需先在「设置 → 角色作息」开启全局开关",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (globalEnabled) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.error,
+                    )
+                }
+                Switch(
+                    checked = enabled,
+                    onCheckedChange = onEnabledChange,
+                    enabled = globalEnabled,
+                )
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+            HorizontalDivider()
+            Spacer(modifier = Modifier.height(8.dp))
+            // 起床/入睡 2 滑杆（入睡支持跨天，最晚次日 01:59）
+            TimeSlider(
+                label = "起床",
+                minute = wakeUp,
+                range = 4 * 60..10 * 60,
+                onValueChange = { wakeUp = it },
+            )
+            TimeSlider(
+                label = "入睡",
+                minute = sleep,
+                range = 20 * 60..ScheduleConfig.MAX_SLEEP_MINUTE,
+                onValueChange = { sleep = it },
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                // 已单独设置过才显示「恢复默认」（清除自定义，跟随角色卡/默认）
+                if (isCustom) {
+                    TextButton(onClick = {
+                        wakeUp = baseCfg.wakeUpMinute
+                        sleep = baseCfg.sleepMinute
+                    }) {
+                        Text("恢复默认")
+                    }
+                    Spacer(modifier = Modifier.width(4.dp))
+                }
+                TextButton(onClick = onDismiss) {
+                    Text("取消")
+                }
+                TextButton(
+                    onClick = {
+                        // 与跟随默认一致则视为未自定义（清除会话级作息）
+                        val newCfg = if (wakeUp == baseCfg.wakeUpMinute && sleep == baseCfg.sleepMinute) {
+                            null
+                        } else {
+                            ScheduleConfig(wakeUp, sleep)
+                        }
+                        onScheduleChange(newCfg)
+                        onDismiss()
+                    },
+                ) {
+                    Text("保存")
+                }
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+        }
+    }
+}
+
+/**
+ * 作息时间滑杆（T11.10 深化，风格对齐设置页/角色卡 TimeSlider）：
+ * 显示 HH:mm，拖动即时回调更新作息分钟数，5 分钟一档。
+ */
+@Composable
+private fun TimeSlider(
+    label: String,
+    minute: Int,
+    range: IntRange,
+    onValueChange: (Int) -> Unit,
+) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Text("$label：${formatMinute(minute)}")
+        Slider(
+            value = minute.toFloat(),
+            onValueChange = { onValueChange(it.toInt()) },
+            valueRange = range.first.toFloat()..range.last.toFloat(),
+            steps = (range.last - range.first) / 5 - 1, // 5 分钟一档
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
+}
+
+/** 分钟数 → HH:mm（T11.10 作息滑杆标签显示；>=24 点表示为次日，如 25:00→次日 01:00） */
+private fun formatMinute(minute: Int): String {
+    val h = minute / 60
+    val m = minute % 60
+    return if (h >= 24) {
+        "次日 %02d:%02d".format(h - 24, m)
+    } else {
+        String.format(Locale.US, "%02d:%02d", h, m)
+    }
+}
