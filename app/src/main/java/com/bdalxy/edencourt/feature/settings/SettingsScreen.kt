@@ -103,13 +103,37 @@ fun SettingsScreen(
             verticalArrangement = Arrangement.spacedBy(24.dp),
         ) {
             // 第 1 区：AI API 配置（T3.3）
-            item { ApiSettingsSection(viewModel = viewModel) }
+            item { SettingsSectionCard { ApiSettingsSection(viewModel = viewModel) } }
             // 第 2 区：我的身份（用户自设角色卡身份，T8.13）
-            item { IdentitySettingsSection(viewModel = viewModel) }
+            item { SettingsSectionCard { IdentitySettingsSection(viewModel = viewModel) } }
             // 第 3 区：角色作息（T11.10，可调，即时生效）
-            item { ScheduleSettingsSection(viewModel = viewModel) }
+            item { SettingsSectionCard { ScheduleSettingsSection(viewModel = viewModel) } }
             // 第 4 区：互动中心入口（T11.13，从设置页也能进入：查看/发起互动、自动驱动、关系故事）
             item { InteractionCenterSection(onOpenInteraction = onOpenInteraction) }
+        }
+    }
+}
+
+/**
+ * 设置页分组卡片（P0-3 设置页分组整理）：把每个功能区用一个柔和圆角卡片包起来，
+ * 视觉上一目了然地分成「AI API / 我的身份 / 角色作息」等组块，避免平铺显得杂乱。
+ * 内部分区各自保留自己的横向内边距（padding 由其子级负责），本卡片只负责外框与边距。
+ */
+@Composable
+private fun SettingsSectionCard(content: @Composable () -> Unit) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp),
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+        ),
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp),
+        ) {
+            content()
         }
     }
 }
