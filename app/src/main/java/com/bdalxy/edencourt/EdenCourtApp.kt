@@ -42,6 +42,8 @@ class EdenCourtApp : Application() {
         // 首次启动播种内置角色卡（幂等，已存在则跳过；T4.4）
         applicationScope.launch {
             BuiltInCards.seed(characterCardDao)
+            // T12.11 性别字段回填补丁：升级前已播种的内置卡补 gender（幂等）
+            BuiltInCards.seedGenderIfMissing(characterCardDao)
         }
         // T11.7 互动自动驱动：App 启动即安排当日自动窗口闹钟（总开关/自动开关任一关闭时自动取消）
         applicationScope.launch {

@@ -25,6 +25,8 @@ data class CharacterCard(
     val firstMessage: String = "",
     /** 审核硬约束（可选） */
     val constraints: String = "",
+    /** 性别（可选；T12.11 新增，取值「女」/「男」/空。供跨会话转述/角色互提时正确使用「她/他」称谓） */
+    val gender: String = "",
     /** 分类标签（可选） */
     val tags: List<String> = emptyList(),
 ) {

@@ -2,6 +2,7 @@ package com.bdalxy.edencourt.domain
 
 import com.bdalxy.edencourt.data.local.dao.CharacterCardDao
 import com.bdalxy.edencourt.data.local.entity.CharacterCardEntity
+import kotlinx.coroutines.flow.first
 import kotlinx.serialization.json.Json
 
 /**
@@ -25,6 +26,7 @@ object BuiltInCards {
                 ExampleDialogue(user = "我最近好累", assistant = "辛苦啦~要不要先休息一下？学姐陪你说说话~"),
             ),
             constraints = "保持温柔，不指责用户，多鼓励。",
+            gender = "女",
             tags = listOf("治愈", "日常"),
         ),
         CharacterCard(
@@ -37,6 +39,7 @@ object BuiltInCards {
                 ExampleDialogue(user = "我代码跑不通", assistant = "又卡编译了？行吧，先看报错第一行，别急着怀疑人生。"),
             ),
             constraints = "毒舌但不人身攻击，吐槽后必须给有用建议。",
+            gender = "男",
             tags = listOf("吐槽", "技术"),
         ),
         CharacterCard(
@@ -49,6 +52,7 @@ object BuiltInCards {
                 ExampleDialogue(user = "我睡不着", assistant = "闭上眼睛，想象羽毛轻轻落在心上。慢慢呼吸，我会一直在这里陪着你。"),
             ),
             constraints = "始终保持温柔纯净的氛围，不使用暴力或负面词汇。",
+            gender = "女",
             tags = listOf("治愈", "幻想"),
         ),
     )
@@ -69,6 +73,25 @@ object BuiltInCards {
                     isBuiltIn = true,
                 ),
             )
+        }
+    }
+
+    /**
+     * T12.11 性别字段回填补丁（幂等）：升级前已播种的内置卡（存量真机数据）没有 gender 字段，
+     * 此方法把「名字匹配内置清单 + isBuiltIn + jsonContent 尚无 gender 字段」的存量卡，
+     * 用内置 JSON（含 gender）原地更新 jsonContent。已有 gender 的卡不动，不误改自定义卡。
+     * @param dao 角色卡表数据访问
+     */
+    suspend fun seedGenderIfMissing(dao: CharacterCardDao) {
+        val builtinsByName = all.associateBy { it.name }
+        dao.observeAll().first().forEach { entity ->
+            val builtin = builtinsByName[entity.name] ?: return@forEach
+            // 仅补内置卡、且 JSON 里还没有 gender 字段（有则已是最新，跳过）
+            if (entity.isBuiltIn && !entity.jsonContent.contains("\"gender\"")) {
+                dao.update(
+                    entity.copy(jsonContent = json.encodeToString(CharacterCard.serializer(), builtin)),
+                )
+            }
         }
     }
 }

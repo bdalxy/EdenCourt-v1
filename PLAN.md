@@ -1090,6 +1090,8 @@ app/src/main/
 > **阶段收尾（2026-08-28）：T12.1~T12.10 全部完成并推送 GitHub（34f9e6d、d12e569 等）。** 安全（Key 加密+备份排除、receiver 全收敛）、性能（流式节流、FTS4 接线、暗访定向查询、消息窗口分页）、工程保底（游标持久化、24 用例单测、ChatViewModel 拆分 1060→891 行、关系对规范化下沉+陪看哨兵改可空列）三类硬伤全部落地，阶段 10 验收关闭。
 >
 > **T12.11 跨会话打听·小夏转述 + 列表预览修复（2026-08-28 完成并推送）**：真机走查发现暗访回传「把 B 的原话+动作直接贴到 A 会话」（视觉上变成 B 在跟用户说话），且打听回传不刷新会话列表预览（停留上一句）。修复：①`CrossSessionConsultService.relayAsVisitor` 以发起角色（A）人格+口吻把打听结果转述给用户（两次 LLM：B 真作答 + A 转述，转述失败兜底回 B 原话不丢信息）；②`ChatSideEffects.updateConsultMessage` 回传后同步刷新 `conversations.lastMessagePreview/时间`（类微信）。真机端到端验证：小夏会话发「你能去问一下羽在干什么吗？」→ 回传为「（小跑到你身边…）我跟你说哦~羽刚才在桂花树下待着呢…」（主体/动作/口吻均是小夏），列表预览同步更新为 01:04 最新回传。文件：`CrossSessionConsultService.kt` · `ChatSideEffects.kt`。
+>
+> **T12.11 补充·角色卡性别字段（2026-08-28 完成，随 T12.11 推送）**：真机复核发现转述里 LLM 把羽称「他」（角色卡无性别信息）。落地：①`CharacterCard.gender`（可选，「女」/「男」/空，JSON 序列化）；②内置三张卡补 gender（小夏女/阿杰男/羽女）；③`BuiltInCards.seedGenderIfMissing` 幂等回填补丁（仅补「名字匹配内置+isBuiltIn+JSON 无 gender」的存量卡，EdenCourtApp 启动调用，不误改自定义卡）；④`ConsultResult.sourceGender` + `relayAsVisitor` 转述 prompt 注入「《羽》是女性角色，提到 ta 一律用『她』」。真机端到端验证：再次打听，回传「她正倚在老槐树下…她说她在谱一支没有词的曲子…」全部用「她」。文件：`CharacterCard.kt` · `BuiltInCards.kt` · `EdenCourtApp.kt` · `CrossSessionConsultService.kt` · `ChatSideEffects.kt`。
 
 - **T12.1 API Key 加密存储 + 备份排除（S1，P0）**：
   - 依赖：无

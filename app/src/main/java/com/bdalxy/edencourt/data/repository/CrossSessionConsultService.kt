@@ -36,6 +36,8 @@ class CrossSessionConsultService(
         val reason: String? = null,
         /** 目标会话绑定的角色卡名称（供 A 侧小字「↑打听到：来自X」展示，T8.3） */
         val sourceName: String = "",
+        /** 目标角色卡的性别（「女」/「男」/空；T12.11 转述时确保「她/他」称谓正确） */
+        val sourceGender: String = "",
     )
 
     /** B 侧旁路上下文里最多携带最近多少条消息（控制上下文长度，参考 PromptBuilder 默认 20） */
@@ -58,20 +60,15 @@ class CrossSessionConsultService(
         val q = question.trim()
         if (q.isEmpty()) return ConsultResult(success = false, reason = "没想好打听什么")
 
-        // 1. 目标会话 B 的人格底座：绑定角色卡则用其 system，否则默认助手
+        // 1. 目标会话 B 的人格底座：绑定角色卡则用其 system，否则默认助手；同时解析名称与性别（T12.11）
         val cardId = target.characterCardId
-        val systemPrompt = if (cardId != null) {
-            val entity = characterCardDao.getById(cardId)
-            val card = entity?.let { runCatching { CharacterCardParser.parse(it.jsonContent) }.getOrNull() }
-            if (card != null) PromptBuilder.buildCardSystemPrompt(card) else PromptBuilder.DEFAULT_SYSTEM_PROMPT
-        } else {
-            PromptBuilder.DEFAULT_SYSTEM_PROMPT
+        val card = cardId?.let { id ->
+            val entity = characterCardDao.getById(id)
+            entity?.let { runCatching { CharacterCardParser.parse(it.jsonContent) }.getOrNull() }
         }
-        val sourceName = if (cardId != null) {
-            characterCardDao.getById(cardId)?.name ?: ""
-        } else {
-            ""
-        }
+        val systemPrompt = card?.let { PromptBuilder.buildCardSystemPrompt(it) } ?: PromptBuilder.DEFAULT_SYSTEM_PROMPT
+        val sourceName = card?.name ?: ""
+        val sourceGender = card?.gender ?: ""
 
         // 2. 只注入 B 「可向外打捞」的记忆（共享且非绝密）——绝密记忆 B 不感知，硬性兜底
         val consultableMemories = cardId?.let { memoryRepository.getConsultableMemories(it) } ?: emptyList()
@@ -100,13 +97,13 @@ class CrossSessionConsultService(
         // 4. 调 LLM 拿 B 作答（非流式即可）
         val raw = runCatching { aiChatService.completeChat(messages, config) }.getOrElse { e ->
             Log.w(TAG, "旁路打听失败：${e.javaClass.simpleName}: ${e.message}")
-            return ConsultResult(success = false, reason = "打听到一半对方没接上", sourceName = sourceName)
+            return ConsultResult(success = false, reason = "打听到一半对方没接上", sourceName = sourceName, sourceGender = sourceGender)
         }
         val answer = raw.trim()
         if (answer.isBlank()) {
-            return ConsultResult(success = false, reason = "对方没回应", sourceName = sourceName)
+            return ConsultResult(success = false, reason = "对方没回应", sourceName = sourceName, sourceGender = sourceGender)
         }
-        return ConsultResult(success = true, answer = answer, sourceName = sourceName)
+        return ConsultResult(success = true, answer = answer, sourceName = sourceName, sourceGender = sourceGender)
     }
 
     /**
@@ -130,6 +127,7 @@ class CrossSessionConsultService(
         question: String,
         answer: String,
         sourceName: String,
+        sourceGender: String = "",
     ): String {
         val config = apiConfigStore.config.firstOrNull()
         if (config == null || config.apiKey.isBlank()) return answer
@@ -146,9 +144,14 @@ class CrossSessionConsultService(
             PromptBuilder.DEFAULT_SYSTEM_PROMPT
         }
 
-        // 2. 转述任务注入：告诉 A「你刚去问过 sourceName，回答如下」，以 A 的口吻回来告诉用户
+        // 2. 转述任务注入：告诉 A「你刚去问过 sourceName，回答如下」，以 A 的口吻回来告诉用户；
+        //    T12.11 已知对方性别时，明确指定「她/他」称谓，杜绝转述里性别代词用错
         val finalSystem = buildString {
             append(systemPrompt)
+            if (sourceGender.isNotBlank()) {
+                append("\n\n【称谓】《").append(sourceName).append("》是").append(sourceGender).append("性角色，")
+                append("你提到 ta 时请一律用「").append(if (sourceGender == "女") "她" else "他").append("」。")
+            }
             append("\n\n【转述任务】你刚去找《").append(sourceName).append("》打听了「").append(question).append("」，")
             append("ta 的回答是：\n").append(answer).append("\n")
             append("现在请以你自己的口吻把这个消息转述给用户（你们平时聊天的语气），")

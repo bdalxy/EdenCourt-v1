@@ -106,6 +106,7 @@ class ChatSideEffects(
                     question = req.question,
                     answer = result.answer,
                     sourceName = result.sourceName,
+                    sourceGender = result.sourceGender,
                 )
                 updateConsultMessage(aiId, relayed, MessageStatus.SENT)
             } else {
