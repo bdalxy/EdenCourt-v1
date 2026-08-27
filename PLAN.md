@@ -1116,7 +1116,7 @@ app/src/main/
   - 依赖：T12.2
   - 操作：`MessageDao` 提供 `observePaged(conversationId, limit, offset)`（LIMIT 查询+Flow），UI 走真分页；旁路暗访改「最近 N 条」定向查询（含 LIMIT），全量流保留给确需场景
   - 文件：`data/local/dao/MessageDao.kt` · `feature/chat/ChatViewModel.kt` · `data/repository/CrossSessionConsultService.kt`
-  - 验收：[ ] 长会话滚动 60fps · [ ] 暗访不拉全文 · [ ] 编译+真机通过
+  - 验收：[x] 长会话滚动 60fps · [x] 暗访不拉全文 · [x] 编译+真机通过
 - **T12.7 FTS4 接线或裁撤（P4，P2，二选一）**：
   - 依赖：无
   - 操作：先补 FTS 查询词转义（`*`/`(`/`)`/`-`/OR/AND 等），再接入管理页英文/标签词检索；**或**明确裁撤 FTS4（删虚拟表+触发器+searchFts）降低复杂度
@@ -1126,7 +1126,7 @@ app/src/main/
   - 依赖：无
   - 操作：互动自动驱动对齐每日打听，补 BootReceiver 在设备开机后重建自动串门闹钟
   - 文件：`data/interaction/InteractionAutoScheduler.kt` · BootReceiver（扩展或新增）· `AndroidManifest.xml`
-  - 验收：[ ] 重启后自动互动闹钟重建 · [ ] 编译+真机通过
+  - 验收：[x] 重启后自动互动闹钟重建 · [x] 编译+真机通过
 - **T12.9 ChatViewModel 拆分专项（Q1，P2，技术债）**：
   - 依赖：T12.5（先有测试护栏再安全重构）
   - 操作：跨会话打听（T8.3/8.4）抽 `ChatSideEffects.kt`、陪看（T11.16）抽 `WatchTogetherDetector.kt`，UI 层不变，仅瘦身 1026 行超载类
@@ -1134,9 +1134,9 @@ app/src/main/
   - 验收：[ ] 拆分后聊天/暗访/陪看行为不变 · [ ] 单测仍通过 · [ ] 编译+真机通过
 - **T12.10 关系对约定下沉 + 陪看事件表达明确（D1/D2，P2）**：
   - 依赖：无
-  - 操作：① 关系对「小 id 恒 A」约定下沉到 Repository，DAO 不暴露裸 `upsert`；② 陪看事件 `convBId=0` 哨兵值改明确表达（可空列或单独 `convUserId`）
-  - 文件：`data/local/dao/RelationshipDao.kt` · `data/repository/RelationshipRepository.kt`（或现有仓储） · `data/local/entity/RelationshipEvent.kt` · `AppDatabase.kt`（迁移）
-  - 验收：[ ] 新调用点无需自记 min/max · [ ] 陪看事件表达明确无哨兵值 · [ ] 迁移不崩 · [ ] 编译+真机通过
+  - 操作：① 关系对「小 id 恒 A」约定下沉到 `RelationshipRepository`（`createNormalized`/`insertEvent` 内部排定，业务层不再裸 `upsert`/自记 min/max）；② 陪看事件 `convBId=0` 哨兵值改**可空列**（`convBId=null` = 用户共同观看），v23→v24 整表重建迁移存量 0→NULL
+  - 文件：`data/local/dao/RelationshipDao.kt` · `data/repository/RelationshipRepository.kt`（新增） · `data/local/entity/RelationshipEvent.kt` · `AppDatabase.kt`（MIGRATION_23_24） · `InteractionExecutor.kt` · `InteractionAutoExecutor.kt` · `ChatViewModel.kt` · `InteractionCenterViewModel.kt` · 迁移测试
+  - 验收：[x] 新调用点无需自记 min/max（createNormalized/insertEvent 承担）· [x] 陪看事件表达明确无哨兵值（可空列）· [x] 迁移不崩（真机 v23→v24 覆盖安装通过）· [x] 编译+真机通过 · [x] 迁移测试含 v22→v24 哨兵归 NULL 用例
 
 > 依赖关系：P0（T12.1、T12.2 并行）→ P1（T12.3、T12.4 可紧随，T12.5 依赖 T12.2）→ P2（T12.6 依赖 T12.2、T12.9 依赖 T12.5，余 T12.7/T12.8/T12.10 无强依赖）。落地顺序建议与现有 PLAN 看板合并，遵项目规则逐任务点推进。
 

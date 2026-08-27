@@ -10,6 +10,7 @@ import com.bdalxy.edencourt.data.local.entity.InteractionSource
 import com.bdalxy.edencourt.data.local.entity.MemoryImportance
 import com.bdalxy.edencourt.data.local.entity.MemoryItem
 import com.bdalxy.edencourt.data.repository.MemoryRepository
+import com.bdalxy.edencourt.data.repository.RelationshipRepository
 import com.bdalxy.edencourt.data.schedule.CharacterSchedule
 import com.bdalxy.edencourt.data.schedule.LifeState
 import com.bdalxy.edencourt.data.schedule.scheduleTrait
@@ -32,7 +33,7 @@ import kotlin.random.Random
 class InteractionAutoExecutor(
     private val conversationDao: ConversationDao,
     private val interactionDao: InteractionDao,
-    private val relationshipDao: RelationshipDao,
+    private val relationshipRepository: RelationshipRepository,
     private val interactionConfigStore: InteractionConfigStore,
     private val interactionExecutor: InteractionExecutor,
     // T11.11：作息配置存储 + 角色卡 DAO，用于判断角色是否处于睡眠状态
@@ -87,7 +88,7 @@ class InteractionAutoExecutor(
                 val lastAuto = interactionDao.lastAutoTimeBetween(a.id, b.id)
                 if (lastAuto != null && lastAuto >= cooldownBefore) continue
                 // 距上次（任意）互动时间：从未互动过 = -1（最优先被想起）
-                val lastAny = relationshipDao.getBetween(a.id, b.id)?.lastInteractionAt ?: -1L
+                val lastAny = relationshipRepository.getBetween(a.id, b.id)?.lastInteractionAt ?: -1L
                 // T11.12：从双方记忆里挑「最该被记得、且去重窗口内未用过」的一件事作为因由；无可用则 null（走定时兜底）
                 val motive = pickMotive(a, b, now - motiveCooldownDays * 24L * 3600_000L)
                 candidates.add(Candidate(a.id, b.id, lastAny, motive))

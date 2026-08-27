@@ -3,7 +3,6 @@ package com.bdalxy.edencourt.data.interaction
 import android.util.Log
 import com.bdalxy.edencourt.data.local.dao.CharacterCardDao
 import com.bdalxy.edencourt.data.local.dao.InteractionDao
-import com.bdalxy.edencourt.data.local.dao.RelationshipDao
 import com.bdalxy.edencourt.data.local.dao.UserIdentityDao
 import com.bdalxy.edencourt.data.local.entity.CharacterCardEntity
 import com.bdalxy.edencourt.data.local.entity.Conversation
@@ -24,6 +23,7 @@ import com.bdalxy.edencourt.data.remote.AiChatService
 import com.bdalxy.edencourt.data.remote.ChatMessage
 import com.bdalxy.edencourt.data.repository.ChatRepository
 import com.bdalxy.edencourt.data.repository.MemoryRepository
+import com.bdalxy.edencourt.data.repository.RelationshipRepository
 import com.bdalxy.edencourt.data.setting.ApiConfig
 import com.bdalxy.edencourt.data.setting.ApiConfigStore
 import com.bdalxy.edencourt.data.setting.InteractionConfigStore
@@ -45,7 +45,7 @@ class InteractionExecutor(
     private val characterCardDao: CharacterCardDao,
     private val memoryRepository: MemoryRepository,
     private val interactionDao: InteractionDao,
-    private val relationshipDao: RelationshipDao,
+    private val relationshipRepository: RelationshipRepository,
     private val interactionConfigStore: InteractionConfigStore,
     private val apiConfigStore: ApiConfigStore,
     private val aiChatService: AiChatService,
@@ -111,7 +111,7 @@ class InteractionExecutor(
             // 同源判定 + 当前好感度：同卡告知双方"来自同一张角色卡"；氛围由好感度分档驱动（T11.6 取代按次数近似）
             val isSameCard = a.characterCardId != null && a.characterCardId == b.characterCardId
             val sameCardName = if (isSameCard) aPlain else ""
-            val existingRel = relationshipDao.getBetween(a.id, b.id)
+            val existingRel = relationshipRepository.getBetween(a.id, b.id)
             val affinityScore = existingRel?.affinityScore ?: 0
             // RIFT 为人工负向态，保留不覆盖；其余按好感度分档推导当前关系氛围
             val relationStatus = if (existingRel?.relationStatus == RelationStatus.RIFT.name) {
@@ -192,9 +192,10 @@ class InteractionExecutor(
             // 8. T11.13：互动沉淀为「共同经历事件」——关系故事叙事素材（场景=因由/日常，主题=话题锚点，氛围=当前档位，要点=双方摘要）
             val eventMood = ConversationRelationship.affinityTierLabel(affinityScore)
             val eventScene = if (motive.isNullOrBlank()) "日常" else "因为「${motive.take(20)}」"
-            relationshipDao.insertEvent(
+            relationshipRepository.insertEvent(
                 RelationshipEvent(
-                    convAId = minOf(a.id, b.id), convBId = maxOf(a.id, b.id),
+                    // T12.10：关系事件规范化（小 id 恒 A）由仓储承担，此处无需自记 min/max
+                    convAId = a.id, convBId = b.id,
                     scene = eventScene,
                     topic = topicSeed.trim().take(40),
                     mood = eventMood,
@@ -362,22 +363,19 @@ class InteractionExecutor(
      */
     private suspend fun upsertRelationshipProgress(aId: Long, bId: Long, now: Long, turnCount: Int) {
         val gain = ConversationRelationship.affinityGain(turnCount)
-        val smallId = minOf(aId, bId)
-        val bigId = maxOf(aId, bId)
-        val existing = relationshipDao.getBetween(aId, bId)
+        val existing = relationshipRepository.getBetween(aId, bId)
         if (existing == null) {
-            relationshipDao.upsert(
-                ConversationRelationship(
-                    convAId = smallId, convBId = bigId,
-                    relationStatus = ConversationRelationship.relationStatusForAffinity(gain),
-                    affinityScore = gain,
-                    interactionCount = 1, lastInteractionAt = now,
-                ),
+            // T12.10：关系对规范化（小 id 恒 A）由仓储承担，调用方无需自记 min/max
+            relationshipRepository.createNormalized(
+                aId, bId,
+                relationStatus = ConversationRelationship.relationStatusForAffinity(gain),
+                affinityScore = gain,
+                now = now,
             )
         } else {
             // 互动后好感度累计、次数+1，按新好感度递进关系标签（供互动中心展示；氛围在 start() 已按当前好感度推导）
             val newScore = existing.affinityScore + gain
-            relationshipDao.touchInteraction(existing.id, now, ConversationRelationship.relationStatusForAffinity(newScore), newScore)
+            relationshipRepository.touchInteraction(existing.id, now, ConversationRelationship.relationStatusForAffinity(newScore), newScore)
         }
     }
 

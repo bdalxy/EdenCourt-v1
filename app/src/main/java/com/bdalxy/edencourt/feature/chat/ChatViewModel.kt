@@ -540,7 +540,7 @@ class ChatViewModel(
 
     /**
      * T11.16：AI 回复完成后，把本次「用户分享 + 角色陪看」沉淀为「共同经历」关系事件。
-     * - 复用 T11.13 关系事件表，type=WATCH（共同观看），convAId=本角色会话、convBId=0（用户侧）；
+     * - 复用 T11.13 关系事件表，type=WATCH（共同观看），convAId=本角色会话、convBId=null（用户侧，无第二会话；T12.10 由可空列表达、非哨兵 0）；
      * - 要点 = 用户分享原文摘要 + 角色陪看回复摘要；
      * - 冷却期内不重复沉淀（同一次陪看不刷多事件），每次新分享会覆盖待沉淀主题。
      */
@@ -553,7 +553,7 @@ class ChatViewModel(
         relationshipDao.insertEvent(
             RelationshipEvent(
                 convAId = conversationId,
-                convBId = 0, // 0 = 用户侧（T11.16 共同观看，区别于角色间互动）
+                convBId = null, // null=用户共同观看（无第二会话，区别于角色间互动，T12.10 非哨兵 0）
                 scene = "你分享内容，一起看「${share.topic.take(12)}」",
                 topic = share.topic.take(40),
                 mood = "一起看",
@@ -934,9 +934,11 @@ class ChatViewModel(
         return buildString {
             append("【你和朋友们共同经历过的事】\n")
             events.forEach { e ->
+                // T12.10：convBId 可空——共同观看（WATCH）事件对方是「你」（无角色会话），其余为另一角色会话
                 val peerId = if (e.convAId == conversationId) e.convBId else e.convAId
-                val peer = repository.getConversation(peerId) ?: return@forEach
-                val peerName = peerDisplayName(peer)
+                val peerName = if (peerId == null) "你" else {
+                    repository.getConversation(peerId)?.let { peerDisplayName(it) } ?: return@forEach
+                }
                 append("- 你和").append(peerName).append("一起")
                 if (e.scene.isNotBlank()) append(e.scene)
                 if (e.topic.isNotBlank()) append("「").append(e.topic.take(20)).append("」")

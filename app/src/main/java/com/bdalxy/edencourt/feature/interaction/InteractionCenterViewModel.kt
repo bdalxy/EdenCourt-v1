@@ -176,8 +176,9 @@ class InteractionCenterViewModel(
                     title = buildString {
                         append(names[e.convAId] ?: "会话")
                         append(" × ")
-                        // T11.16：共同观看事件 convBId=0 表示用户侧，显示「你」
-                        append(if (e.convBId == 0L) "你" else (names[e.convBId] ?: "会话"))
+                        // T11.16：共同观看事件 convBId=null 表示用户侧，显示「你」（T12.10 取消哨兵 0，改可空列）
+                        val peerB = e.convBId
+                        append(if (peerB == null) "你" else (names[peerB] ?: "会话"))
                     },
                     scene = e.scene,
                     topic = e.topic,

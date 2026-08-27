@@ -19,6 +19,7 @@ import com.bdalxy.edencourt.data.interaction.InteractionExecutor
 import com.bdalxy.edencourt.data.repository.ChatRepository
 import com.bdalxy.edencourt.data.repository.CrossSessionConsultService
 import com.bdalxy.edencourt.data.repository.MemoryRepository
+import com.bdalxy.edencourt.data.repository.RelationshipRepository
 import com.bdalxy.edencourt.data.setting.ApiConfigStore
 import com.bdalxy.edencourt.data.setting.DailyConsultConfigStore
 import com.bdalxy.edencourt.data.setting.InteractionConfigStore
@@ -153,6 +154,11 @@ class EdenCourtApp : Application() {
         AppDatabase.getInstance(this).relationshipDao()
     }
 
+    /** 会话间关系仓储单例（T12.10：关系对规范化约定下沉，业务层不再直接裸 upsert） */
+    val relationshipRepository: RelationshipRepository by lazy {
+        RelationshipRepository(relationshipDao)
+    }
+
     /** 用户自设身份表数据访问单例（v1.2b，T8.13：我的身份，唯一一条） */
     val userIdentityDao: UserIdentityDao by lazy {
         AppDatabase.getInstance(this).userIdentityDao()
@@ -165,7 +171,7 @@ class EdenCourtApp : Application() {
             characterCardDao = characterCardDao,
             memoryRepository = memoryRepository,
             interactionDao = interactionDao,
-            relationshipDao = relationshipDao,
+            relationshipRepository = relationshipRepository,
             interactionConfigStore = interactionConfigStore,
             apiConfigStore = apiConfigStore,
             aiChatService = aiChatService,
@@ -178,7 +184,7 @@ class EdenCourtApp : Application() {
         InteractionAutoExecutor(
             conversationDao = conversationDao,
             interactionDao = interactionDao,
-            relationshipDao = relationshipDao,
+            relationshipRepository = relationshipRepository,
             interactionConfigStore = interactionConfigStore,
             interactionExecutor = interactionExecutor,
             // T11.11：注入作息存储 + 角色卡 DAO，用于「睡眠中不串门」判断

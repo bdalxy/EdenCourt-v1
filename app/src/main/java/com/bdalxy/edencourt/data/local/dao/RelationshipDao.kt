@@ -16,7 +16,9 @@ import kotlinx.coroutines.flow.Flow
 @Dao
 interface RelationshipDao {
 
-    /** 新增或覆盖一条关系（同对会话幂等） */
+    /** 新增或覆盖一条关系（同对会话幂等）。
+     * 注意：关系对约定 convAId < convBId（小 id 恒 A），规范化由 RelationshipRepository 保证，
+     *      业务层不直接调用本裸 upsert（T12.10）。 */
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(relationship: ConversationRelationship): Long
 

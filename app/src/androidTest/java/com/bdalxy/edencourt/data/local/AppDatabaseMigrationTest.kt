@@ -33,11 +33,11 @@ class AppDatabaseMigrationTest {
     )
 
     /**
-     * 用例1：从 v12（核心业务表 + conv_relationship 初具形态）一路迁移到 v23。
+     * 用例1：从 v12（核心业务表 + conv_relationship 初具形态）一路迁移到 v24。
      * 迁移前埋入一条记忆 + 一条会话，验证穿越全部版本后数据完整保留。
      */
     @Test
-    fun migrateFrom_v12_to_v23_keepsData() {
+    fun migrateFrom_v12_to_v24_keepsData() {
         helper.createDatabase(TEST_DB, 12).use { db ->
             // 埋入 v12 形态的旧数据
             db.execSQL(
@@ -51,10 +51,10 @@ class AppDatabaseMigrationTest {
                     "VALUES ('测试会话', '备注名', 'V-test01', 0, 1000, 2000, 0, '你好', 2000)",
             )
 
-            // 与生产同源同序地跑完全部版本迁移（12→23）
-            migrateChain(db, from = 12, to = 23)
+            // 与生产同源同序地跑完全部版本迁移（12→24）
+            migrateChain(db, from = 12, to = 24)
 
-            // 迁移后数据仍在（穿越 11 次迁移未丢）
+            // 迁移后数据仍在（穿越 12 次迁移未丢）
             val count = queryInt(db, "SELECT COUNT(*) FROM memory_items WHERE content = '她喜欢喝热奶茶'")
             check(count == 1) { "迁移后记忆数据丢失: count=$count" }
             val convCount = queryInt(db, "SELECT COUNT(*) FROM conversations WHERE code = 'V-test01'")
@@ -63,22 +63,35 @@ class AppDatabaseMigrationTest {
     }
 
     /**
-     * 用例2：最新一次迁移 v22→v23（T11.16 给 relationship_event 加 type 列 + 对存量数据填默认）。
-     * 验证：type 列存在且存量数据被填默认值 'INTERACTION'。
+     * 用例2：最新一次迁移 v22→v24（T11.16 加 type 列 + T12.10 convBId 改可空）。
+     * 验证：type 列存在且存量数据被填默认值 'INTERACTION'；convBId=0 的 WATCH 哨兵行迁移为 NULL。
      */
     @Test
-    fun migrateFrom_v22_to_v23_addsTypeColumnWithDefault() {
+    fun migrateFrom_v22_to_v24_addsTypeAndNormalizesWatchSentinel() {
         helper.createDatabase(TEST_DB2, 22).use { db ->
             db.execSQL(
                 "INSERT INTO relationship_event (convAId, convBId, scene, topic, mood, points, source, happenedAt) " +
                     "VALUES (1, 2, '午夜', '星座话题', '轻松', '聊了很多', 'AUTO', 3000)",
             )
+            // 埋一条旧 WATCH 哨兵事件（convBId=0 表示用户共同观看）
+            db.execSQL(
+                "INSERT INTO relationship_event (convAId, convBId, scene, topic, mood, points, source, happenedAt) " +
+                    "VALUES (1, 0, '你分享内容一起看', '新番', '一起看', '聊了很多', 'MANUAL', 4000)",
+            )
 
-            migrateChain(db, from = 22, to = 23)
+            migrateChain(db, from = 22, to = 24)
 
             // 最新迁移新增的 type 列可读，且存量数据被填默认值
-            val type = queryString(db, "SELECT type FROM relationship_event WHERE convAId = 1 LIMIT 1")
+            val type = queryString(db, "SELECT type FROM relationship_event WHERE convAId = 1 AND convBId = 2 LIMIT 1")
             check(type == "INTERACTION") { "type 列默认值不对: $type" }
+            // T12.10：convBId=0 哨兵被迁移为 NULL（用户侧明确表达）
+            val sentinelIsNull = queryInt(
+                db,
+                "SELECT COUNT(*) FROM relationship_event WHERE convAId = 1 AND convBId IS NULL AND type = 'INTERACTION'",
+            )
+            check(sentinelIsNull == 1) { "WATCH 哨兵未迁移为 NULL: count=$sentinelIsNull" }
+            val orphanZero = queryInt(db, "SELECT COUNT(*) FROM relationship_event WHERE convBId = 0")
+            check(orphanZero == 0) { "仍存在 convBId=0 哨兵: count=$orphanZero" }
         }
     }
 

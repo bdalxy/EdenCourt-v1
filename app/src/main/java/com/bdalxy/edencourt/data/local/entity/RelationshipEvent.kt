@@ -17,10 +17,13 @@ import androidx.room.PrimaryKey
 data class RelationshipEvent(
     @PrimaryKey(autoGenerate = true)
     val id: Long = 0L,
-    /** 会话 A（小 id）；用户共同观看事件时=本角色会话 */
+    /** 会话 A（小 id）：INTERACTION=小 id 会话；用户共同观看事件=本角色会话 */
     val convAId: Long,
-    /** 会话 B（大 id）；用户共同观看事件时=0（表示用户侧，T11.16） */
-    val convBId: Long,
+    /**
+     * 会话 B（大 id）。INTERACTION=大 id 会话（且 convAId < convBId 规范化）；
+     * 用户共同观看（WATCH）=null（无第二会话，非哨兵值，T12.10 由可空列明确表达）。
+     */
+    val convBId: Long?,
     /** 场景（T11.13）：这场互动发生在什么情境下——事件驱动时记「因为「{因由}」」，否则「日常」 */
     val scene: String = "",
     /** 主题（本次互动话题锚点，即开场者抛出的第一句话） */

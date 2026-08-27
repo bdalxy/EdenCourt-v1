@@ -33,7 +33,7 @@ import com.bdalxy.edencourt.data.local.entity.UserIdentity
  */
 @Database(
     entities = [Conversation::class, Message::class, CharacterCardEntity::class, MemoryItem::class, ConversationRelationship::class, RelationshipEvent::class, Interaction::class, InteractionParticipant::class, InteractionTurn::class, UserIdentity::class],
-    version = 23,
+    version = 24,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -309,6 +309,41 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /** v23→v24：relationship_event 的 convBId 改可空列（T12.10，陪看事件取消哨兵 0）。
+         *  此前陪看事件以 convBId=0 表示「用户共同观看」；现改为可空列明确表达：
+         *  convBId=NULL = 用户共同观看（无第二会话），INTERACTION 事件不受影响（仍 convAId < convBId 规范化）。
+         *  SQLite 不能直接改列可空性，故整表重建，并将存量 convBId=0 的行迁移为 NULL。
+         */
+        private val MIGRATION_23_24 = object : Migration(23, 24) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `relationship_event_new` (" +
+                        "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "`convAId` INTEGER NOT NULL, " +
+                        "`convBId` INTEGER, " +
+                        "`scene` TEXT NOT NULL, " +
+                        "`topic` TEXT NOT NULL, " +
+                        "`mood` TEXT NOT NULL, " +
+                        "`points` TEXT NOT NULL, " +
+                        "`source` TEXT NOT NULL, " +
+                        "`type` TEXT NOT NULL DEFAULT 'INTERACTION', " +
+                        "`happenedAt` INTEGER NOT NULL" +
+                        ")",
+                )
+                db.execSQL(
+                    "INSERT INTO relationship_event_new (id, convAId, convBId, scene, topic, mood, points, source, type, happenedAt) " +
+                        "SELECT id, convAId, CASE WHEN convBId = 0 THEN NULL ELSE convBId END, " +
+                        "scene, topic, mood, points, source, type, happenedAt FROM relationship_event",
+                )
+                db.execSQL("DROP TABLE relationship_event")
+                db.execSQL("ALTER TABLE relationship_event_new RENAME TO relationship_event")
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_relationship_event_convAId_convBId_happenedAt` " +
+                        "ON `relationship_event` (`convAId`, `convBId`, `happenedAt`)",
+                )
+            }
+        }
+
         /** v1→v2：messages 表新增 reasoning 列，默认空串（兼容旧数据） */
         private val MIGRATION_1_2 = object : Migration(1, 2) {
             override fun migrate(db: SupportSQLiteDatabase) {
@@ -396,7 +431,7 @@ abstract class AppDatabase : RoomDatabase() {
             MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7,
             MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13,
             MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18, MIGRATION_18_19,
-            MIGRATION_19_20, MIGRATION_20_21, MIGRATION_21_22, MIGRATION_22_23,
+            MIGRATION_19_20, MIGRATION_20_21, MIGRATION_21_22, MIGRATION_22_23, MIGRATION_23_24,
         )
 
         /** 获取单例（双重检查锁，避免并发重复建库） */
