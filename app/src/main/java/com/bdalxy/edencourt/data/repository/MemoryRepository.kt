@@ -104,6 +104,8 @@ class MemoryRepository(
         const val MIN_CONFIDENCE = 0.7f
         /** 单角色卡注入记忆条数上限（T6.13，防止 prompt 过长） */
         const val DEFAULT_MEMORY_INJECT_LIMIT = 30
+        /** T11.8b 修复：内容级冲突判定时，较长一方内容长度的最低信任阈值（避免「喜欢」「图书馆」等短词误判为同一事实而覆盖旧记忆） */
+        private const val CONTENT_MATCH_MIN_LEN = 5
         private const val TAG = "MemoryRepo"
     }
 
@@ -527,11 +529,35 @@ class MemoryRepository(
             }
         }
 
-        // 1. 冲突判定：关键词任一命中已有记忆的 keywords 或 content，视为同一条记忆
+        // 1. 冲突判定（T11.8b 修复）：判定「同一条事实」必须满足更强证据，避免宽泛关键词误覆盖无关旧记忆。
+        //    - 范围收紧：优先在本角色卡现有记忆内判定（调用方已传入该卡现有记忆；为空则回退关键词搜索）；
+        //    - 证据1「内容重叠」：新旧内容互为包含，且较长一方长度>=阈值（避免「喜欢」等短词误判为同一事实）；
+        //    - 证据2「多关键词命中」：>=2 个关键词同时命中同一条记忆的 keywords/content（单宽泛关键词不足信）；
+        //    - 均不满足 → 视为不同事实 → 新增（保住旧记忆，T11.8b 事故「羽的阅读记忆被互动事实覆盖」修复）。
         val candidateKeywords = item.keywords.split(",").map { it.trim() }.filter { it.isNotEmpty() }
-        val existing = candidateKeywords.firstNotNullOfOrNull { kw ->
-            dao.searchByKeyword(kw).firstOrNull()
+        val pool: List<MemoryItem> = if (existingMemories.isNotEmpty()) {
+            existingMemories
+        } else {
+            candidateKeywords.flatMap { dao.searchByKeyword(it) }.distinctBy { it.id }
         }
+
+        // 证据1：内容重叠（同一事实的重复表述，如「喜欢奶茶」vs「用户喜欢喝奶茶」）
+        val byContent = pool.firstOrNull { old ->
+            !old.isDeleted && content.isNotEmpty() && old.content.isNotEmpty() &&
+                (old.content.length >= CONTENT_MATCH_MIN_LEN || content.length >= CONTENT_MATCH_MIN_LEN) &&
+                (old.content.contains(content) || content.contains(old.content))
+        }
+
+        // 证据2：多关键词同时命中同一条记忆（多证据才可信，单宽泛关键词不再触发覆盖）
+        val byKeywords = if (byContent == null && candidateKeywords.size >= 2) {
+            pool.firstOrNull { old ->
+                !old.isDeleted && candidateKeywords.count { kw ->
+                    kw.length >= 2 && (old.content.contains(kw) || old.keywords.contains(kw))
+                } >= 2
+            }
+        } else null
+
+        val existing = byContent ?: byKeywords
 
         if (existing != null) {
             // 2. 冲突：更新内容与置信度（取更高者），刷新时间；归属角色卡同步为新卡（T6.13）
