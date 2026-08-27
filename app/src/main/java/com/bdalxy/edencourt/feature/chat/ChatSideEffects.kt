@@ -98,8 +98,16 @@ class ChatSideEffects(
             }
             val result = crossSessionConsultService.consult(targetId, req.question, visitor)
             if (result.success) {
-                // 回传：正文自然带来源（"我去问了X，X说…"），用户可看到打听到的内容与出处
-                updateConsultMessage(aiId, "我去问了${result.sourceName}，${result.sourceName}说：\n${result.answer}", MessageStatus.SENT)
+                // T12.11 小夏转述：以发起角色（A）自己的口吻/动作把打听结果转述给用户，
+                // 避免把 B 的原话（含 B 的动作描写）直接贴出、视觉上变成 B 在跟用户说话
+                val relayed = crossSessionConsultService.relayAsVisitor(
+                    visitorConversationId = conversationId,
+                    visitorName = visitor,
+                    question = req.question,
+                    answer = result.answer,
+                    sourceName = result.sourceName,
+                )
+                updateConsultMessage(aiId, relayed, MessageStatus.SENT)
             } else {
                 updateConsultMessage(aiId, result.reason ?: "没问到", MessageStatus.SENT)
             }
@@ -108,9 +116,21 @@ class ChatSideEffects(
         }
     }
 
-    /** 把打听占位消息原地更新为最终回传文本（T8.3 结果回传 A） */
+    /**
+     * 把打听占位消息原地更新为最终回传文本（T8.3 结果回传 A），并同步刷新会话列表预览
+     * （T12.11：类微信——预览/时间跟随最新一条回传，避免列表仍显示上一句）。
+     */
     private suspend fun updateConsultMessage(id: Long, content: String, status: MessageStatus) {
         repository.getMessage(id)?.let { repository.updateMessage(it.copy(content = content, status = status)) }
+        val conv = repository.getConversation(conversationId) ?: return
+        val now = System.currentTimeMillis()
+        repository.updateConversation(
+            conv.copy(
+                lastMessagePreview = content.replace('\n', ' ').take(50),
+                lastMessageTime = now,
+                updatedAt = now,
+            ),
+        )
     }
 
     /** 打听主题拆词（按常见标点/空白切分，供 T8.1 检索） */

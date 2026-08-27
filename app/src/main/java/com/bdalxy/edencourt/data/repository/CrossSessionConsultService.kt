@@ -109,6 +109,69 @@ class CrossSessionConsultService(
         return ConsultResult(success = true, answer = answer, sourceName = sourceName)
     }
 
+    /**
+     * T12.11 小夏转述：旁路拿到 B（羽）的回答后，再以发起会话 A（小夏）自己的口吻/动作
+     * 把结果转述给用户——保证「去打听的人是小夏、回来汇报的也是小夏」，而不是把 B 的原话
+     * （含 B 的动作描写/第一人称）直接贴到 A 会话里（视觉上变成 B 在跟用户说话）。
+     *
+     * 流程：A 人格 system + A 最近历史 + 一条注入的「你刚去找《sourceName》打听了 question，
+     * 得到的回答是 answer」→ 调 LLM 生成 A 的转述文本。
+     * 转述失败/空白时兜底返回 B 的原话（至少用户能看到打听到的内容，不丢信息）。
+     *
+     * @param visitorConversationId 发起会话 A 的 id（转述主体 = A 绑定角色）
+     * @param visitorName 发起会话 A 的角色名（小夏）
+     * @param question 用户打听的问题原文
+     * @param answer B（羽）的回答原文（旁路咨询结果）
+     * @param sourceName 被打听角色名（羽），供转述 prompt 注入来源
+     */
+    suspend fun relayAsVisitor(
+        visitorConversationId: Long,
+        visitorName: String,
+        question: String,
+        answer: String,
+        sourceName: String,
+    ): String {
+        val config = apiConfigStore.config.firstOrNull()
+        if (config == null || config.apiKey.isBlank()) return answer
+        val visitor = chatRepository.getConversation(visitorConversationId)
+            ?: return answer
+
+        // 1. A 的人格底座（与 consult 同款解析，保证口吻一致）
+        val cardId = visitor.characterCardId
+        val systemPrompt = if (cardId != null) {
+            val entity = characterCardDao.getById(cardId)
+            val card = entity?.let { runCatching { CharacterCardParser.parse(it.jsonContent) }.getOrNull() }
+            if (card != null) PromptBuilder.buildCardSystemPrompt(card) else PromptBuilder.DEFAULT_SYSTEM_PROMPT
+        } else {
+            PromptBuilder.DEFAULT_SYSTEM_PROMPT
+        }
+
+        // 2. 转述任务注入：告诉 A「你刚去问过 sourceName，回答如下」，以 A 的口吻回来告诉用户
+        val finalSystem = buildString {
+            append(systemPrompt)
+            append("\n\n【转述任务】你刚去找《").append(sourceName).append("》打听了「").append(question).append("」，")
+            append("ta 的回答是：\n").append(answer).append("\n")
+            append("现在请以你自己的口吻把这个消息转述给用户（你们平时聊天的语气），")
+            append("可以带你的小动作、语气、反应和一点点你自己的看法，")
+            append("但不要复述『我去问了X，X说：』这种干巴巴的模板句，要像你亲口告诉用户那样自然。")
+        }
+
+        // 3. A 最近历史 + 注入「刚从 sourceName 那打听完回来」
+        val history = chatRepository.getRecentMessages(visitorConversationId, targetHistoryLimit)
+            .map { msg -> ChatMessage(role = if (msg.role == com.bdalxy.edencourt.data.local.entity.Role.USER) "user" else "assistant", content = msg.content) }
+        val probe = ChatMessage(role = "user", content = "（你刚从${sourceName}那打听完，回来告诉用户）")
+
+        val messages = listOf(ChatMessage(role = "system", content = finalSystem)) + history + probe
+
+        // 4. 调 LLM 生成 A 的转述（非流式）
+        val raw = runCatching { aiChatService.completeChat(messages, config) }.getOrElse { e ->
+            Log.w(TAG, "转述失败，回退用 B 原话：${e.javaClass.simpleName}: ${e.message}")
+            return answer
+        }
+        val relayed = raw.trim()
+        return if (relayed.isBlank()) answer else relayed
+    }
+
     private companion object {
         private const val TAG = "CrossSessionConsult"
     }
