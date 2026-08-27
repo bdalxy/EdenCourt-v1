@@ -39,7 +39,42 @@ interface MessageDao {
     @Query("SELECT * FROM messages WHERE id = :id")
     suspend fun getById(id: Long): Message?
 
-    /** 按会话一次性取全部消息（按时间正序，供跨会话旁路暗访构建目标上下文用，T8.2） */
+    /** 按会话一次性取全部消息（按时间正序，供确需全量历史的场景用，T8.2） */
     @Query("SELECT * FROM messages WHERE conversationId = :conversationId ORDER BY createdAt ASC, id ASC")
     suspend fun getByConversation(conversationId: Long): List<Message>
+
+    /**
+     * 定向取某会话「最近 limit 条」消息（时间正序，LIMIT 在数据库层完成，不拉全文）。
+     * T12.6：供跨会话暗访/每日打听等只需最近一段上下文的旁路场景用，
+     *     避免此前「getByConversation 拉全量再 takeLast」的长会话浪费。
+     * 实现：先按时间倒序取末尾 limit 条，再整体倒序回正序，保证返回仍是「旧→新」。
+     */
+    @Query(
+        """
+        SELECT * FROM (
+            SELECT * FROM messages
+            WHERE conversationId = :conversationId
+            ORDER BY createdAt DESC, id DESC
+            LIMIT :limit
+        ) ORDER BY createdAt ASC, id ASC
+        """
+    )
+    suspend fun getRecentByConversation(conversationId: Long, limit: Int): List<Message>
+
+    /**
+     * 观察分页（T12.6 基础设施，供确需按页订阅的场景）。
+     * 按时间正序取第 offset 起的 limit 条；翻页以 offset 递增。
+     * 说明：Room 表级校验会使本 Flow 在写好该会话时整体重发一次，
+     *      offset 语义在有增删的消息表中可能跳位，UI 持续滚动场景通常改用
+     *      observeByConversation + UI 侧窗口（G-① displayMessages）更稳。
+     */
+    @Query(
+        """
+        SELECT * FROM messages
+        WHERE conversationId = :conversationId
+        ORDER BY createdAt ASC, id ASC
+        LIMIT :limit OFFSET :offset
+        """
+    )
+    fun observePaged(conversationId: Long, limit: Int, offset: Int): Flow<List<Message>>
 }

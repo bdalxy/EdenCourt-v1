@@ -119,8 +119,8 @@ class DailyConsultExecutor(
                     ?.let { PromptBuilder.buildCardSystemPrompt(it) }
             }
         } ?: PromptBuilder.DEFAULT_SYSTEM_PROMPT
-        // 最近对话历史（控制上下文长度）
-        val history = chatRepository.getMessages(conversation.id).takeLast(HISTORY_LIMIT)
+        // 最近对话历史（控制上下文长度，T12.6：数据库层定向取最近 HISTORY_LIMIT 条，不再拉全量再 takeLast）
+        val history = chatRepository.getRecentMessages(conversation.id, HISTORY_LIMIT)
             .map { msg -> ChatMessage(role = if (msg.role == Role.USER) "user" else "assistant", content = msg.content) }
         val system = ChatMessage(role = "system", content = "$systemPrompt\n\n【这是一个只有你自己在的安静时刻】")
         val probe = ChatMessage(

@@ -49,9 +49,17 @@ class ChatRepository(
     fun observeMessages(conversationId: Long): Flow<List<Message>> =
         messageDao.observeByConversation(conversationId)
 
-    /** 按会话一次性取全部消息（按时间正序，跨会话旁路暗访构建目标上下文用，T8.2） */
+    /** 按会话一次性取全部消息（按时间正序，供确需全量历史的场景用，T8.2） */
     suspend fun getMessages(conversationId: Long): List<Message> =
         messageDao.getByConversation(conversationId)
+
+    /** 定向取某会话「最近 limit 条」消息（时间正序，T12.6：数据库层 LIMIT，供旁路暗访/每日打听等只需最近上下文的场景） */
+    suspend fun getRecentMessages(conversationId: Long, limit: Int): List<Message> =
+        messageDao.getRecentByConversation(conversationId, limit)
+
+    /** 观察分页（消息按时间正序第 offset 起的 limit 条，T12.6 基础设施） */
+    fun observePagedMessages(conversationId: Long, limit: Int, offset: Int): Flow<List<Message>> =
+        messageDao.observePaged(conversationId, limit, offset)
 
     /** 新增消息，返回生成的 id */
     suspend fun insertMessage(message: Message): Long = messageDao.insert(message)

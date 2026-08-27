@@ -90,7 +90,8 @@ class CrossSessionConsultService(
             append("如果是你的私密心事、或对方绝不可知道的事，就委婉拒绝或说不知道，绝不要编造；")
             append("实在不知道就说「我不清楚」。")
         }
-        val history = chatRepository.getMessages(targetConversationId).takeLast(targetHistoryLimit)
+        // T12.6：数据库层定向取最近 targetHistoryLimit 条，不再 getMessages 拉全量再 takeLast
+        val history = chatRepository.getRecentMessages(targetConversationId, targetHistoryLimit)
             .map { msg -> ChatMessage(role = if (msg.role == com.bdalxy.edencourt.data.local.entity.Role.USER) "user" else "assistant", content = msg.content) }
         val probe = ChatMessage(role = "user", content = "（来客代问）$visitorName 想打听：$q")
 
