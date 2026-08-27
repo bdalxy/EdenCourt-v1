@@ -47,6 +47,14 @@
         <receiver
             android:name=".data.interaction.InteractionAutoReceiver"
             android:exported="false" />
+        <!-- T12.8：设备开机后重排互动自动驱动窗口闹钟（对齐每日打听 Boot 重排） -->
+        <receiver
+            android:name=".data.interaction.InteractionAutoBootReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
 
     </application>
 
