@@ -35,6 +35,7 @@ import com.bdalxy.edencourt.data.repository.ChatRepository
 import com.bdalxy.edencourt.data.repository.CrossSessionConsultService
 import com.bdalxy.edencourt.data.repository.MemoryRepository
 import com.bdalxy.edencourt.data.setting.ApiConfigStore
+import com.bdalxy.edencourt.data.setting.ReplyCursorStore
 import com.bdalxy.edencourt.data.setting.ScheduleConfig
 import com.bdalxy.edencourt.data.setting.ScheduleConfigStore
 import com.bdalxy.edencourt.domain.CharacterCard
@@ -109,6 +110,7 @@ class ChatViewModel(
     private val relationshipDao: RelationshipDao,
     private val userIdentityDao: UserIdentityDao,
     private val scheduleConfigStore: ScheduleConfigStore,
+    private val replyCursorStore: ReplyCursorStore,
 ) : ViewModel() {
 
     /** 该会话的消息流（按创建时间正序，数据库变化自动刷新） */
@@ -630,6 +632,12 @@ class ChatViewModel(
         if (replyPumpJob?.isActive == true) return
         replyPumpJob = viewModelScope.launch {
             while (true) {
+                // T12.4：进程重启后首次运行，从持久化游标恢复已处理位置，
+                // 避免把历史用户消息全部「当新来信」重复洗澡成一次回复（B1 修复）。
+                // 仅在游标为空（首轮）才读库，之后每轮沿用内存值，避免重复 IO。
+                if (lastProcessedUserMessageId == null) {
+                    lastProcessedUserMessageId = replyCursorStore.get(conversationId)
+                }
                 // 取当前历史（含刚发送/攒批的用户消息）
                 val history = repository.observeMessages(conversationId).first()
                 // 本轮待回复：位于上次处理点之后的所有用户消息（连发会一次性取到，实现攒批）
@@ -640,6 +648,8 @@ class ChatViewModel(
                 // 没有新消息，泵退出等待下次发送
                 if (newUserMessages.isEmpty()) break
                 lastProcessedUserMessageId = newUserMessages.last().id
+                // T12.4：游标推进后立即落库，进程重启后可从中断位置续扫（不重复、不丢失）
+                replyCursorStore.save(conversationId, lastProcessedUserMessageId!!)
                 // 合并为一次「来信」：多条以换行分隔，AI 按性格决定怎么回（T6.9）
                 val mergedInput = newUserMessages.joinToString("\n") { it.content }
                 streamReply(
@@ -1040,6 +1050,7 @@ class ChatViewModel(
                         relationshipDao = app.relationshipDao,
                         userIdentityDao = app.userIdentityDao,
                         scheduleConfigStore = app.scheduleConfigStore,
+                        replyCursorStore = app.replyCursorStore,
                     )
                 }
             }

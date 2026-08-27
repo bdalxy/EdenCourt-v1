@@ -23,6 +23,7 @@ import com.bdalxy.edencourt.data.setting.ApiConfigStore
 import com.bdalxy.edencourt.data.setting.DailyConsultConfigStore
 import com.bdalxy.edencourt.data.setting.InteractionConfigStore
 import com.bdalxy.edencourt.data.setting.OnboardingConfigStore
+import com.bdalxy.edencourt.data.setting.ReplyCursorStore
 import com.bdalxy.edencourt.data.setting.ScheduleConfigStore
 import com.bdalxy.edencourt.domain.BuiltInCards
 import kotlinx.coroutines.CoroutineScope
@@ -201,5 +202,10 @@ class EdenCourtApp : Application() {
     /** 首启引导状态存储单例（T11.14：是否已看过新手指引，跳过或看完都记「已看过」） */
     val onboardingConfigStore: OnboardingConfigStore by lazy {
         OnboardingConfigStore(this)
+    }
+
+    /** 回复泵已处理游标存储单例（T12.4：进程重启后泵恢复游标，避免把历史重复洗澡成新来信） */
+    val replyCursorStore: ReplyCursorStore by lazy {
+        ReplyCursorStore(this)
     }
 }
