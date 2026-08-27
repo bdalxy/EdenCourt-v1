@@ -1129,9 +1129,9 @@ app/src/main/
   - 验收：[x] 重启后自动互动闹钟重建 · [x] 编译+真机通过
 - **T12.9 ChatViewModel 拆分专项（Q1，P2，技术债）**：
   - 依赖：T12.5（先有测试护栏再安全重构）
-  - 操作：跨会话打听（T8.3/8.4）抽 `ChatSideEffects.kt`、陪看（T11.16）抽 `WatchTogetherDetector.kt`，UI 层不变，仅瘦身 1026 行超载类
-  - 文件：`feature/chat/ChatViewModel.kt`（拆分）· 新增 `ChatSideEffects.kt` / `WatchTogetherDetector.kt`
-  - 验收：[ ] 拆分后聊天/暗访/陪看行为不变 · [ ] 单测仍通过 · [ ] 编译+真机通过
+  - 操作：跨会话打听（T8.3/8.4）抽 `ChatSideEffects.kt`、陪看（T11.16）抽 `WatchTogetherDetector.kt`，UI 层不变，仅瘦身 1060 行超载类；UI 状态（isGenerating/errorMessages）留在 ViewModel
+  - 文件：`feature/chat/ChatViewModel.kt`（1060→891 行）· 新增 `ChatSideEffects.kt` / `WatchTogetherDetector.kt`
+  - 验收：[x] 拆分后聊天/暗访/陪看行为不变（逻辑原样搬移，仅接线点替换）· [x] 单测仍通过（24 用例）· [x] 编译+真机通过（覆盖安装启动无崩溃）
 - **T12.10 关系对约定下沉 + 陪看事件表达明确（D1/D2，P2）**：
   - 依赖：无
   - 操作：① 关系对「小 id 恒 A」约定下沉到 `RelationshipRepository`（`createNormalized`/`insertEvent` 内部排定，业务层不再裸 `upsert`/自记 min/max）；② 陪看事件 `convBId=0` 哨兵值改**可空列**（`convBId=null` = 用户共同观看），v23→v24 整表重建迁移存量 0→NULL

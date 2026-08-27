@@ -20,7 +20,6 @@ import com.bdalxy.edencourt.data.local.entity.MemoryItem
 import com.bdalxy.edencourt.data.local.entity.Message
 import com.bdalxy.edencourt.data.local.entity.MessageStatus
 import com.bdalxy.edencourt.data.local.entity.ParticipantRole
-import com.bdalxy.edencourt.data.local.entity.RelationshipEvent
 import com.bdalxy.edencourt.data.local.entity.Role
 import com.bdalxy.edencourt.data.remote.AiChatService
 import com.bdalxy.edencourt.data.remote.ApiErrorKind
@@ -389,18 +388,16 @@ class ChatViewModel(
      */
     private var generationCounter = 0L
 
-    // ===== T11.16 共同内容会话「一起看」：用户主动分享内容 → 角色陪看 =====
+    /** 陪看模式检测与事件沉淀（T12.9 拆分：T11.16 逻辑独立成类，瘦身本超载类） */
+    private val watchTogether = WatchTogetherDetector(conversationId, relationshipDao)
 
-    /** 本次待沉淀的共同观看事件（发送时检测到分享 → AI 回复完成后沉淀，T11.16） */
-    private var pendingWatch: WatchShare? = null
-
-    /** 最近一次沉淀「共同观看」事件的时间戳（本会话，防同一次陪看刷多事件） */
-    private var lastWatchEventAt: Long = 0L
-
-    /** 一次用户分享 + 角色陪看回复（沉淀为共同经历事件用） */
-    private data class WatchShare(
-        val topic: String,      // 内容主题（提取自分享语句）
-        val userContent: String, // 用户分享的原文（作为讨论要点素材）
+    /** 跨会话打听副作用执行器（T12.9 拆分：T8.3/8.4 暗访逻辑独立成类） */
+    private val chatSideEffects = ChatSideEffects(
+        conversationId = conversationId,
+        repository = repository,
+        characterCardDao = characterCardDao,
+        memoryRepository = memoryRepository,
+        crossSessionConsultService = crossSessionConsultService,
     )
 
     init {
@@ -442,178 +439,17 @@ class ChatViewModel(
             updateConversationOnSend(content)
             // 3. v1.2 用户触发跨会话打听（T8.4）：命中则走旁路打听并原地回传，不走正常回复泵
             val conversations = repository.observeConversations().first()
-            val consult = detectConsult(content, conversations)
+            val consult = chatSideEffects.detectConsult(content, conversations)
             if (consult != null) {
-                runConsultUntilDone(consult)
+                chatSideEffects.runConsult(consult, roleName.value) { _isGenerating.value = it }
                 return@launch
             }
             // 4. 否则走正常流程：确保回复泵在跑（生成中连发的消息已入库，泵下轮循环自动取到并攒批回复）
             // T11.16：检测用户是否在分享内容（陪看模式），命中则记录待沉淀主题（含原文作讨论要点素材）
-            pendingWatch = detectWatchContent(content)?.let { WatchShare(it, content) }
+            watchTogether.detect(content)
             ensureReplyPumpRunning()
         }
     }
-
-    /** 用户触发跨会话打听的请求（v1.2，T8.4） */
-    private data class ConsultRequest(
-        val targetConversationId: Long?,
-        val question: String,
-    )
-
-    /**
-     * 检测用户消息是否为「跨会话打听」意图（T8.4，MVP 用关键词触发）：
-     * - 命中触发词（去问问/帮我打听/打听一下…）即视为打听；
-     * - 若能点名目标角色卡（消息里出现某角色名）→ 直接定位其某会话；
-     * - 主题 = 去掉触发词与点名的角色名后的剩余文本。
-     */
-    private suspend fun detectConsult(text: String, conversations: List<Conversation>): ConsultRequest? {
-        val trigger = CONSULT_TRIGGERS.firstOrNull { text.contains(it) } ?: return null
-        val cardNameById = characterCardDao.observeAll().first()
-            .mapNotNull { it.id to (it.remark.ifBlank { it.name }) }
-            .toMap()
-        var targetId: Long? = null
-        var matchedName: String? = null
-        // 在非当前会话中找「被点名角色」的任一会话作为打听目标
-        for (conv in conversations) {
-            if (conv.id == conversationId) continue
-            val cid = conv.characterCardId ?: continue
-            val name = cardNameById[cid] ?: continue
-            if (text.contains(name)) {
-                matchedName = name
-                targetId = conv.id
-                break
-            }
-        }
-        var question = text.replace(trigger, "").trim()
-        matchedName?.let { question = question.replace(it, "").trim() }
-        return ConsultRequest(targetConversationId = targetId, question = question.ifBlank { text })
-    }
-
-    // ===== T11.16 共同内容会话「一起看」：分享内容检测 =====
-
-    /** 陪看触发词：明确表达「我在看/分享」意图的短语（命中即视为分享内容） */
-    private val watchTriggers = listOf(
-        "我在看", "在追", "刚看完", "看完了", "追到", "更新了", "新出了", "出新",
-        "分享", "发你", "给你看", "一起看", "这段剧情", "这个剧情", "这段",
-        "这部", "这篇", "这个番", "这本小说", "这本漫画", "最新章节", "最新一集",
-        "看到第", "看到哪", "看到这里",
-    )
-
-    /** 粘贴正文判定阈值：无明确触发词但消息超长（如整段粘贴的小说/剧情文字）也视为分享 */
-    private val WATCH_PASTE_MIN_LENGTH = 60
-
-    /** 同一次陪看沉淀冷却（毫秒）：10 分钟内不重复沉淀，避免连发刷多事件 */
-    private val WATCH_EVENT_COOLDOWN_MS = 10 * 60 * 1000L
-
-    /**
-     * 检测用户消息是否为「分享内容」→ 进入陪看模式（T11.16）。
-     * - 规则 1：命中陪看触发词（我在看 XX / 分享 / 这段剧情…）→ 提取触发词后的内容为主题；
-     * - 规则 2：无触发词但文本超长（粘贴整段正文/小说/截图说明）→ 取开头片段为主题。
-     * 红线：只处理用户**主动发来**的消息，绝不读取设备上正在看什么（前台 App/剪贴板监控=越权）。
-     * @return 检测到分享则返回主题（供 prompt 注入与事件 topic），否则 null
-     */
-    private fun detectWatchContent(text: String): String? {
-        val trigger = watchTriggers.firstOrNull { text.contains(it) }
-        if (trigger != null) {
-            // 规则 1：主题 = 触发词后的内容（如「我在看 海贼王」→「海贼王」）
-            val after = text.substringAfter(trigger, "").trim().trimStart('：', ':', '，', ',', ' ')
-            return extractWatchTopic(after.ifBlank { text })
-        }
-        // 规则 2：超长粘贴正文视为分享内容
-        if (text.length >= WATCH_PASTE_MIN_LENGTH) return extractWatchTopic(text)
-        return null
-    }
-
-    /** 提取分享内容主题：取文本前 20 字并去掉结尾标点（用于 prompt/事件 topic 的简洁锚点） */
-    private fun extractWatchTopic(text: String): String {
-        val head = text.trim().replace('\n', ' ').take(20)
-            .trimEnd('。', '！', '？', '，', '；', '…', '!', '?', '.', ' ')
-        return head.ifBlank { "你分享的内容" }
-    }
-
-    /** 陪看模式注入片段（T11.16）：让角色以陪看口吻回应讨论/吐槽/猜后续 */
-    private fun buildWatchModeText(topic: String): String =
-        "【陪看模式】用户正在和你分享内容、一起看「$topic」。" +
-            "请像朋友一起追番追文那样回应：可以讨论剧情、吐槽角色、分享感想、猜后续发展，" +
-            "并自然追问「看到哪了」「看完一定要告诉我结局」之类的跟进话。" +
-            "记住你们是在一起看的同伴，不是你在单向解说，要像真人一样有来有回。"
-
-    /**
-     * T11.16：AI 回复完成后，把本次「用户分享 + 角色陪看」沉淀为「共同经历」关系事件。
-     * - 复用 T11.13 关系事件表，type=WATCH（共同观看），convAId=本角色会话、convBId=null（用户侧，无第二会话；T12.10 由可空列表达、非哨兵 0）；
-     * - 要点 = 用户分享原文摘要 + 角色陪看回复摘要；
-     * - 冷却期内不重复沉淀（同一次陪看不刷多事件），每次新分享会覆盖待沉淀主题。
-     */
-    private suspend fun settleWatchEvent(aiContent: String) {
-        val share = pendingWatch ?: return
-        pendingWatch = null // 立即消费，避免本次回复只沉淀一次
-        val now = System.currentTimeMillis()
-        if (now - lastWatchEventAt < WATCH_EVENT_COOLDOWN_MS) return // 冷却期内跳过
-        lastWatchEventAt = now
-        relationshipDao.insertEvent(
-            RelationshipEvent(
-                convAId = conversationId,
-                convBId = null, // null=用户共同观看（无第二会话，区别于角色间互动，T12.10 非哨兵 0）
-                scene = "你分享内容，一起看「${share.topic.take(12)}」",
-                topic = share.topic.take(40),
-                mood = "一起看",
-                points = buildString {
-                    append("你分享：").append(share.userContent.replace('\n', ' ').take(60))
-                    if (aiContent.isNotBlank()) append("\n").append("角色回应：").append(aiContent.replace('\n', ' ').take(60))
-                },
-                type = RelationshipEvent.TYPE_WATCH,
-                happenedAt = now,
-            ),
-        )
-    }
-
-    /**
-     * 执行一次用户触发的旁路打听（T8.3 回传 + T8.4 装配）：
-     * - 未点名目标时用 T8.1 按主题检索候选会话 B；
-     * - 插一条 AI 占位消息（复用现有消息流渲染："我去打听一下…"），完成后原地更新为回传结果，用户全程可见、不打断正文。
-     */
-    private suspend fun runConsultUntilDone(req: ConsultRequest) {
-        var targetId = req.targetConversationId
-        if (targetId == null) {
-            val candidates = memoryRepository.locateTargetConversationIds(splitTerms(req.question), conversationId)
-            targetId = candidates.firstOrNull()
-        }
-        // AI 占位消息（GENERATING，UI 顶部显示「正在输入…」同款处理）
-        val aiId = repository.insertMessage(
-            Message(
-                conversationId = conversationId,
-                role = Role.ASSISTANT,
-                content = "（我去打听一下…）",
-                status = MessageStatus.GENERATING,
-            ),
-        )
-        _isGenerating.value = true
-        try {
-            if (targetId == null) {
-                updateConsultMessage(aiId, "我去问了一圈，没人知道呀。", MessageStatus.SENT)
-                return
-            }
-            val visitor = roleName.value
-            val result = crossSessionConsultService.consult(targetId, req.question, visitor)
-            if (result.success) {
-                // 回传：正文自然带来源（"我去问了X，X说…"），用户可看到打听到的内容与出处
-                updateConsultMessage(aiId, "我去问了${result.sourceName}，${result.sourceName}说：\n${result.answer}", MessageStatus.SENT)
-            } else {
-                updateConsultMessage(aiId, result.reason ?: "没问到", MessageStatus.SENT)
-            }
-        } finally {
-            _isGenerating.value = false
-        }
-    }
-
-    /** 把打听占位消息原地更新为最终回传文本（T8.3 结果回传 A） */
-    private suspend fun updateConsultMessage(id: Long, content: String, status: MessageStatus) {
-        repository.getMessage(id)?.let { repository.updateMessage(it.copy(content = content, status = status)) }
-    }
-
-    /** 打听主题拆词（按常见标点/空白切分，供 T8.1 检索） */
-    private fun splitTerms(question: String): List<String> =
-        question.split(Regex("[，。,.！!？?、\\s]+")).filter { it.isNotBlank() }
 
     /** 停止生成：取消当前回复泵任务（已生成内容保留并标记完成，不视为失败） */
     fun stopGenerating() {
@@ -781,7 +617,7 @@ class ChatViewModel(
     /** 失败处理：记录错误提示 + 将 AI 消息标记 FAILED（T3.8） */
     private suspend fun markFailed(aiId: Long, kind: ApiErrorKind) {
         // T11.16：生成失败则作废本次陪看待沉淀状态，避免残留注入到下次普通消息
-        pendingWatch = null
+        watchTogether.clear()
         val text = when (kind) {
             ApiErrorKind.NETWORK -> "网络不可用，请检查网络后重试"
             ApiErrorKind.AUTH -> "API Key 无效，请到设置页检查"
@@ -811,7 +647,7 @@ class ChatViewModel(
         // 记忆提取基于完整回复内容（不受拆条影响，T5.3）
         extractMemoryAsync(current.copy(content = finalContent))
         // T11.16：若本次发送检测到「分享内容」，AI 回复完成后沉淀为「共同经历」关系事件（进关系故事区）
-        settleWatchEvent(finalContent)
+        watchTogether.settle(finalContent)
 
         // 拆条连发：第一条复用占位消息（保持原 id，避免 UI key 突变），后续逐条插入
         val chunks = MessageSplitter.split(finalContent)
@@ -920,7 +756,7 @@ class ChatViewModel(
             // T11.13：注入「共同经历事件」——角色记得自己和其他会话角色共同经历过的事，对话有连续性
             relationshipEventsText = buildRelationshipEventFragment(),
             // T11.16：注入「陪看模式」——用户正在分享内容，角色以陪看口吻回应（未触发则为空）
-            watchModeText = pendingWatch?.let { buildWatchModeText(it.topic) } ?: "",
+            watchModeText = watchTogether.injectionText(),
         )
     }
 
@@ -1029,11 +865,6 @@ class ChatViewModel(
         private const val CHUNK_SEND_DELAY_MS = 500L
         /** 流式写入节流间隔（T12.2：每 token 落库改等时间节流批量写，降低 Room IO 频次与 UI 掉帧） */
         private const val STREAM_PERSIST_THROTTLE_MS = 120L
-        /** 跨会话打听触发词（v1.2，T8.4 意图识别：命中任一即视为用户触发打听） */
-        private val CONSULT_TRIGGERS = listOf(
-            "去打听", "帮我打听", "打听一下", "去问问", "帮我问",
-            "打探", "探探口风", "问问", "去问",
-        )
 
         /** 工厂：传入路由参数 conversationId，从 Application 取仓库/角色卡 DAO/配置/网络服务单例 */
         fun factory(conversationId: Long, application: Application): ViewModelProvider.Factory =
