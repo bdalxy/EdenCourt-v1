@@ -15,6 +15,7 @@ import com.bdalxy.edencourt.data.local.entity.InteractionStatus
 import com.bdalxy.edencourt.data.local.entity.InteractionTurn
 import com.bdalxy.edencourt.data.local.entity.Message
 import com.bdalxy.edencourt.data.local.entity.MessageType
+import com.bdalxy.edencourt.data.local.entity.MemoryVisibility
 import com.bdalxy.edencourt.data.local.entity.ParticipantRole
 import com.bdalxy.edencourt.data.local.entity.RelationStatus
 import com.bdalxy.edencourt.data.local.entity.RelationshipEvent
@@ -206,6 +207,11 @@ class InteractionExecutor(
                 ),
             )
 
+            // 9. T11.8b：互动事实沉淀为新记忆——A 从互动中得知的关于 B 的事实归 A 名下、B 得知的归 B，
+            //    只基于已说出口的对白提取（共同事实），天然不泄漏任何一方的私密/绝密
+            a.characterCardId?.let { memoryRepository.settleInteractionFacts(it, a.id, aPlain, bPlain, turns) }
+            b.characterCardId?.let { memoryRepository.settleInteractionFacts(it, b.id, bPlain, aPlain, turns) }
+
             Log.d(TAG, "互动完成 #$interactionId：A(${a.id}) × B(${b.id}) 共 ${turns.size} 句，话题=${topicSeed.take(20)}")
             return InteractionOutcome(true, interactionId, "互动完成")
         } finally {
@@ -250,6 +256,7 @@ class InteractionExecutor(
             append("规则：1) 只输出你这一句的台词，不要替对方说话，不要加括号说明或其他解释；\n")
             append("2) 只基于你自己的记忆和已发生的对话回应，不要凭空编造新信息；\n")
             append("3) 对方不想说的事、以及他人绝不可知的秘密，绝不要吐露，也不要去逼问；\n")
+            append("   【只有你自己知道的私密】是仅属于你的事——说或不说由你自己决定：可以守口如瓶，也可以对信任的人自然流露，但绝不为了客套而编造或泄底；\n")
             append("4) 一句自然口语，不超过 60 字；\n")
             append("5) 说话用「我」自称，称呼对方用「你」；不要用「另一个XX」之类的说法；按你自己的性格自然地对待你们的关系；\n")
             append("6) 不要复述或模仿对方刚说过的话，按你自己的记忆和性格自然地回应；\n")
@@ -303,15 +310,25 @@ class InteractionExecutor(
         return if (card != null) PromptBuilder.buildCardSystemPrompt(card, identityText) else PromptBuilder.DEFAULT_SYSTEM_PROMPT
     }
 
-    /** 说话者自己的可互动记忆片段：该角色共享 + 本会话私有，全部排除绝密（互动中双方都不感知绝密，硬性兜底） */
+    /** 说话者自己的可互动记忆片段：该角色共享 + 本会话私有，全部排除绝密（互动中双方都不感知绝密，硬性兜底）。
+     *  T11.8a：按可见性分组标注——共享记忆标「大家都记得」，私有记忆标「只有你自己知道的私密」，
+     *  让角色明确区分「哪些可以自然聊、哪些是自己的秘密（说或不说由自己决定）」。 */
     private suspend fun buildMemoryFragment(conversation: Conversation): String {
         val cardId = conversation.characterCardId ?: return ""
         val memories = memoryRepository.getInjectableMemories(cardId, conversation.id, memoryInjectLimit)
             .filter { !it.isTopSecret }
         if (memories.isEmpty()) return ""
+        val shared = memories.filter { it.visibility == MemoryVisibility.SHARED }
+        val privates = memories.filter { it.visibility == MemoryVisibility.PRIVATE }
         return buildString {
-            append("[你记得的事]\n")
-            memories.forEach { m -> append("- ").append(m.content).append("\n") }
+            if (shared.isNotEmpty()) {
+                append("[你和大家都记得的事]\n")
+                shared.forEach { m -> append("- ").append(m.content).append("\n") }
+            }
+            if (privates.isNotEmpty()) {
+                append("[只有你自己知道的私密]\n")
+                privates.forEach { m -> append("- ").append(m.content).append("\n") }
+            }
         }.trim()
     }
 

@@ -48,6 +48,15 @@ class MemoryRepository(
     /** 提取 JSON 解析器：忽略未知字段，容忍 AI 输出不规范 */
     private val json = Json { ignoreUnknownKeys = true }
 
+    /** T11.8b 互动事实提取 DTO：从互动对白中提取「某角色从对方获知的新事实」（只取明确说出口的内容） */
+    @Serializable
+    private data class InteractionFact(
+        @SerialName("type") val type: String = "other",
+        @SerialName("content") val content: String = "",
+        @SerialName("keywords") val keywords: String = "",
+        @SerialName("confidence") val confidence: Float = 1f,
+    )
+
     /** T11.4 记忆导入导出：单条记忆的备份 DTO（不含自增 id，跨设备恢复时重新分配） */
     @Serializable
     private data class BackupMemory(
@@ -406,6 +415,79 @@ class MemoryRepository(
             if (item.confidence < MIN_CONFIDENCE) return@forEach
             upsertWithConflictCheck(item, content, cardId, conversationId, existingMemories)
         }
+    }
+
+    /**
+     * T11.8b 互动信息不对等：互动结束后，把某角色从互动中【从对方获知】的新事实沉淀为新记忆。
+     * - 只基于双方已说出口的对白（共同事实）提取，天然不泄漏任何一方的私密/绝密；
+     * - 归属：谁得知就归谁的角色卡名下（shared），来源=互动（非亲历，区别于用户亲口告知）；
+     * - 来源会话=该角色自己的会话 id，后续 getInjectableMemories 自然覆盖（互动后能想起对方的事）。
+     * @param cardId 记忆归属的角色卡 id
+     * @param conversationId 该角色自己的会话 id
+     * @param speakerName 该角色显示名
+     * @param otherName 对方显示名
+     * @param turns 完整互动对白 [(说话者显示名, 台词)]，共同事实
+     */
+    suspend fun settleInteractionFacts(
+        cardId: Long,
+        conversationId: Long,
+        speakerName: String,
+        otherName: String,
+        turns: List<Pair<String, String>>,
+    ) {
+        if (turns.isEmpty()) return
+        val config = apiConfigStore.config.firstOrNull() ?: run {
+            Log.w(TAG, "互动事实沉淀跳过：未读到 API 配置")
+            return
+        }
+        if (config.apiKey.isBlank()) return
+
+        // 1. 组装提取 prompt：只提取「对方明确说出口的」新信息，绝不脑补
+        val dialogue = turns.joinToString("\n") { (name, line) -> "$name：$line" }
+        val prompt = buildString {
+            append("你是观察者。以下是「$speakerName」与「$otherName」的一场对话：\n")
+            append(dialogue).append("\n\n")
+            append("请提取「$speakerName」在这场对话中【从 $otherName 口中获知的新事实】——")
+            append("即对方明确说出口的、$speakerName 此前不知道的信息（对方的喜好/近况/经历/共同约定等）。\n")
+            append("规则：1) 只提取对方明确说出口的内容，绝不脑补、不推断对方没说的话；")
+            append("2) 每条一句话，聚焦「关于对方的新信息」；3) 没有值得记的新事实则输出 []。\n")
+            append("输出格式：仅输出 JSON 数组，不要任何额外文字：")
+            append("[{\"type\":\"personal_info\"|\"preference\"|\"event\"|\"other\",\"content\":\"一句话内容\",\"keywords\":\"关键词1,关键词2\",\"confidence\":0.0~1.0}]\n")
+        }
+
+        // 2. 调 API（非流式），剥 markdown 后解析
+        val raw = runCatching {
+            aiChatService.completeChat(messages = listOf(ChatMessage(role = "user", content = prompt)), config = config)
+        }.getOrElse { e ->
+            Log.w(TAG, "互动事实提取失败：completeChat 异常 ${e.javaClass.simpleName}: ${e.message}")
+            return
+        }
+        val cleaned = raw.trim().removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
+        val facts = runCatching { json.decodeFromString<List<InteractionFact>>(cleaned) }
+            .getOrElse { e ->
+                Log.w(TAG, "互动事实解析失败：原文=[${raw.take(200)}], err=${e.message}")
+                return
+            }
+        if (facts.isEmpty()) return
+
+        // 3. 逐条冲突检查入库（说出口的对白是共同事实 → 可见性 shared）
+        val existing = dao.getActiveByCard(cardId, DEFAULT_MEMORY_INJECT_LIMIT)
+        facts.filter { it.content.isNotBlank() }.forEach { f ->
+            upsertWithConflictCheck(
+                item = ExtractedMemory(
+                    type = f.type,
+                    content = f.content,
+                    keywords = f.keywords,
+                    confidence = f.confidence,
+                    visibility = "shared",
+                ),
+                content = f.content,
+                cardId = cardId,
+                conversationId = conversationId,
+                existingMemories = existing,
+            )
+        }
+        Log.d(TAG, "互动事实沉淀完成：$speakerName 从 $otherName 处获知 ${facts.size} 条新事实")
     }
 
     /** 冲突检查入库：可覆盖旧记忆、或内容相似后合并更新，否则新增（企划书 3.5.2 / T6.13.2） */
