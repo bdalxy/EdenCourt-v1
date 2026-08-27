@@ -1,6 +1,7 @@
 package com.bdalxy.edencourt.feature.chat
 
 import android.app.Application
+import android.os.SystemClock
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
@@ -690,6 +691,9 @@ class ChatViewModel(
         )
         val accumulated = StringBuilder()
         val accumulatedReasoning = StringBuilder()
+        // T12.2：流式写入节流——记录上次落库时刻（elapsedRealtime 单调时钟，不随系统时间跳变），
+        // 距上次 >= STREAM_PERSIST_THROTTLE_MS 才触发一次批量写，从「每 token 1次」降到「每~120ms 1次」
+        var lastPersistAt = 0L
         // T6.9：同步在当前协程（回复泵/重试协程）内执行，generatingJob 记录当前协程供「停止」取消
         val currentJob = coroutineContext[Job]
         generatingJob = currentJob
@@ -698,17 +702,16 @@ class ChatViewModel(
             var attempt = 0
             while (true) {
                 try {
-                    // 收集增量并逐段写入 Room：正式答案与思考过程分开累积（T3.4 修正）
+                    // 收集增量并节流批量写入 Room：正式答案与思考过程分开累积（T3.4 修正）
                     aiChatService.streamChat(promptMessages, config).collect { delta ->
                         if (delta.reasoning.isNotEmpty()) accumulatedReasoning.append(delta.reasoning)
                         if (delta.content.isNotEmpty()) accumulated.append(delta.content)
-                        val current = repository.getMessage(aiId) ?: return@collect
-                        repository.updateMessage(
-                            current.copy(
-                                content = accumulated.toString(),
-                                reasoning = accumulatedReasoning.toString(),
-                            ),
-                        )
+                        // 等时间节流：达标才落库；未达标仅累积在内存，最终由 finishReply/打断路径 flush
+                        val now = SystemClock.elapsedRealtime()
+                        if (now - lastPersistAt >= STREAM_PERSIST_THROTTLE_MS) {
+                            persistAiMessage(aiId, accumulated.toString(), accumulatedReasoning.toString())
+                            lastPersistAt = now
+                        }
                     }
                     // 正常完成：空输出兜底（企划书 3.6.4）
                     finishReply(aiId, accumulated.toString().ifBlank { "（对方没有回应）" })
@@ -728,16 +731,26 @@ class ChatViewModel(
                 }
             }
         } catch (e: CancellationException) {
-            // 用户主动停止/打断（T5.10）：协程已取消，需用 NonCancellable 包裹才能执行挂起写库
+            // 用户主动停止/打断（T5.10）：协程已取消，需用 NonCancellable 包裹才能执行挂起写库。
+            // T12.2：不再读 DB 旧值（节流会让 DB 落后于内存最新累积），改 flush 内存 accumulated 最新值，
+            // 保证打断时最后一批未落库的增量也不丢失。
             withContext(NonCancellable) {
+                val latestContent = accumulated.toString()
+                val latestReasoning = accumulatedReasoning.toString()
                 val current = repository.getMessage(aiId)
                 if (current != null && current.status == MessageStatus.GENERATING) {
-                    if (current.content.isBlank()) {
+                    if (latestContent.isBlank() && latestReasoning.isBlank()) {
                         // 尚无任何内容：删除空占位，避免残留「正在输入」气泡（打断即作废，T5.10）
                         repository.deleteMessage(current)
                     } else {
-                        // 已有部分内容：保留并标记完成（不视为失败）
-                        repository.updateMessage(current.copy(status = MessageStatus.DONE))
+                        // 已有部分内容：flush 内存最新内容并标记完成（不视为失败）
+                        repository.updateMessage(
+                            current.copy(
+                                content = latestContent,
+                                reasoning = latestReasoning,
+                                status = MessageStatus.DONE,
+                            ),
+                        )
                     }
                 }
             }
@@ -747,6 +760,12 @@ class ChatViewModel(
                 _isGenerating.value = false
             }
         }
+    }
+
+    /** 流式写入 helper（T12.2）：读取占位消息并整条更新为最新累积内容（content + reasoning），供节流调用 */
+    private suspend fun persistAiMessage(aiId: Long, content: String, reasoning: String) {
+        val current = repository.getMessage(aiId) ?: return
+        repository.updateMessage(current.copy(content = content, reasoning = reasoning))
     }
 
     /** 失败处理：记录错误提示 + 将 AI 消息标记 FAILED（T3.8） */
@@ -996,6 +1015,8 @@ class ChatViewModel(
         private const val TAG = "ChatViewModel"
         /** 拆条连发间隔（T5.9：模拟真人连续打字发送的节奏） */
         private const val CHUNK_SEND_DELAY_MS = 500L
+        /** 流式写入节流间隔（T12.2：每 token 落库改等时间节流批量写，降低 Room IO 频次与 UI 掉帧） */
+        private const val STREAM_PERSIST_THROTTLE_MS = 120L
         /** 跨会话打听触发词（v1.2，T8.4 意图识别：命中任一即视为用户触发打听） */
         private val CONSULT_TRIGGERS = listOf(
             "去打听", "帮我打听", "打听一下", "去问问", "帮我问",
