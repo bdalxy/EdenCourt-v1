@@ -27,11 +27,20 @@ class MemorySearchService(
         /** 注入 top-K 上限（防止 prompt 过长；与管理页分页无关） */
         const val DEFAULT_TOP_K = 20
         private const val TAG = "MemorySearch"
+
+        /**
+         * 判断查询词是否「可被 FTS unicode61 分词」：含 ASCII 字母或数字（英文/数字/标签词）。
+         * 中文子串 FTS 几乎无法命中、且拖慢，故纯中文查询不走 FTS（仍 LIKE 兜底）。
+         */
+        private fun isFtsQuery(query: String): Boolean =
+            query.any { it.code in 32..126 && it.isLetterOrDigit() }
     }
 
     /**
-     * 管理页分页检索统一入口（T9.3）。
-     * 中文子串走 LIKE（先按角色/分类缩小候选）；英文等走 FTS 精确匹配由 searchFts 承担。
+     * 管理页分页检索统一入口（T9.3 / T12.7 接线）。
+     * 中文子串走 LIKE（先按角色/分类缩小候选）；可分词词（英文/数字/标签）在 LIKE 之外并入 FTS 精确命中并置前。
+     * 融合规则：先跑 LIKE 分页得本页结果，再把「本页里确被 FTS 精确命中的记忆」排到最前，
+     *          其余按原序补足（不改列表长度、不动 offset/count，翻页语义稳定；未命中 FTS 的 LIKE 兜底仍显示）。
      */
     suspend fun searchPaged(
         query: String,
@@ -40,7 +49,17 @@ class MemorySearchService(
         mapType: MemoryType? = null,
         page: Int = 0,
         pageSize: Int = 20,
-    ): List<MemoryItem> = memoryDao.searchPaged(query, cardId, manualOnly, mapType, pageSize, page * pageSize)
+    ): List<MemoryItem> {
+        val like = memoryDao.searchPaged(query, cardId, manualOnly, mapType, pageSize, page * pageSize)
+        // 纯中文/空查询：LIKE 已可靠，无需 FTS 增强
+        if (query.isBlank() || !isFtsQuery(query) || like.isEmpty()) return like
+        // 可分词词：取本页内部被 FTS 精确命中的记忆，提至最前（不引入新的跨页去重）
+        val ftsPin = runCatching { searchFts(query.trim(), topK = pageSize * 2) }.getOrElse { emptyList() }
+            .filter { hit -> like.any { it.id == hit.id } }
+        if (ftsPin.isEmpty()) return like
+        val pinnedIds = ftsPin.map { it.id }.toSet()
+        return ftsPin + like.filter { it.id !in pinnedIds }
+    }
 
     /** 管理页筛选计数（分类 Tab 数量 / 分页总数），过滤条件与 searchPaged 一致 */
     suspend fun countFiltered(
@@ -54,6 +73,9 @@ class MemorySearchService(
      * FTS4 精确命中检索（英文/数字/标签等 Unicode61 可分词的词）。
      * 通过 @RawQuery 动态执行（FTS 虚拟表非 Room 实体），对查询词做安全转义后用 `content:"词"` 匹配；
      * 结果 JOIN 主表过滤 isDeleted=0，并按「置顶/重要/更新时间」排序截断 top-K。
+     * 转义说明（T12.7）：查询词整体以双引号包裹成 **短语**（`content:"..."`），短语内
+     *   `*` `(` `)` `-` `OR` `AND` 等 FTS 语法字符均按字面文本参与匹配、不做操作符解析；
+     *   唯一需翻倍转义的是引号自身（见 escaped），避免提前闭合短语引发语法错误。
      * 失败静默返回空（FTS 为增强检索，不影响主链路）。
      */
     suspend fun searchFts(keyword: String, topK: Int = DEFAULT_TOP_K): List<MemoryItem> {
