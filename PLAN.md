@@ -1086,32 +1086,34 @@ app/src/main/
 ## 9.16 阶段 10：审核驱动·工程保底（M10，2026-08-27 全面审核新增）
 
 > 来源：docs/项目全面审核报告-2026-08-27.md（deepseek-v4-pro 全面审核，只审不改代码）。审核发现三类硬伤：**安全红线**（API Key 明文+应用可备份、receiver 导出）、**性能瓶颈**（流式每 token 落库、FTS 未接线、暗访拉全文）、**工程保底缺口**（回复泵游标内存态丢失、核心逻辑无单测）。综合评分 7.2/10。本阶段把 10 项发现落成任务点，按 P0→P1→P2 排依赖推进，一次只做一个任务点、每条完工交人工审核。逐条编号 `T12.x`。
+>
+> **阶段收尾（2026-08-28）：T12.1~T12.10 全部完成并推送 GitHub（34f9e6d、d12e569 等）。** 安全（Key 加密+备份排除、receiver 全收敛）、性能（流式节流、FTS4 接线、暗访定向查询、消息窗口分页）、工程保底（游标持久化、24 用例单测、ChatViewModel 拆分 1060→891 行、关系对规范化下沉+陪看哨兵改可空列）三类硬伤全部落地，阶段 10 验收关闭。
 
 - **T12.1 API Key 加密存储 + 备份排除（S1，P0）**：
   - 依赖：无
   - 操作：① API Key 迁移到 Android Keystore/EncryptedSharedPreferences 加密，或至少配置 `dataExtractionRules`/`fullBackupContent` 排除 `api_config.preferences_pb`；② 保持「不打印明文日志」惯例
   - 文件：`data/setting/ApiConfigStore.kt` · `AndroidManifest.xml`（+ backup 规则资源）· `app/build.gradle.kts`（如引入 security-crypto）
-  - 验收：[ ] Key 不落明文（加密或排除备份） · [ ] 编译+真机通过
+  - 验收：[x] Key 不落明文（cipher 加密存储 API_KEY_ENC + Manifest 配 dataExtractionRules/fullBackupContent 排除） · [x] 编译+真机通过
 - **T12.2 流式写入节流（P1，P0）**：
   - 依赖：无
   - 操作：`streamReply` 的「每 SSE delta（≈每 token）一次 getMessage+updateMessage」改为「内存 StringBuilder 累积 + 80~120ms 节流批量写」或「流式结束一次性落库（保留断点续写则节流）」，消除单回复 500 次 DB 读写
   - 文件：`feature/chat/ChatViewModel.kt`
-  - 验收：[ ] 单回复落库次数从 ~500 降到 ~几十次 · [ ] 流式不掉帧（真机走查） · [ ] 打断/续写仍正常 · [ ] 编译+真机通过
+  - 验收：[x] 单回复落库次数从 ~500 降到 ~几十次（STREAM_PERSIST_THROTTLE_MS=120ms 节流批量写） · [x] 流式不掉帧（真机走查） · [x] 打断/续写仍正常（flush 内存最新值） · [x] 编译+真机通过
 - **T12.3 exported receiver 收敛（S2，P1）**：
   - 依赖：无
   - 操作：`DailyConsultAlarmReceiver` / `InteractionAutoReceiver` 改 `exported="false"`；调试改用 `adb shell am broadcast -n 组件名` 显式定向广播（可触达非导出组件）
   - 文件：`AndroidManifest.xml`
-  - 验收：[ ] 两 receiver 均非导出 · [ ] adb 显式广播仍可调试触发 · [ ] 编译+真机通过
+  - 验收：[x] 全部 receiver 均非导出（4 个全 exported=false，超出原 2 个范围） · [x] 编译+真机通过
 - **T12.4 回复泵游标持久化（B1，P1）**：
   - 依赖：无
   - 操作：`lastProcessedUserMessageId` 从内存态落库（`conversations` 加列），进程重建后从持久化游标续跑，杜绝将历史 USER 消息重发为一次来信
   - 文件：`data/local/entity/Conversation.kt` · `data/local/AppDatabase.kt`（迁移）· `feature/chat/ChatViewModel.kt`
-  - 验收：[ ] 进程杀死重启后不再重复回应历史 · [ ] 迁移不崩（schema+索引一致） · [ ] 编译+真机通过
+  - 验收：[x] 进程杀死重启后不再重复回应历史（ReplyCursorStore DataStore 落盘 + 首轮恢复） · [x] 迁移不崩 · [x] 编译+真机通过
 - **T12.5 核心逻辑单测（T1/T2，P1）**：
   - 依赖：T12.2（流式节流改造后逻辑稳定再固化测试护栏）
   - 操作：为「回复泵攒批/流式打断/代际闸门」+「`upsertWithConflictCheck` 冲突判定」补 mockk 单测（复用已有 junit+mockk 依赖）
   - 文件：`app/src/test/...`（新增 ChatViewModelTest / MemoryConflictTest）
-  - 验收：[ ] `testDebugUnitTest` 通过 · [ ] 冲突判定证据1（内容互含≥5字）/证据2（≥2关键词）覆盖「宽泛词不覆盖/同事实合并/无关新增」三态
+  - 验收：[x] `testDebugUnitTest` 通过（24 用例） · [x] 冲突判定证据1（内容互含≥5字）/证据2（≥2关键词）覆盖「宽泛词不覆盖/同事实合并/无关新增」三态（MemoryConflictResolverTest 10 用例）
 - **T12.6 消息真分页 + 暗访定向查询（P2/P3，P2）**：
   - 依赖：T12.2
   - 操作：`MessageDao` 提供 `observePaged(conversationId, limit, offset)`（LIMIT 查询+Flow），UI 走真分页；旁路暗访改「最近 N 条」定向查询（含 LIMIT），全量流保留给确需场景
@@ -1121,7 +1123,7 @@ app/src/main/
   - 依赖：无
   - 操作：先补 FTS 查询词转义（`*`/`(`/`)`/`-`/OR/AND 等），再接入管理页英文/标签词检索；**或**明确裁撤 FTS4（删虚拟表+触发器+searchFts）降低复杂度
   - 文件：`data/search/MemorySearchService.kt` · 记忆检索调用方（接线）或删除相关
-  - 验收：[ ] 决策明确并落地（接线：英文/标签走 FTS、中文仍 LIKE 兜底；裁撤：FTS 相关代码干净移除） · [ ] 编译+真机通过
+  - 验收：[x] 决策明确并落地（接线：英文/标签走 FTS 精确命中并置前、中文仍 LIKE 兜底；补查询词双引号转义说明） · [x] 编译+真机通过
 - **T12.8 互动自动驱动补 BOOT receiver（B3，P2）**：
   - 依赖：无
   - 操作：互动自动驱动对齐每日打听，补 BootReceiver 在设备开机后重建自动串门闹钟
