@@ -17,6 +17,15 @@ android {
         targetSdk = 36
         versionCode = 1
         versionName = "1.0.0"
+
+        // androidTest 使用标准 runner（方案 G-③ Phase2：Room 迁移测试用）
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    sourceSets {
+        // 方案 G-③ Phase2：把导出的 Room schema JSON 作为 androidTest 资产，
+        // 供 MigrationTestHelper 校验迁移后的 schema（与导出版本逐一比对）
+        getByName("androidTest").assets.srcDirs(files("$projectDir/schemas"))
     }
 
     buildTypes {
@@ -76,4 +85,9 @@ dependencies {
     // 方案 G-③ 自动化回归集 Phase1：核心纯逻辑 JVM 单元测试（好感度分档/记忆排序/冲突判定等）
     testImplementation(libs.junit)
     testImplementation(libs.mockk)
+
+    // 方案 G-③ Phase2：Room 迁移升级测试（MigrationTestHelper + runner）
+    androidTestImplementation(libs.androidx.room.testing)
+    androidTestImplementation(libs.androidx.test.runner)
+    androidTestImplementation(libs.androidx.test.ext.junit)
 }
