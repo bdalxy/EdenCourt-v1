@@ -101,6 +101,43 @@ if (Test-Path $walPath) {
 }
 if (-not $ok) { throw "备份校验失败：文件可能损坏，请勿用于恢复" }
 
+# ---- 按版本做旧备份清理（保留策略）----
+#   temp（临时）                     : 最多保留 5 份
+#   正式小版本（v1.1 / v1.2 …）      : 最多保留 3 份
+#   大版本（v1.0 / v2.0 …，即 .0）   : 永久保留，不清理
+$keepTemp  = 5
+$keepMinor = 3
+$pruned = 0
+if ($Tag -ne "custom") {
+    $backupRoot = (Split-Path $dest -Parent)        # 当前版本目录（temp / v1.0 / v1.1 …）
+    if (Test-Path $backupRoot) {
+        # 判定是否大版本（形如 v<n>.0，即主版本号 x.0）
+        $isMajor = $False
+        if ($Tag -match '^v?(\d+\.0)$') { $isMajor = $True }
+
+        if ($isMajor) {
+            Write-Host "  [保留策略] $Tag 为大版本，所有备份永久保留，不清理。"
+        } else {
+            $limit = if ($Tag -eq "temp") { $keepTemp } else { $keepMinor }
+            # 按时间戳子目录排序（子目录名为 yyyyMMdd_HHmmss，字典序=时间序），保留最新的 limit 份，删更老
+            $dirs = Get-ChildItem $backupRoot -Directory | Sort-Object Name -Descending
+            if ($dirs.Count -gt $limit) {
+                $toRemove = $dirs | Select-Object -Skip $limit
+                foreach ($d in $toRemove) {
+                    Remove-Item -Recurse -Force $d.FullName
+                    Write-Host "  [清理] 已删除过旧备份: $($d.Name)"
+                    $pruned++
+                }
+                if ($pruned -gt 0) {
+                    Write-Host "  [保留策略] $Tag 保留最近 $limit 份，已删 $pruned 份（超过上限的最老备份）。"
+                }
+            } else {
+                Write-Host "  [保留策略] $Tag 现有 $($dirs.Count) 份，未超上限 $limit。"
+            }
+        }
+    }
+}
+
 Write-Host "[4/4] 完成。备份目录："
 Write-Host "        $dest"
 Get-ChildItem $dest | Select-Object Name, Length | Format-Table -AutoSize
