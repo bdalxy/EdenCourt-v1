@@ -48,6 +48,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
@@ -117,6 +118,52 @@ class ChatViewModel(
                 started = SharingStarted.WhileSubscribed(5_000),
                 initialValue = emptyList(),
             )
+
+    /**
+     * 消息列表「展示窗口分页」（G-① 列表懒加载+分页 —— 聊天页侧）。
+     * 背景：messages 为全量流（流式/prompt/跨会话暗访均依赖全量，不可截断），
+     *      但 UI 一次性渲染数千条 item 会产生重组/测量卡顿。
+     * 做法：messages 全量流不变，UI 只展示「最近 windowSize 条」；向上滚动接近窗口顶时
+     *      调 loadOlderMessages() 扩大窗口，历史消息按 key 前插且不跳动。
+     * 兼容性：新消息/流式更新自动进入窗口尾部（数据源自同一全量流），滚底/交错/暗访全保留。
+     */
+    /** 初始展示的消息条数（够一屏起，避免长会话首帧全量渲染） */
+    private val initialWindowSize = 60
+
+    /** 每次「向上加载更早历史」追加的条数 */
+    private val windowPageSize = 40
+
+    /** 当前展示窗口覆盖的条数（从最新往前数） */
+    private val _windowSize = MutableStateFlow(initialWindowSize)
+
+    /**
+     * 聊天页实际渲染的消息子集 = messages 最近 windowSize 条（时间正序保持）。
+     * 空态判断应看全量 messages，这里仅用于渲染与滚底。
+     */
+    val displayMessages: StateFlow<List<Message>> =
+        combine(messages, _windowSize) { all, size ->
+            if (all.size <= size) all else all.takeLast(size)
+        }.stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = emptyList(),
+        )
+
+    /** 是否还有更早的历史可向上加载（windowSize < 全量条数） */
+    val hasMoreOlder: StateFlow<Boolean> =
+        combine(messages, _windowSize) { all, size -> all.size > size }.stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = false,
+        )
+
+    /** 向上滚动到顶部附近时调用：扩大展示窗口，载入更早的历史消息 */
+    fun loadOlderMessages() {
+        // 仅在确实还有更早历史时扩展，避免无效调用刷状态
+        if (_windowSize.value < messages.value.size) {
+            _windowSize.update { it + windowPageSize }
+        }
+    }
 
     /**
      * 会话绑定角色卡实体（T6.2A，聊天页顶部显示头像+角色名用）。

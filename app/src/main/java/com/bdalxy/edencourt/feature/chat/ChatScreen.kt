@@ -59,6 +59,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -116,6 +117,9 @@ fun ChatScreen(
         factory = ChatViewModel.factory(conversationId, app),
     )
     val messages by viewModel.messages.collectAsStateWithLifecycle()
+    // G-①：展示窗口分页——UI 只渲染展示子集 displayMessages（含已加载的更多历史），空态判断仍用全量 messages
+    val displayMessages by viewModel.displayMessages.collectAsStateWithLifecycle()
+    val hasMoreOlder by viewModel.hasMoreOlder.collectAsStateWithLifecycle()
     // T6.2A：顶部显示会话绑定角色卡（头像+角色名，企划书 5.3.2「返回+角色名+更多」）
     val roleCard by viewModel.roleCard.collectAsStateWithLifecycle()
     val roleName by viewModel.roleName.collectAsStateWithLifecycle()
@@ -160,14 +164,27 @@ fun ChatScreen(
     val imeBottom = WindowInsets.ime.getBottom(LocalDensity.current)
     // 键盘弹出（IME 高度 > 0）：滚动到列表底部，保证最新消息完整可见
     LaunchedEffect(imeBottom) {
-        if (imeBottom > 0 && messages.isNotEmpty()) {
-            listState.scrollToItem(messages.size - 1)
+        if (imeBottom > 0 && displayMessages.isNotEmpty()) {
+            listState.scrollToItem(displayMessages.size - 1)
         }
     }
-    // 消息/错误提示变化：平滑滚到底部（发送后/失败提示出现时重新定位，避免「重试」被输入栏遮挡）
+    // 消息/错误提示变化：平滑滚到底部（发送后/失败提示出现时重新定位，避免「重试」被输入栏遮挡）。
+    // 注意：只依赖全量 messages.size 变化（新消息/流式的唯一信号），不能用 displayMessages.size——
+    //      后者在「向上加载更早历史」时也会变，会导致翻历史时被迫跳回底部。
     LaunchedEffect(messages.size, errorMessages.size) {
-        if (messages.isNotEmpty()) {
-            listState.animateScrollToItem(messages.size - 1)
+        if (displayMessages.isNotEmpty()) {
+            listState.animateScrollToItem(displayMessages.size - 1)
+        }
+    }
+    // G-① 窗口分页：向上滚动接近窗口顶部（且还有更早历史）时，加载更早的消息。
+    // 用 firstVisibleItemIndex 接近 0 触发；窗口前插历史时 LazyColumn 按 key 保持当前可见项，不跳动。
+    LaunchedEffect(listState, displayMessages, hasMoreOlder) {
+        snapshotFlow {
+            listState.firstVisibleItemIndex
+        }.collect { first ->
+            if (first <= 2 && hasMoreOlder && displayMessages.lastIndex >= first) {
+                viewModel.loadOlderMessages()
+            }
         }
     }
 
@@ -274,7 +291,8 @@ fun ChatScreen(
                 modifier = Modifier.fillMaxSize().padding(innerPadding),
                 contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 16.dp),
             ) {
-                items(items = messages, key = { it.id }) { message ->
+                items(items = displayMessages, key = { it.id }) { message ->
+                    // G-①：只渲染展示窗口子集 displayMessages（含向上加载的更多历史）
                     MessageBubble(
                         message = message,
                         error = errorMessages[message.id],
