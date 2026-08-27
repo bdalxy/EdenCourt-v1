@@ -72,4 +72,8 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
 
     debugImplementation(libs.androidx.ui.tooling)
+
+    // 方案 G-③ 自动化回归集 Phase1：核心纯逻辑 JVM 单元测试（好感度分档/记忆排序/冲突判定等）
+    testImplementation(libs.junit)
+    testImplementation(libs.mockk)
 }
