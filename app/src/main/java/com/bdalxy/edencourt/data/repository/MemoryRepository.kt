@@ -188,11 +188,12 @@ class MemoryRepository(
      * 取可注入到 system prompt 的记忆（T7.5 会话级私有定稿）：
      * = 该角色全部共享记忆 + 当前会话自己的私有记忆。合并去重。
      */
-    suspend fun getInjectableMemories(cardId: Long, conversationId: Long, limit: Int = DEFAULT_MEMORY_INJECT_LIMIT): List<MemoryItem> {
+    suspend fun getInjectableMemories(cardId: Long, conversationId: Long, limit: Int = DEFAULT_MEMORY_INJECT_LIMIT, query: String? = null): List<MemoryItem> {
         val shared = dao.getSharedByCard(cardId, limit)
         val privates = dao.getPrivateByConversation(conversationId, limit)
         // 合并去重后走统一检索服务的 top-K 排序（置顶 > 重要 > 更新时间，T9.3），保证注入的是当前最该被记得的
-        return searchService.rankByRelevance((shared + privates).distinctBy { it.id }, limit)
+        // 方案 F v1：传当前用户消息 query 给 rankByRelevance，让与当前话题相关的记忆优先注入（「记得你说过的 X」更可靠）
+        return searchService.rankByRelevance((shared + privates).distinctBy { it.id }, limit, query)
     }
 
     /**

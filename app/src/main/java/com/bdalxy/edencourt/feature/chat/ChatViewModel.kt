@@ -832,7 +832,7 @@ class ChatViewModel(
      * @param userBatchCount 本次来信合并的用户消息条数（>1 表示连发攒批，T6.9）
      */
     private suspend fun buildPrompt(history: List<Message>, userInput: String, userBatchCount: Int = 1): List<ChatMessage> {
-        val memoryFragment = buildLongTermMemoryFragment()
+        val memoryFragment = buildLongTermMemoryFragment(userInput)
         return PromptBuilder.build(
             history = history,
             userInput = userInput,
@@ -908,11 +908,13 @@ class ChatViewModel(
      * 修复原「用户输入分词 LIKE 检索」：中文整句几乎无法命中记忆里的短句，
      * 导致「AI 竟然不知道用户告知过的事实」。现直接取当前角色卡名下的记忆注入，
      * 既保证「AI 记得」，又做到不同角色卡之间记忆互不可见。
+     * @param query 当前用户消息（方案 F v1）：传给检索排序做相关性加权，
+     *              让与当前话题相关的记忆优先注入，强化「它记得我说过的 X」。
      */
-    private suspend fun buildLongTermMemoryFragment(): String {
+    private suspend fun buildLongTermMemoryFragment(query: String? = null): String {
         val cardId = currentCardId() ?: return ""
         // T7.5 会话级私有定稿：注入 = 该角色共享记忆 + 本会话自己的私有记忆（跨会话私有不串）
-        val memories = memoryRepository.getInjectableMemories(cardId, conversationId)
+        val memories = memoryRepository.getInjectableMemories(cardId, conversationId, query = query)
         if (memories.isEmpty()) return ""
         return buildString {
             append("[关于用户的长期记忆]\n")

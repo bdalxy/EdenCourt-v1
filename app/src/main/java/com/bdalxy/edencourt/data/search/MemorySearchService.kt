@@ -81,11 +81,40 @@ class MemorySearchService(
      * 把候选记忆按「置顶 > 重要 > 更新时间新」排序并截断——保证注入进 prompt 的是当前最该被记得的。
      * @param items 候选记忆（如某角色的共享+私有记忆合并）
      * @param topK 想注入的最多条数
+     * @param query 当前对话相关性查询词（方案 F 记忆主动引用增强）。非空时在基准排序前，
+     *              先按「与 query 的关键词重叠度」把相关记忆顶到前面，让「记得你说过的 X」更可靠。
+     *              预期：同一角色名下，与当前话题相关的记忆优先于「最近才更新但无关」的记忆。
      */
-    fun rankByRelevance(items: List<MemoryItem>, topK: Int = DEFAULT_TOP_K): List<MemoryItem> =
-        items.sortedWith(
-            compareByDescending<MemoryItem> { it.isPinned }
+    fun rankByRelevance(items: List<MemoryItem>, topK: Int = DEFAULT_TOP_K, query: String? = null): List<MemoryItem> {
+        val q = query?.trim().orEmpty()
+
+        val ranked = items.sortedWith(
+            compareByDescending<MemoryItem> { relevanceScore(it, q) }
+                .thenByDescending { it.isPinned }
                 .thenByDescending { it.importance == MemoryImportance.IMPORTANT }
                 .thenByDescending { it.updatedAt },
-        ).take(topK)
+        )
+        return ranked.take(topK)
+    }
+
+    /**
+     * 方案 F v1：计算某条记忆与当前对话 query 的「相关性得分」（0~2）。
+     * 判定方向反着来：取记忆自身的关键词（AI 提取时落库的核心词，如「热奶茶/小夏/买」），
+     * 看其中有多少个「较长词（≥2 字）」出现在当前用户消息整段里。
+     * - 这样只命中有意义的主题词，避免「把 query 切成 8 字长句」导致中文几乎永不命中；
+     * - query 出现该记忆的关键词越多，得分越高（封顶 2）。
+     */
+    private fun relevanceScore(item: MemoryItem, query: String): Int {
+        if (query.isEmpty()) return 0
+        val keywords = (item.keywords ?: "").split(",", "，").map { it.trim() }
+            .filter { it.length >= 2 } // 只取 ≥2 字的关键词（过滤掉单字/无意义公共字）
+        if (keywords.isEmpty()) return 0
+        val hits = keywords.count { kw -> query.contains(kw) }
+        // 命中 1 个主题词 +1，≥2 个 +2（封顶）
+        return when {
+            hits >= 2 -> 2
+            hits == 1 -> 1
+            else -> 0
+        }
+    }
 }
