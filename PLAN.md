@@ -1083,6 +1083,65 @@ app/src/main/
 
 ---
 
+## 9.16 阶段 10：审核驱动·工程保底（M10，2026-08-27 全面审核新增）
+
+> 来源：docs/项目全面审核报告-2026-08-27.md（deepseek-v4-pro 全面审核，只审不改代码）。审核发现三类硬伤：**安全红线**（API Key 明文+应用可备份、receiver 导出）、**性能瓶颈**（流式每 token 落库、FTS 未接线、暗访拉全文）、**工程保底缺口**（回复泵游标内存态丢失、核心逻辑无单测）。综合评分 7.2/10。本阶段把 10 项发现落成任务点，按 P0→P1→P2 排依赖推进，一次只做一个任务点、每条完工交人工审核。逐条编号 `T12.x`。
+
+- **T12.1 API Key 加密存储 + 备份排除（S1，P0）**：
+  - 依赖：无
+  - 操作：① API Key 迁移到 Android Keystore/EncryptedSharedPreferences 加密，或至少配置 `dataExtractionRules`/`fullBackupContent` 排除 `api_config.preferences_pb`；② 保持「不打印明文日志」惯例
+  - 文件：`data/setting/ApiConfigStore.kt` · `AndroidManifest.xml`（+ backup 规则资源）· `app/build.gradle.kts`（如引入 security-crypto）
+  - 验收：[ ] Key 不落明文（加密或排除备份） · [ ] 编译+真机通过
+- **T12.2 流式写入节流（P1，P0）**：
+  - 依赖：无
+  - 操作：`streamReply` 的「每 SSE delta（≈每 token）一次 getMessage+updateMessage」改为「内存 StringBuilder 累积 + 80~120ms 节流批量写」或「流式结束一次性落库（保留断点续写则节流）」，消除单回复 500 次 DB 读写
+  - 文件：`feature/chat/ChatViewModel.kt`
+  - 验收：[ ] 单回复落库次数从 ~500 降到 ~几十次 · [ ] 流式不掉帧（真机走查） · [ ] 打断/续写仍正常 · [ ] 编译+真机通过
+- **T12.3 exported receiver 收敛（S2，P1）**：
+  - 依赖：无
+  - 操作：`DailyConsultAlarmReceiver` / `InteractionAutoReceiver` 改 `exported="false"`；调试改用 `adb shell am broadcast -n 组件名` 显式定向广播（可触达非导出组件）
+  - 文件：`AndroidManifest.xml`
+  - 验收：[ ] 两 receiver 均非导出 · [ ] adb 显式广播仍可调试触发 · [ ] 编译+真机通过
+- **T12.4 回复泵游标持久化（B1，P1）**：
+  - 依赖：无
+  - 操作：`lastProcessedUserMessageId` 从内存态落库（`conversations` 加列），进程重建后从持久化游标续跑，杜绝将历史 USER 消息重发为一次来信
+  - 文件：`data/local/entity/Conversation.kt` · `data/local/AppDatabase.kt`（迁移）· `feature/chat/ChatViewModel.kt`
+  - 验收：[ ] 进程杀死重启后不再重复回应历史 · [ ] 迁移不崩（schema+索引一致） · [ ] 编译+真机通过
+- **T12.5 核心逻辑单测（T1/T2，P1）**：
+  - 依赖：T12.2（流式节流改造后逻辑稳定再固化测试护栏）
+  - 操作：为「回复泵攒批/流式打断/代际闸门」+「`upsertWithConflictCheck` 冲突判定」补 mockk 单测（复用已有 junit+mockk 依赖）
+  - 文件：`app/src/test/...`（新增 ChatViewModelTest / MemoryConflictTest）
+  - 验收：[ ] `testDebugUnitTest` 通过 · [ ] 冲突判定证据1（内容互含≥5字）/证据2（≥2关键词）覆盖「宽泛词不覆盖/同事实合并/无关新增」三态
+- **T12.6 消息真分页 + 暗访定向查询（P2/P3，P2）**：
+  - 依赖：T12.2
+  - 操作：`MessageDao` 提供 `observePaged(conversationId, limit, offset)`（LIMIT 查询+Flow），UI 走真分页；旁路暗访改「最近 N 条」定向查询（含 LIMIT），全量流保留给确需场景
+  - 文件：`data/local/dao/MessageDao.kt` · `feature/chat/ChatViewModel.kt` · `data/repository/CrossSessionConsultService.kt`
+  - 验收：[ ] 长会话滚动 60fps · [ ] 暗访不拉全文 · [ ] 编译+真机通过
+- **T12.7 FTS4 接线或裁撤（P4，P2，二选一）**：
+  - 依赖：无
+  - 操作：先补 FTS 查询词转义（`*`/`(`/`)`/`-`/OR/AND 等），再接入管理页英文/标签词检索；**或**明确裁撤 FTS4（删虚拟表+触发器+searchFts）降低复杂度
+  - 文件：`data/search/MemorySearchService.kt` · 记忆检索调用方（接线）或删除相关
+  - 验收：[ ] 决策明确并落地（接线：英文/标签走 FTS、中文仍 LIKE 兜底；裁撤：FTS 相关代码干净移除） · [ ] 编译+真机通过
+- **T12.8 互动自动驱动补 BOOT receiver（B3，P2）**：
+  - 依赖：无
+  - 操作：互动自动驱动对齐每日打听，补 BootReceiver 在设备开机后重建自动串门闹钟
+  - 文件：`data/interaction/InteractionAutoScheduler.kt` · BootReceiver（扩展或新增）· `AndroidManifest.xml`
+  - 验收：[ ] 重启后自动互动闹钟重建 · [ ] 编译+真机通过
+- **T12.9 ChatViewModel 拆分专项（Q1，P2，技术债）**：
+  - 依赖：T12.5（先有测试护栏再安全重构）
+  - 操作：跨会话打听（T8.3/8.4）抽 `ChatSideEffects.kt`、陪看（T11.16）抽 `WatchTogetherDetector.kt`，UI 层不变，仅瘦身 1026 行超载类
+  - 文件：`feature/chat/ChatViewModel.kt`（拆分）· 新增 `ChatSideEffects.kt` / `WatchTogetherDetector.kt`
+  - 验收：[ ] 拆分后聊天/暗访/陪看行为不变 · [ ] 单测仍通过 · [ ] 编译+真机通过
+- **T12.10 关系对约定下沉 + 陪看事件表达明确（D1/D2，P2）**：
+  - 依赖：无
+  - 操作：① 关系对「小 id 恒 A」约定下沉到 Repository，DAO 不暴露裸 `upsert`；② 陪看事件 `convBId=0` 哨兵值改明确表达（可空列或单独 `convUserId`）
+  - 文件：`data/local/dao/RelationshipDao.kt` · `data/repository/RelationshipRepository.kt`（或现有仓储） · `data/local/entity/RelationshipEvent.kt` · `AppDatabase.kt`（迁移）
+  - 验收：[ ] 新调用点无需自记 min/max · [ ] 陪看事件表达明确无哨兵值 · [ ] 迁移不崩 · [ ] 编译+真机通过
+
+> 依赖关系：P0（T12.1、T12.2 并行）→ P1（T12.3、T12.4 可紧随，T12.5 依赖 T12.2）→ P2（T12.6 依赖 T12.2、T12.9 依赖 T12.5，余 T12.7/T12.8/T12.10 无强依赖）。落地顺序建议与现有 PLAN 看板合并，遵项目规则逐任务点推进。
+
+---
+
 ## 10. 远期决策项（不阻塞 MVP，记录待定）
 
 | 决策项 | 现状 | 何时定 |
@@ -1099,6 +1158,7 @@ app/src/main/
 ## 11. 当前状态与下一步
 
 - 当前进度：
+  - **全面审核完成（2026-08-27，deepseek-v4-pro）**：生成 docs/项目全面审核报告-2026-08-27.md（只审不改代码），综合评分 7.2/10（代码质量 8.0 / 架构 8.2 / 性能 6.5 / 潜在 Bug 7.0 / 安全 6.0 / 测试 6.0）。发现 10 项需处理：安全 S1（API Key 明文+allowBackup）、S2（receiver exported）；性能 P1（流式每 token 落库）、P2/P3（窗口分页治标不治本+暗访拉全文）、P4（FTS 未接线）；稳定性 B1（回复泵游标内存态）；测试 T1/T2（核心逻辑无单测）；一致性 B3（互动自动驱动无 BOOT receiver）；可维护 Q1（ChatViewModel 超载）；数据模型 D1/D2。已落成任务点 T12.1~T12.10（阶段 10「审核驱动·工程保底」，见上），按 P0→P1→P2 排依赖推进。
   - **方向 B'（角色活力）T11.10/T11.11/T11.12/T11.13 已完成并真机验证（待推送）**：T11.10 角色生活状态机（个性派生作息+角色卡/会话两级自定义+跨天入睡）；T11.11 状态驱动对话与互动调度（睡眠不串门）；T11.12 事件驱动自发动机（记忆挑「因由」注入开场白+7天去重+定时兜底+DB v21 motive）；T11.13 关系事件叙事（每次互动沉淀 relationship_event 共同经历事件，互动中心「关系故事」时间线区+Prompt 注入连续性，DB v22；好感度数值体系保留不冲突）。真机 force 验证：#9 因由注入（Nana）✓、#11 因由去重回落兜底 ✓、#12 事件沉淀（scene=日常/mood=亲密/双方摘要）✓、v22 迁移 ✓。代码已本地提交待推送。
   - **改进方案（docs/IMPROVEMENT-PLAN.md）已落盘待用户审核**：诊断 10 项问题 → 7 个改进方案 → 双维复杂度量化评估 → 优选组合（A基础→D轻量→A深化→C→D完整→B→F→G，E 转远期；审阅后调整含新增方案 A' 软感知陪伴）。用户已批准 5 条新增需求 N1~N5 插入看板（见阶段 9.15 方向 B'，T11.10~T11.16）。**待人工审核方案文档后按任务点推进**。
   - **阶段 8.6（记忆系统深化 · 方向B 互动+好感度）T11.6/T11.7 已完成并真机验证（已推送 b3f9b84）**：T11.6 好感度数值体系（互动累计好感度、分档驱动氛围与对话、好感度细分到会话角色、会话记忆面板升级）；T11.7 互动自动驱动（每日窗口 AlarmManager + 概率 + 冷却期去重 + AUTO 来源标记 + 互动中心自动驱动设置区）。真机实测：自动互动「小夏→光羽」COMPLETED 且摘要回写会话、重复触发命中冷却期去重、force 调试通道可用、手动/自动来源区分正确。
@@ -1107,6 +1167,7 @@ app/src/main/
   - **阶段 7（v1.1 记忆「会话级私有」底座）已全部完成并推送**：T7.1~T7.5。
 - 下一步：方向 B'（角色活力 T11.10~T11.16）、方向 D（T11.8 互动信息不对等）、P0-3 设置页分组整理均已交付；T11.8d 复核由 AI 自动验证通过。**已推进方案 F（记忆主动引用增强，IMPROVEMENT-PLAN §2 F）v1 子点——检索相关性增强**：`rankByRelevance` 新增 query 参数，聊天注入时 `PromptBuilder/buildPrompt` 传入当前用户消息，按「记忆关键词（≥2字）在当前消息中的命中数」加权，让与当前话题相关的记忆优先进入 top-K 注入名额（旧默认排序完全兼容）。Python 用例验证通过（提「奶茶」→奶茶记忆置顶/提「图书馆」→图书馆置顶/无query保原序/提「名字」→名字置顶）。**遗留**：方案 F「触发增强」（合适时机主动引用）依赖模型自觉、难确定性验证，留待后续。**接下来候选**：方案 G-① 列表懒加载+分页（P-07）/ 方案 G-③ 自动化回归集（P-08）。拆解：G-① 会话/消息/记忆 LazyColumn 分页 → G-③ 核心链路 UI 冒烟+Room 迁移升级测试。**方案 F 检索相关性增强已交付并推 GitHub（735f5ec）。方案 G-③ 回归集已建首期（Phase1）**：新增 JVM 单元测试基础设施（junit+mockk），首期落地 14 用例——好感度分档（affinityGain/relationStatusForAffinity/affinityTierLabel 档位边界）+ 记忆注入排序（T9.3 置顶>重要>更新时间 与 方案F query 相关性加权、无 query 兼容旧行为、topK 截断、保守语义）。`testDebugUnitTest` 14/14 通过（BUILD SUCCESSFUL）。**G-③ Phase2 迁移回归已完成并推送**：新增 androidTest 迁移测试（room-testing + androidTest assets 指向 schemas 目录），AppDatabase 抽出 `ALL_MIGRATIONS`（builder 与测试共用）；两个用例——v12→v23 旧数据穿越 11 次迁移不丢、v22→v23 验证 relationship_event 新增 type 列默认值；真机 connectedDebugAndroidTest 通过。实现要点：因 FTS 虚拟表 `memory_items_fts` 无实体声明、不在导出 schema 里，`runMigrationsAndValidate` 会误报 "Unexpected table"，故改「把 ALL_MIGRATIONS 当纯函数链式执行」验证迁移跑通+数据保持+新列字段可读。**遗留**：G-③ Phase3 核心链路 UI 冒烟（会话/聊天/记忆可达性 smoke）。**方案 G-① 列表懒加载+分页（聊天页侧窗口分页）已完成并推 GitHub**：调研确认记忆列表已分页（T9.5 done）、会话数量少无需分页，唯一缺口为消息列表长会话全量渲染。做法——messages 全量流不变（流式/prompt/跨会话暗访依赖全量不可截断），新增 `displayMessages` = messages 最近 windowSize 条（初始 60、`loadOlderMessages()` 每次 +40），UI 只渲染展示子集；ChatScreen 空态判断仍用全量 messages、滚底只依赖 messages.size（避免翻历史时跳回底部）、`snapshotFlow` 监听 firstVisibleItemIndex 接近顶部且 hasMoreOlder 时向上加载；LazyColumn 按 key 前插历史不跳动。编译 BUILD SUCCESSFUL + 真机覆盖安装 Success 无崩溃数据保留。**遗留**：G-③ Phase3 核心链路 UI 冒烟（instrumented，需在安全设备/备份后跑，勿再用 connectedDebugAndroidTest 打正式机）。
 - 更新记录：
+  - 2026-08-27 全面审核（deepseek-v4-pro）：生成 docs/项目全面审核报告-2026-08-27.md，综合 7.2/10。发现 10 项处理项（安全 S1/S2、性能 P1~P4、稳定性 B1、测试 T1/T2、一致性 B3、可维护 Q1、数据模型 D1/D2），落成阶段 10「审核驱动·工程保底」任务点 T12.1~T12.10（P0→P1→P2 带依赖）。本次不涉及代码改动。
   - 2026-08-26 系统性改进优化方案（docs/IMPROVEMENT-PLAN.md）落盘：诊断 10 问题 / 7 方案 / 双维复杂度评估 / 资源分配 / KPI 闭环。同日审阅处理（用户批注+专家意见，见方案附录 C）：新增方案 A' 软感知陪伴（不做行为观察、零新权限）；执行顺序调整为 A基础→D轻量→A深化→C→D完整→B→F→G（E 转远期）。用户批准新增需求 N1~N4 全部插入看板 → 阶段 9.15 新增「方向 B'：角色活力」（T11.10 生活状态机 / T11.11 状态驱动对话与调度 / T11.12 事件驱动自发动机(含软感知陪伴) / T11.13 关系事件叙事(数值保留) / T11.14 轻量首启引导 / T11.15 完整引导+入口提级）。同日用户新增 N5「一起看」并入方向 B' → **T11.16 共同内容会话（用户主动分享→陪看讨论→沉淀共同经历关系事件，红线不采集设备行为）**；远期台阶 2/3（进度同步/多模态同框）记入 ROADMAP 2.3。T11.6/T11.7 已推送 GitHub（b3f9b84）。
   - 2026-08-25 阶段 8.5（v1.2b）T8.7~T8.13 完成并真机验证：T8.9b 互动氛围改关系标签+性格驱动；T8.13 用户自设身份唯一绑定、全角色统一称呼。手动触发互动「光羽×学姐」真机跑通（多轮/摘要回写/氛围递进），用户身份「测友」全角色一致。代码已推 main（d0b23a8），看板状态段待补推。
   - 2026-08-23 新增阶段 5.5（真人式交互）：T5.7 消息类型化预留（为远期设备控制铺路）、T5.8 动作神态气泡内小字斜体、T5.9 拆条连发+输入中状态、T5.10 双向可打断+交错；远期决策项增加「消息类型化」。

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  T12.1（S1 安全红线）：备份排除规则（Android 11 及以下 / API 29~30 走 fullBackupContent）。
+  与 data_extraction_rules.xml 同理，排除 API 配置 DataStore 文件，避免明文/密文 Key 进入备份。
+  minSdk=29，故兼容两套规则：dataExtractionRules（31+）+ fullBackupContent（29~30）。
+-->
+<full-backup-content>
+    <exclude domain="file" path="datastore/api_config.preferences_pb" />
+</full-backup-content>

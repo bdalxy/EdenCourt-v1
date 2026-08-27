@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  T12.1（S1 安全红线）：备份排除规则（Android 12+/API 31+ 走 dataExtractionRules）。
+  排除 API 配置 DataStore 文件 api_config.preferences_pb——
+  该文件内的 apiKey 已加密，此处再排除备份做双保险，防止云端备份 / 设备迁移被提取。
+  DataStore 偏好文件位于 files/datastore/，domain="file" 即 files 目录，故 path 以 datastore/ 起算。
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="file" path="datastore/api_config.preferences_pb" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="file" path="datastore/api_config.preferences_pb" />
+    </device-transfer>
+</data-extraction-rules>
