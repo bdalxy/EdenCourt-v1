@@ -27,11 +27,12 @@
         </activity>
 
         <!-- v1.2 P2（T8.5）：每日打听窗口闹钟接收器。
-             此处 exported=true 仅为便于 adb 显示广播手动触发调试/验收；
-             系统 AlarmManager 的 PendingIntent 走同 app 组件投递不受此限制。勿改回 false -->
+             T12.3（S2）：exported=false 收敛——AlarmManager 的 PendingIntent 走同 app 组件投递、
+             不依赖 exported；adb 调试仍可用 `am broadcast -n <组件>` 显式定向触达非导出组件。
+             改 false 可阻止第三方进程构造隐式广播触发耗取 token 额度 -->
         <receiver
             android:name=".data.consult.DailyConsultAlarmReceiver"
-            android:exported="true" />
+            android:exported="false" />
         <!-- v1.2 P2（T8.5）：设备开机后重排每日打听 -->
         <receiver
             android:name=".data.consult.DailyConsultBootReceiver"
@@ -42,11 +43,10 @@
         </receiver>
 
         <!-- v1.2b（T11.7）：互动自动驱动窗口闹钟接收器。
-             此处 exported=true 仅为便于 adb 显示广播手动触发调试/验收；
-             系统 AlarmManager 的 PendingIntent 走同 app 组件投递不受此限制。勿改回 false -->
+             T12.3（S2）：exported=false 收敛，理由同 DailyConsultAlarmReceiver -->
         <receiver
             android:name=".data.interaction.InteractionAutoReceiver"
-            android:exported="true" />
+            android:exported="false" />
 
     </application>
 
