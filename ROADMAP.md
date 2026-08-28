@@ -224,6 +224,21 @@ M9（v2.0 设备操作 / 本地模型）: 依赖 M7，方向待用户确认
 发布: 每个 M 里程碑按「完成→验收→推送 GitHub」推进
 ```
 
+### 7.1 里程碑发布 gate（2026-08-28 起生效）
+
+每个稳定版本发布前，须全绿以下 6 项门槛（详见 [docs/版本管理与开发流程方案.md](docs/版本管理与开发流程方案.md) §3.3）：
+
+| 门槛 | 标准 |
+|---|---|
+| G1 编译 | assembleDebug / assembleRelease 通过，无阻断错误 |
+| G2 单测 | testDebugUnitTest 全绿（基线 65 用例，只增不减） |
+| G3 迁移 | assembleDebugAndroidTest 编译通过；迁移测试在安全环境通过 |
+| G4 真机 | adb install -r 覆盖安装成功，核心链路人工冒烟通过 |
+| G5 备份 | 发布前备份完成且 magic 校验有效（release APK 归档到 `F:\EdenCourt\releases\`） |
+| G6 文档 | CHANGELOG 更新、tag 打好、PLAN 状态同步 |
+
+> 版本节奏：每个 MINOR 版本 ≈ 5 个测试版本（test1~test5）+ 1 轮回归/发布；大版本(1.x→2.0)发布前须追加「全面审核 + 系统性测试」。手机日常装测试版 `app-debug.apk`，稳定版 `app-release.apk` 归档留档、不上手机。
+
 ---
 
 ## 8. 附录
