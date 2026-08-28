@@ -43,10 +43,10 @@ class ConsultParserTest {
     }
 
     @Test
-    fun `命中触发词_主题剥离触发词`() {
+    fun `命中触发词_主题剥离触发词与语气词`() {
         val result = ConsultParser.identify("帮我打听一下她最近好吗", conversations, conversationId = 1L, cardNameById = names)
-        // 触发词按列表顺序取第一个命中「帮我打听」，仅剥这一个（对齐既有行为）
-        assertEquals(ConsultRequest(targetConversationId = null, question = "一下她最近好吗"), result)
+        // 剥离全部命中触发词 + 口语语气词「一下」；未点名任何角色，目标为空
+        assertEquals(ConsultRequest(targetConversationId = null, question = "她最近好吗"), result)
     }
 
     // ---------- 点名定位目标会话 ----------
@@ -60,9 +60,9 @@ class ConsultParserTest {
 
     @Test
     fun `点名自己会话角色_不作为打听目标`() {
-        // 「小夏」是当前会话(1)的角色，循环跳过自己 → 目标为空；角色名也未剥离（对齐既有行为）
+        // 「小夏」是当前会话(1)的角色，循环跳过自己 → 目标为空；且当前角色名也已从主题剥离
         val result = ConsultParser.identify("去问问小夏吃饭没", conversations, conversationId = 1L, cardNameById = names)
-        assertEquals(ConsultRequest(targetConversationId = null, question = "小夏吃饭没"), result)
+        assertEquals(ConsultRequest(targetConversationId = null, question = "吃饭没"), result)
     }
 
     @Test

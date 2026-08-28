@@ -40,7 +40,9 @@ object ConsultParser {
         conversationId: Long,
         cardNameById: Map<Long, String>,
     ): ConsultRequest? {
-        val trigger = CONSULT_TRIGGERS.firstOrNull { text.contains(it) } ?: return null
+        // 命中任一触发词才算打听意图
+        if (CONSULT_TRIGGERS.none { text.contains(it) }) return null
+
         var targetId: Long? = null
         var matchedName: String? = null
         // 在非当前会话中找「被点名角色」的任一会话作为打听目标
@@ -54,8 +56,24 @@ object ConsultParser {
                 break
             }
         }
-        var question = text.replace(trigger, "").trim()
+
+        // 按长度降序剥离所有命中触发词（长词优先，避免残留短触发词片段），
+        // 修正原 firstOrNull 只剥第一个导致「帮我打听一下」等组合词残留的问题
+        var question = text
+        CONSULT_TRIGGERS.sortedByDescending { it.length }.forEach { trigger ->
+            question = question.replace(trigger, "")
+        }
+        // 剥离口语语气词「一下」（打听祈使句里常见，避免主题残留虚词影响检索）
+        question = question.replace("一下", "").trim()
+
+        // 剥离被点名的目标角色名
         matchedName?.let { question = question.replace(it, "").trim() }
+
+        // 剥离当前会话角色名：点名当前角色时不作打听目标，但名字也不该残留在主题里参与检索
+        val selfCardId = conversations.firstOrNull { it.id == conversationId }?.characterCardId
+        val selfName = selfCardId?.let { cardNameById[it] }
+        selfName?.let { question = question.replace(it, "").trim() }
+
         return ConsultRequest(targetConversationId = targetId, question = question.ifBlank { text })
     }
 
