@@ -23,6 +23,7 @@ import com.bdalxy.edencourt.data.local.entity.ParticipantRole
 import com.bdalxy.edencourt.data.local.entity.Role
 import com.bdalxy.edencourt.data.remote.AiChatService
 import com.bdalxy.edencourt.data.remote.ApiErrorKind
+import com.bdalxy.edencourt.data.remote.StreamPolicy
 import com.bdalxy.edencourt.data.remote.ApiException
 import com.bdalxy.edencourt.data.local.entity.Conversation
 import com.bdalxy.edencourt.data.remote.ChatMessage
@@ -538,7 +539,7 @@ class ChatViewModel(
         val accumulated = StringBuilder()
         val accumulatedReasoning = StringBuilder()
         // T12.2：流式写入节流——记录上次落库时刻（elapsedRealtime 单调时钟，不随系统时间跳变），
-        // 距上次 >= STREAM_PERSIST_THROTTLE_MS 才触发一次批量写，从「每 token 1次」降到「每~120ms 1次」
+        // 距上次 >= 节流阈值（StreamPolicy.DEFAULT_THROTTLE_MS）才触发一次批量写，从「每 token 1次」降到「每~120ms 1次」
         var lastPersistAt = 0L
         // T6.9：同步在当前协程（回复泵/重试协程）内执行，generatingJob 记录当前协程供「停止」取消
         val currentJob = coroutineContext[Job]
@@ -553,8 +554,9 @@ class ChatViewModel(
                         if (delta.reasoning.isNotEmpty()) accumulatedReasoning.append(delta.reasoning)
                         if (delta.content.isNotEmpty()) accumulated.append(delta.content)
                         // 等时间节流：达标才落库；未达标仅累积在内存，最终由 finishReply/打断路径 flush
+                        // 节流判断抽离为纯函数 StreamPolicy（行为不变，可单测）
                         val now = SystemClock.elapsedRealtime()
-                        if (now - lastPersistAt >= STREAM_PERSIST_THROTTLE_MS) {
+                        if (StreamPolicy.shouldPersist(now, lastPersistAt)) {
                             persistAiMessage(aiId, accumulated.toString(), accumulatedReasoning.toString())
                             lastPersistAt = now
                         }
@@ -563,10 +565,10 @@ class ChatViewModel(
                     finishReply(aiId, accumulated.toString().ifBlank { "（对方没有回应）" })
                     break
                 } catch (e: ApiException) {
-                    // 429 退避重试 1~2 次（企划书 3.6.4）
-                    if (e.kind == ApiErrorKind.RATE_LIMIT && attempt < 2) {
+                    // 429 退避重试 1~2 次（企划书 3.6.4）；重试策略抽离为纯函数 StreamPolicy（行为不变，可单测）
+                    if (StreamPolicy.shouldRetry(e.kind, attempt)) {
                         attempt++
-                        delay(1000L * attempt)
+                        delay(StreamPolicy.backoffDelayMs(attempt))
                         continue
                     }
                     markFailed(aiId, e.kind)
@@ -863,8 +865,6 @@ class ChatViewModel(
         private const val TAG = "ChatViewModel"
         /** 拆条连发间隔（T5.9：模拟真人连续打字发送的节奏） */
         private const val CHUNK_SEND_DELAY_MS = 500L
-        /** 流式写入节流间隔（T12.2：每 token 落库改等时间节流批量写，降低 Room IO 频次与 UI 掉帧） */
-        private const val STREAM_PERSIST_THROTTLE_MS = 120L
 
         /** 工厂：传入路由参数 conversationId，从 Application 取仓库/角色卡 DAO/配置/网络服务单例 */
         fun factory(conversationId: Long, application: Application): ViewModelProvider.Factory =
