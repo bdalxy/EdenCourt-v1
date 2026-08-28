@@ -487,9 +487,11 @@ class ChatViewModel(
                 replyCursorStore.save(conversationId, lastProcessedUserMessageId!!)
                 // 合并为一次「来信」：多条以换行分隔，AI 按性格决定怎么回（T6.9）
                 val mergedInput = ReplyPumpCalculator.buildBatchInput(newUserMessages)
+                // 推进代际号（先自增成员变量，再作为本请求代际传入，语义同 ++generationCounter）
+                generationCounter = GenerationGate.next(generationCounter)
                 streamReply(
                     promptMessages = buildPrompt(history, mergedInput, newUserMessages.size),
-                    generation = ++generationCounter,
+                    generation = generationCounter,
                 )
             }
         }
@@ -513,7 +515,8 @@ class ChatViewModel(
             val newHistory = history.filter { it.id != failedAiId && it.id != userMsg.id }
             // 代际计数自增后再发起重试（B2 修复）：重试视为一次「新的生成」，推进代际，
             // 与 streamReply 的代际闸门语义对齐（避免极端并发下旧请求被误判/旧结果覆盖新结果）
-            streamReply(buildPrompt(newHistory, userMsg.content), ++generationCounter)
+            generationCounter = GenerationGate.next(generationCounter)
+            streamReply(buildPrompt(newHistory, userMsg.content), generationCounter)
         }
     }
 
@@ -525,7 +528,8 @@ class ChatViewModel(
      */
     private suspend fun streamReply(promptMessages: List<ChatMessage>, generation: Long) {
         // 代际闸门：本请求已被更新的发送覆盖（generation != 当前最新）则直接作废，不启动生成
-        if (generation != generationCounter) return
+        // 闸门判断抽离为纯函数 GenerationGate（行为不变，可单测）
+        if (!GenerationGate.isCurrent(generation, generationCounter)) return
         _isGenerating.value = true
         // AI 占位消息（空内容 + 生成中状态，UI 顶部显示「正在输入…」，T6.8）
         val aiId = repository.insertMessage(
