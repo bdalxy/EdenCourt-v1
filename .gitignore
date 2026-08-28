@@ -4,6 +4,9 @@ build/
 app/build/
 !gradle/wrapper/gradle-wrapper.jar
 
+# 发布签名密钥（仅本机保留，勿提交；含 .jks 与签署配置）
+app/keystore/
+
 # 本机配置（含 sdk.dir 路径，勿提交）
 local.properties
 

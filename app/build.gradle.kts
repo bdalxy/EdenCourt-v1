@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -28,8 +30,24 @@ android {
         getByName("androidTest").assets.srcDirs(files("$projectDir/schemas"))
     }
 
+    signingConfigs {
+        // 发布签名（方案1：自生成开发签名 keystore）
+        // 密钥路径与密码仅存本机 local.properties（已 gitignore），避免把密钥明文硬编码进代码
+        create("release") {
+            val props = Properties().apply {
+                val f = rootProject.file("local.properties")
+                if (f.exists()) f.inputStream().use { load(it) }
+            }
+            storeFile = file(props.getProperty("ec.keystore.path") ?: "")
+            storePassword = props.getProperty("ec.keystore.password")
+            keyAlias = props.getProperty("ec.keystore.alias")
+            keyPassword = props.getProperty("ec.keystore.key.password")
+        }
+    }
+
     buildTypes {
         release {
+            signingConfig = signingConfigs.getByName("release")
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
