@@ -110,9 +110,17 @@ fun SettingsScreen(
             item { SettingsSectionCard { ScheduleSettingsSection(viewModel = viewModel) } }
             // 第 4 区：互动中心入口（T11.13，从设置页也能进入：查看/发起互动、自动驱动、关系故事）
             item { InteractionCenterSection(onOpenInteraction = onOpenInteraction) }
+            // 开发者工具区：仅 debug 构建可见（性能压测种子数据，M3 验收前提）
+            if (isDebugBuild(context)) {
+                item { DebugSection(viewModel = viewModel) }
+            }
         }
     }
 }
+
+/** 是否为 debug 构建（无 BuildConfig 时用 ApplicationInfo 调试标志判断，release 恒为 false） */
+private fun isDebugBuild(application: Application): Boolean =
+    (application.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
 
 /**
  * 设置页分组卡片（P0-3 设置页分组整理）：把每个功能区用一个柔和圆角卡片包起来，
@@ -634,4 +642,48 @@ private fun InteractionCenterSection(onOpenInteraction: () -> Unit) {
             )
         }
     }
+}
+
+/**
+ * 开发者工具区（仅 debug 构建显示，release 经 isDebugBuild 恒隐藏）。
+ * - 「生成千条压测数据」：调用 SeedDataTool 新建一次性测试会话并灌入千条消息/记忆，
+ *   用于真机实测 聊天页滚动 与 记忆页分页 的流畅度（M3「千条数据 60fps」验收前提）。
+ * - 生成只放独立【压测】会话/记忆，不触碰正式会话；运行结果用文本就地反馈。
+ */
+@Composable
+private fun DebugSection(viewModel: SettingsViewModel) {
+    val seedState by viewModel.seedState.collectAsStateWithLifecycle()
+    val statusText = when (val s = seedState) {
+        is SeedState.Idle -> "生成后可在对话列表看到【压测·1】会话，进入验证千条消息滚动流畅度。"
+        is SeedState.Running -> "正在生成千条数据，请稍候…"
+        is SeedState.Done -> "已生成，测试会话 id=${s.conversationId}（对话列表可见【压测·1】）。"
+        is SeedState.Error -> s.message
+    }
+    Column(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        SettingsSectionTitle("开发者工具（仅调试构建）")
+        Button(
+            onClick = { viewModel.generateSeedData(tag = 1) },
+            enabled = seedState !is SeedState.Running,
+        ) {
+            Text(if (seedState is SeedState.Running) "生成中…" else "生成千条压测数据")
+        }
+        Text(
+            text = statusText,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+/** 设置页分区小标题（复用现有标题样式，供 DebugSection 等分区使用） */
+@Composable
+private fun SettingsSectionTitle(title: String) {
+    Text(
+        text = title,
+        style = MaterialTheme.typography.titleMedium,
+        fontWeight = FontWeight.Bold,
+    )
 }

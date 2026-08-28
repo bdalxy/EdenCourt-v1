@@ -7,12 +7,14 @@ import com.bdalxy.edencourt.data.local.dao.ConversationDao
 import com.bdalxy.edencourt.data.local.dao.InteractionDao
 import com.bdalxy.edencourt.data.local.dao.MemoryDao
 import com.bdalxy.edencourt.data.local.dao.MemorySearchDao
+import com.bdalxy.edencourt.data.local.dao.MessageDao
 import com.bdalxy.edencourt.data.local.dao.RelationshipDao
 import com.bdalxy.edencourt.data.local.dao.UserIdentityDao
 import com.bdalxy.edencourt.data.remote.RemoteApiChatService
 import com.bdalxy.edencourt.data.search.MemorySearchService
 import com.bdalxy.edencourt.data.consult.DailyConsultExecutor
 import com.bdalxy.edencourt.data.consult.DailyConsultScheduler
+import com.bdalxy.edencourt.data.debug.SeedDataTool
 import com.bdalxy.edencourt.data.interaction.InteractionAutoExecutor
 import com.bdalxy.edencourt.data.interaction.InteractionAutoScheduler
 import com.bdalxy.edencourt.data.interaction.InteractionExecutor
@@ -72,6 +74,11 @@ class EdenCourtApp : Application() {
     /** 记忆条目表数据访问单例（T5.1 起供记忆系统使用） */
     val memoryDao: MemoryDao by lazy {
         AppDatabase.getInstance(this).memoryDao()
+    }
+
+    /** 消息表数据访问单例（供性能种子工具等数据层辅助场景使用；聊天主流程走 chatRepository） */
+    val messageDao: MessageDao by lazy {
+        AppDatabase.getInstance(this).messageDao()
     }
 
     /** FTS4 全文检索数据访问单例（T9.2 起供记忆检索服务使用） */
@@ -215,5 +222,14 @@ class EdenCourtApp : Application() {
     /** 回复泵已处理游标存储单例（T12.4：进程重启后泵恢复游标，避免把历史重复洗澡成新来信） */
     val replyCursorStore: ReplyCursorStore by lazy {
         ReplyCursorStore(this)
+    }
+
+    /** 性能压测种子数据工具单例（M3「千条数据 60fps」验收前提；仅 debug 构建设置页「开发者工具」区触发） */
+    val seedDataTool: SeedDataTool by lazy {
+        SeedDataTool(
+            chatRepository = chatRepository,
+            messageDao = messageDao,
+            memoryDao = memoryDao,
+        )
     }
 }

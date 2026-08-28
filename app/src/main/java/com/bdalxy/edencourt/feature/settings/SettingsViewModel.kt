@@ -7,6 +7,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.bdalxy.edencourt.EdenCourtApp
+import com.bdalxy.edencourt.data.debug.SeedDataTool
 import com.bdalxy.edencourt.data.local.dao.CharacterCardDao
 import com.bdalxy.edencourt.data.local.dao.UserIdentityDao
 import com.bdalxy.edencourt.data.local.entity.CharacterCardEntity
@@ -46,6 +47,17 @@ sealed interface TestState {
 }
 
 /**
+ * 种子数据生成状态（M3 性能压测工具，仅 debug 构建设置页「开发者工具」区使用）。
+ * - Idle=未开始 · Running=生成中 · Done=完成（携带新建测试会话 id）· Error=失败
+ */
+sealed interface SeedState {
+    data object Idle : SeedState
+    data object Running : SeedState
+    data class Done(val conversationId: Long) : SeedState
+    data class Error(val message: String) : SeedState
+}
+
+/**
  * 单个角色个性作息概览（设置页「角色作息」区只读展示，T11.10 深化）。
  * 由基础作息 + 该角色的作息特征（trait）/自定义作息派生；让用户直观看到「每个角色作息不同」。
  */
@@ -70,6 +82,7 @@ class SettingsViewModel(
     private val userIdentityDao: UserIdentityDao,
     private val scheduleConfigStore: ScheduleConfigStore,
     private val characterCardDao: CharacterCardDao,
+    private val seedDataTool: SeedDataTool,
 ) : ViewModel() {
 
     /** API 配置流（温度滑块等连续控件直接绑定此值） */
@@ -133,6 +146,10 @@ class SettingsViewModel(
     /** 测试连接状态流 */
     private val _testState = MutableStateFlow<TestState>(TestState.Idle)
     val testState: StateFlow<TestState> = _testState.asStateFlow()
+
+    /** 种子数据生成状态流（仅 debug 构建「开发者工具」区使用） */
+    private val _seedState = MutableStateFlow<SeedState>(SeedState.Idle)
+    val seedState: StateFlow<SeedState> = _seedState.asStateFlow()
 
     /** Base URL：输入即保存 */
     fun updateBaseUrl(value: String) = viewModelScope.launch {
@@ -215,6 +232,20 @@ class SettingsViewModel(
         }
     }
 
+    /** 生成千条压测种子数据（M3 性能压测工具，仅 debug 构建设置页「开发者工具」区调用） */
+    fun generateSeedData(tag: Int) {
+        if (_seedState.value == SeedState.Running) return
+        _seedState.value = SeedState.Running
+        viewModelScope.launch {
+            try {
+                val convId = seedDataTool.generate(tag = tag)
+                _seedState.value = SeedState.Done(convId)
+            } catch (e: Exception) {
+                _seedState.value = SeedState.Error("生成失败：${e.message}")
+            }
+        }
+    }
+
     companion object {
         /** 工厂：从 Application 取 ApiConfigStore 与 AI 服务单例 */
         fun factory(application: Application): ViewModelProvider.Factory = viewModelFactory {
@@ -226,6 +257,7 @@ class SettingsViewModel(
                     userIdentityDao = app.userIdentityDao,
                     scheduleConfigStore = app.scheduleConfigStore,
                     characterCardDao = app.characterCardDao,
+                    seedDataTool = app.seedDataTool,
                 )
             }
         }

@@ -20,6 +20,10 @@ interface MessageDao {
     @Insert
     suspend fun insert(message: Message): Long
 
+    /** 批量新增（性能种子工具用：千条历史一次性入库，优于逐条 insert 被 Room 逐次级联重查） */
+    @Insert
+    suspend fun insertAll(messages: List<Message>)
+
     /** 更新消息（流式生成中逐段更新 AI 消息、失败置 FAILED 等场景使用） */
     @Update
     suspend fun update(message: Message)
