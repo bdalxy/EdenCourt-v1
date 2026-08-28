@@ -586,19 +586,21 @@ class ChatViewModel(
                 val latestContent = accumulated.toString()
                 val latestReasoning = accumulatedReasoning.toString()
                 val current = repository.getMessage(aiId)
-                if (current != null && current.status == MessageStatus.GENERATING) {
-                    if (latestContent.isBlank() && latestReasoning.isBlank()) {
+                // 打断处理决策抽离为纯函数 InterruptionPolicy（行为不变，可单测）：SKIP/DELETE/FLUSH_DONE
+                if (current != null) {
+                    when (InterruptionPolicy.decide(current.status, latestContent, latestReasoning)) {
                         // 尚无任何内容：删除空占位，避免残留「正在输入」气泡（打断即作废，T5.10）
-                        repository.deleteMessage(current)
-                    } else {
+                        InterruptionAction.DELETE -> repository.deleteMessage(current)
                         // 已有部分内容：flush 内存最新内容并标记完成（不视为失败）
-                        repository.updateMessage(
+                        InterruptionAction.FLUSH_DONE -> repository.updateMessage(
                             current.copy(
                                 content = latestContent,
                                 reasoning = latestReasoning,
                                 status = MessageStatus.DONE,
                             ),
                         )
+                        // 消息已非生成中（被 finish/失败处理过）：不动它
+                        InterruptionAction.SKIP -> Unit
                     }
                 }
             }
