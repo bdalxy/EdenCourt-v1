@@ -477,17 +477,15 @@ class ChatViewModel(
                 // 取当前历史（含刚发送/攒批的用户消息）
                 val history = repository.observeMessages(conversationId).first()
                 // 本轮待回复：位于上次处理点之后的所有用户消息（连发会一次性取到，实现攒批）
-                val newUserMessages = history.filter { msg ->
-                    msg.role == Role.USER &&
-                        (lastProcessedUserMessageId == null || msg.id > lastProcessedUserMessageId!!)
-                }
+                // T6.9 攒批决策抽离为纯函数（ReplyPumpCalculator），逻辑此处直接复用，行为不变
+                val newUserMessages = ReplyPumpCalculator.selectNewUserMessages(history, lastProcessedUserMessageId)
                 // 没有新消息，泵退出等待下次发送
                 if (newUserMessages.isEmpty()) break
                 lastProcessedUserMessageId = newUserMessages.last().id
                 // T12.4：游标推进后立即落库，进程重启后可从中断位置续扫（不重复、不丢失）
                 replyCursorStore.save(conversationId, lastProcessedUserMessageId!!)
                 // 合并为一次「来信」：多条以换行分隔，AI 按性格决定怎么回（T6.9）
-                val mergedInput = newUserMessages.joinToString("\n") { it.content }
+                val mergedInput = ReplyPumpCalculator.buildBatchInput(newUserMessages)
                 streamReply(
                     promptMessages = buildPrompt(history, mergedInput, newUserMessages.size),
                     generation = ++generationCounter,
