@@ -173,10 +173,13 @@ class RemoteApiChatService(
                         }
                     }
                     val body = response.body?.string().orEmpty()
-                    // 解析 JSON 响应取首条助手消息内容；失败返回空串由调用方兜底
+                    // 解析 JSON 响应取首条助手消息内容；失败抛出明确错误而非静默返回空串，
+                    // 让调用方（记忆提取/跨会话打听等）能感知失败，避免把空串当有效结果
                     runCatching {
                         SseStreamParser.json.decodeFromString<ChatCompletionResponse>(body).firstContent
-                    }.getOrDefault("")
+                    }.getOrElse { e ->
+                        throw ApiException(ApiErrorKind.SERVER, "响应解析失败：${e.message}")
+                    }
                 }
             } catch (e: SocketTimeoutException) {
                 throw ApiException(ApiErrorKind.TIMEOUT, "连接超时")
