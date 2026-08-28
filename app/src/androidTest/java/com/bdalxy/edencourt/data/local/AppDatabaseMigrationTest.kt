@@ -33,11 +33,11 @@ class AppDatabaseMigrationTest {
     )
 
     /**
-     * 用例1：从 v12（核心业务表 + conv_relationship 初具形态）一路迁移到 v24。
-     * 迁移前埋入一条记忆 + 一条会话，验证穿越全部版本后数据完整保留。
+     * 用例1：从 v12（核心业务表 + conv_relationship 初具形态）一路迁移到 v25。
+     * 迁移前埋入一条记忆 + 一条会话，验证穿越全部版本后数据完整保留，且最新新增表可查。
      */
     @Test
-    fun migrateFrom_v12_to_v24_keepsData() {
+    fun migrateFrom_v12_to_v25_keepsData() {
         helper.createDatabase(TEST_DB, 12).use { db ->
             // 埋入 v12 形态的旧数据
             db.execSQL(
@@ -51,14 +51,17 @@ class AppDatabaseMigrationTest {
                     "VALUES ('测试会话', '备注名', 'V-test01', 0, 1000, 2000, 0, '你好', 2000)",
             )
 
-            // 与生产同源同序地跑完全部版本迁移（12→24）
-            migrateChain(db, from = 12, to = 24)
+            // 与生产同源同序地跑完全部版本迁移（12→25）
+            migrateChain(db, from = 12, to = 25)
 
-            // 迁移后数据仍在（穿越 12 次迁移未丢）
+            // 迁移后数据仍在（穿越 13 次迁移未丢）
             val count = queryInt(db, "SELECT COUNT(*) FROM memory_items WHERE content = '她喜欢喝热奶茶'")
             check(count == 1) { "迁移后记忆数据丢失: count=$count" }
             val convCount = queryInt(db, "SELECT COUNT(*) FROM conversations WHERE code = 'V-test01'")
             check(convCount == 1) { "迁移后会话数据丢失: convCount=$convCount" }
+            // 最新版本新增的 conversation_traits 表已建好（可查询）
+            val tableCount = queryInt(db, "SELECT COUNT(*) FROM conversation_traits")
+            check(tableCount == 0) { "conversation_traits 表不可用: tableCount=$tableCount" }
         }
     }
 
@@ -96,6 +99,51 @@ class AppDatabaseMigrationTest {
     }
 
     /**
+     * 用例3：最新迁移 v24→v25（T13.1 新增 conversation_traits 会话独有人格表）。
+     * 验证：新表字段可写可读（6 维 + 反差对 + 印象摘要默认值）；conversationId 唯一索引生效（同会话二次插入被拒）。
+     */
+    @Test
+    fun migrateFrom_v24_to_v25_addsConversationTraitsTable() {
+        helper.createDatabase(TEST_DB3, 24).use { db ->
+            db.execSQL(
+                "INSERT INTO conversations (title, remark, code, interactionEnabled, createdAt, updatedAt, " +
+                    "isPinned, lastMessagePreview, lastMessageTime) " +
+                    "VALUES ('小夏会话', '', 'V-test25', 0, 1000, 2000, 0, '你好', 2000)",
+            )
+
+            migrateChain(db, from = 24, to = 25)
+
+            // 新表字段完整可写（6 维 + 反差对 + 印象摘要/标签/来源 + 时间）
+            db.execSQL(
+                "INSERT INTO conversation_traits (conversationId, characterCardId, sociability, initiative, " +
+                    "warmth, attachment, humor, casualness, contrastSurface, contrastInner, contrastTrigger, " +
+                    "identityBlurb, identityTags, generatedBy, createdAt) " +
+                    "VALUES (1, 1, 55, 60, 85, 70, 40, 30, '温柔体贴的学姐', '很要强', '被误解或低估时', " +
+                    "'慢热·暖心｜平时温柔体贴，但初识话不多', '[\"慢热\",\"暖心\"]', 'template', 5000)",
+            )
+            val count = queryInt(db, "SELECT COUNT(*) FROM conversation_traits")
+            check(count == 1) { "conversation_traits 插入失败: count=$count" }
+            val blurb = queryString(db, "SELECT identityBlurb FROM conversation_traits WHERE conversationId = 1 LIMIT 1")
+            check(blurb == "慢热·暖心｜平时温柔体贴，但初识话不多") { "印象摘要回读不对: $blurb" }
+            val warmth = queryInt(db, "SELECT warmth FROM conversation_traits WHERE conversationId = 1 LIMIT 1")
+            check(warmth == 85) { "6 维数值回读不对: warmth=$warmth" }
+
+            // conversationId 唯一索引生效：同会话二次插入应被唯一约束拒绝
+            val dupRejected = runCatching {
+                db.execSQL(
+                    "INSERT INTO conversation_traits (conversationId, characterCardId, sociability, initiative, " +
+                        "warmth, attachment, humor, casualness, contrastSurface, contrastInner, contrastTrigger, " +
+                        "identityBlurb, identityTags, generatedBy, createdAt) " +
+                        "VALUES (1, 1, 50, 50, 50, 50, 50, 50, '', '', '', '', '[]', 'template', 6000)",
+                )
+            }.isFailure
+            check(dupRejected) { "conversationId 唯一索引未生效，同会话可重复插入" }
+            val finalCount = queryInt(db, "SELECT COUNT(*) FROM conversation_traits WHERE conversationId = 1")
+            check(finalCount == 1) { "唯一索引失效后数据被重复写入: count=$finalCount" }
+        }
+    }
+
+    /**
      * 把 ALL_MIGRATIONS 当作纯函数按版本升序链式执行（与生产 builder.addMigrations 用的是同一批对象）。
      * 中途任一迁移抛异常即测试失败——从而捕获「某次迁移在真实数据形态下跑不通」的回归。
      */
@@ -114,5 +162,6 @@ class AppDatabaseMigrationTest {
     companion object {
         private const val TEST_DB = "migration-test-v12.db"
         private const val TEST_DB2 = "migration-test-v22.db"
+        private const val TEST_DB3 = "migration-test-v24.db"
     }
 }

@@ -1151,6 +1151,56 @@ app/src/main/
 
 ---
 
+## 9.16 阶段 11（v1.3）：角色差异化 + 自补充（用户 2026-08-28 提出，AI 拍板立项）
+
+> 方案：docs/角色差异化与自补充方案.md（v2，2026-08-28 已立项）。
+> 目标：同一角色卡开多个会话 → 每个会话角色在卡范围内随机 6 维数值 + 反差对 + 印象摘要，实现「同卡不同魂」；人设未提到的偏好（如运动）角色遇到时按性格/经历自补充并沉淀为**该会话私有记忆**。
+> 依赖链：T13.1（建表迁移）→ T13.2/T13.3（范围派生+生成）→ T13.4（LLM 印象摘要）→ T13.5（Prompt 注入）→ T13.6（可视化区分）→ T13.7（自补充闭环）。P1=P1 底座、P2=可视化、P3=自补充。
+
+- **T13.1 数据层：conversation_traits 表 + Room v24→v25 迁移（P1，P0）**：
+  - 依赖：无
+  - 操作：新建实体 `ConversationTraits`（conversationId 唯一 FK + characterCardId + 6 维数值 + 反差对三字段 + identityBlurb/identityTags/generatedBy/createdAt）；DAO `getByConversation/insert/updateBlurbAndTags`；`AppDatabase.kt` 加 MIGRATION_24_25（纯新增表，无存量）；迁移测试补 v24→v25 用例
+  - 文件：`data/local/entity/ConversationTraits.kt`（新增）· `data/local/dao/ConversationTraitsDao.kt`（新增）· `data/local/AppDatabase.kt` · 迁移测试
+  - 验收：[ ] 编译通过 · [ ] 单测全绿 · [ ] 迁移测试 v24→v25 通过
+- **T13.2 范围派生：traitsRange + LLM 读卡生成范围（P1，P1）**：
+  - 依赖：T13.1
+  - 操作：① `CharacterCard` 加可选 `traitsRange`（数据党 JSON 字段，`ignoreUnknownKeys` 兼容旧卡）；② 新增 `TraitRangeResolver`：数据党直接用 traitsRange → 感觉党走 LLM 读卡 `personality/description` 输出 6 维范围 JSON（带 confidence）→ 失败降级关键词启发式 → 50±25 兜底（三级兜底）；③ 单测覆盖三态
+  - 文件：`domain/CharacterCard.kt` · `data/traits/TraitRangeResolver.kt`（新增）· 单测
+  - 验收：[ ] 编译通过 · [ ] 单测覆盖数据党/感觉党/中间党三态
+- **T13.3 6 维随机生成 + 反差对生成（P1，P2）**：
+  - 依赖：T13.2
+  - 操作：① `TraitsGenerator`：SecureRandom 在范围内均匀落点（固定不漂移）；② 反差对：卡派生表面 + 受限反差库选隐藏（关键词冲突检测过滤，冲突重选）；③ 单测覆盖范围边界/一致性过滤/重选
+  - 文件：`data/traits/TraitsGenerator.kt`（新增）· `data/traits/ContrastLibrary.kt`（新增）· 单测
+  - 验收：[ ] 编译通过 · [ ] 单测覆盖随机边界 + 反差一致性过滤
+- **T13.4 LLM 印象摘要生成（P1，P3）**：
+  - 依赖：T13.3
+  - 操作：建会话时把「卡设定 + 6 维数值 + 反差对」交 LLM 生成第三人称概括 + 2~3 标签；失败降级纯模板（数值区间+标签库拼装）；写入 identityBlurb/identityTags/generatedBy='llm'；用户手动改后 generatedBy='user' 不被覆盖
+  - 文件：`data/traits/TraitsSummaryGenerator.kt`（新增）· 建会话流程（ConversationListViewModel）
+  - 验收：[ ] 编译通过 · [ ] 真机同卡开 3 会话印象摘要各不相同且符合人设 · [ ] 用户改印象不被覆盖
+- **T13.5 Prompt 注入：印象摘要 + 反差对 + 自补充引导（P1，P4）**：
+  - 依赖：T13.4
+  - 操作：`PromptBuilder.buildCardSystemPrompt` 追加注入：①印象摘要（如有）②反差对（平时外显表面、依恋度≥阈值流露隐藏）③自补充引导（未知偏好按性格推断并自述、沉淀记忆保持一致）；ChatViewModel 组装 prompt 时读 traits（一次查询缓存）
+  - 文件：`domain/PromptBuilder.kt` · `feature/chat/ChatViewModel.kt`
+  - 验收：[ ] 编译通过 · [ ] 真机问未设定偏好（运动/食物）角色自述且与性格一致 · [ ] 依恋度阈值触发反差
+- **T13.6 可视化区分：会话列表标签行 + 聊天页印象摘要（P2，P5）**：
+  - 依赖：T13.4
+  - 操作：① 会话列表卡片显示印象标签行（identityTags）一眼区分；② 聊天页角色信息/记忆面板展示完整摘要 + 编辑入口（用户可改，generatedBy→'user'）；③ 无 traits 老会话不显示（兼容）
+  - 文件：会话列表 UI · 聊天页 UI · 相关 ViewModel
+  - 验收：[ ] 编译通过 · [ ] 真机同卡多会话列表可区分 · [ ] 编辑印象保存生效
+- **T13.7 自补充闭环：偏好沉淀 + 一致性校验（P3，P6）**：
+  - 依赖：T13.5
+  - 操作：① 角色自述推断偏好 → 复用既有记忆提取管线 → 以该会话私有（sourceConversationId=本会话, visibility=PRIVATE）存入；② 后续 prompt 注入保持自洽；③ 一致性校验（复用记忆更正机制，P4 优化位先记）
+  - 文件：`data/repository/MemoryRepository.kt`（接线）· `domain/PromptBuilder.kt`
+  - 验收：[ ] 编译通过 · [ ] 真机问偏好→角色自述→记忆沉淀→下次一致 · [ ] 其他会话不可见该偏好
+- **T13.8 阶段收尾：单测 + 迁移 + 真机验证（P3）**：
+  - 依赖：T13.6、T13.7
+  - 操作：全量 `testDebugUnitTest` + 迁移测试 + 真机覆盖安装回归（同卡 3 会话区分 / 自补充一致 / 老会话兼容 / 无崩）
+  - 验收：[ ] 单测全绿（≥65+新增） · [ ] 真机回归通过 · [ ] 备份留档
+
+> 依赖关系：T13.1 → T13.2 → T13.3 → T13.4 →（T13.5 ‖ T13.6）→ T13.7 → T13.8。P1 底座（T13.1~T13.5）先交付人工审核，再 P2 可视化（T13.6）、P3 自补充（T13.7）。
+
+---
+
 ## 10. 远期决策项（不阻塞 MVP，记录待定）
 
 | 决策项 | 现状 | 何时定 |
