@@ -28,39 +28,16 @@ class ChatSideEffects(
     private val crossSessionConsultService: CrossSessionConsultService,
 ) {
 
-    /** 用户触发跨会话打听的请求（v1.2，T8.4） */
-    data class ConsultRequest(
-        val targetConversationId: Long?,
-        val question: String,
-    )
-
     /**
-     * 检测用户消息是否为「跨会话打听」意图（T8.4，MVP 用关键词触发）：
-     * - 命中触发词（去问问/帮我打听/打听一下…）即视为打听；
-     * - 若能点名目标角色卡（消息里出现某角色名）→ 直接定位其某会话；
-     * - 主题 = 去掉触发词与点名的角色名后的剩余文本。
+     * 检测用户消息是否为「跨会话打听」意图（T8.4，MVP 用关键词触发）。
+     * 解析逻辑已抽离为纯函数 [ConsultParser.identify]（可单测）：触发词命中/点名定位/主题剥离。
+     * 此处仅负责取角色名表（DAO）后调用解析，返回打听请求或 null（普通对话）。
      */
     suspend fun detectConsult(text: String, conversations: List<Conversation>): ConsultRequest? {
-        val trigger = CONSULT_TRIGGERS.firstOrNull { text.contains(it) } ?: return null
         val cardNameById = characterCardDao.observeAll().first()
             .mapNotNull { it.id to (it.remark.ifBlank { it.name }) }
             .toMap()
-        var targetId: Long? = null
-        var matchedName: String? = null
-        // 在非当前会话中找「被点名角色」的任一会话作为打听目标
-        for (conv in conversations) {
-            if (conv.id == conversationId) continue
-            val cid = conv.characterCardId ?: continue
-            val name = cardNameById[cid] ?: continue
-            if (text.contains(name)) {
-                matchedName = name
-                targetId = conv.id
-                break
-            }
-        }
-        var question = text.replace(trigger, "").trim()
-        matchedName?.let { question = question.replace(it, "").trim() }
-        return ConsultRequest(targetConversationId = targetId, question = question.ifBlank { text })
+        return ConsultParser.identify(text, conversations, conversationId, cardNameById)
     }
 
     /**
@@ -78,7 +55,7 @@ class ChatSideEffects(
     ) {
         var targetId = req.targetConversationId
         if (targetId == null) {
-            val candidates = memoryRepository.locateTargetConversationIds(splitTerms(req.question), conversationId)
+            val candidates = memoryRepository.locateTargetConversationIds(ConsultParser.splitTerms(req.question), conversationId)
             targetId = candidates.firstOrNull()
         }
         // AI 占位消息（GENERATING，UI 顶部显示「正在输入…」同款处理）
@@ -131,18 +108,6 @@ class ChatSideEffects(
                 lastMessageTime = now,
                 updatedAt = now,
             ),
-        )
-    }
-
-    /** 打听主题拆词（按常见标点/空白切分，供 T8.1 检索） */
-    private fun splitTerms(question: String): List<String> =
-        question.split(Regex("[，。,.！!？?、\\s]+")).filter { it.isNotBlank() }
-
-    companion object {
-        /** 跨会话打听触发词（v1.2，T8.4 意图识别：命中任一即视为用户触发打听） */
-        private val CONSULT_TRIGGERS = listOf(
-            "去打听", "帮我打听", "打听一下", "去问问", "帮我问",
-            "打探", "探探口风", "问问", "去问",
         )
     }
 }
