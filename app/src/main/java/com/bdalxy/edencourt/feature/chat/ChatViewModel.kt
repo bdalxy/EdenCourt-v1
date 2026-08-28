@@ -512,7 +512,9 @@ class ChatViewModel(
             _errorMessages.update { it - failedAiId }
             repository.deleteMessage(failed)
             val newHistory = history.filter { it.id != failedAiId && it.id != userMsg.id }
-            streamReply(buildPrompt(newHistory, userMsg.content), generationCounter)
+            // 代际计数自增后再发起重试（B2 修复）：重试视为一次「新的生成」，推进代际，
+            // 与 streamReply 的代际闸门语义对齐（避免极端并发下旧请求被误判/旧结果覆盖新结果）
+            streamReply(buildPrompt(newHistory, userMsg.content), ++generationCounter)
         }
     }
 

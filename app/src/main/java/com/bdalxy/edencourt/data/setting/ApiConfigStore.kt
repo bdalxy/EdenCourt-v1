@@ -87,9 +87,15 @@ class ApiConfigStore(
             topP = prefs[Keys.TOP_P] ?: 1.0,
         )
 
-    /** 更新配置：基于当前值生成新值后写回；apiKey 加密后写入密文键 */
+    /** 更新配置：基于当前值生成新值后写回；apiKey 加密后写入密文键。
+     * baseUrl 强制要求 HTTPS（S4 安全：避免用户误填 http:// 明文传输 API Key）。
+     */
     suspend fun update(transform: (ApiConfig) -> ApiConfig) {
         val next = transform(config.first())
+        // HTTPS 校验：非 https 地址直接拒绝保存（本地调试走 https://localhost 或代理 https 转发）
+        require(next.baseUrl.isBlank() || next.baseUrl.trim().startsWith("https://", ignoreCase = true)) {
+            "API 地址必须使用 HTTPS 安全连接，防止 API Key 明文传输"
+        }
         context.apiConfigDataStore.edit { prefs ->
             prefs[Keys.BASE_URL] = next.baseUrl
             prefs[Keys.API_KEY_ENC] = cipher.encrypt(next.apiKey)

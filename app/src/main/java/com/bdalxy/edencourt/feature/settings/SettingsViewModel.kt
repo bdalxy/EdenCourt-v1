@@ -22,6 +22,7 @@ import com.bdalxy.edencourt.data.setting.ApiConfig
 import com.bdalxy.edencourt.data.setting.ApiConfigStore
 import com.bdalxy.edencourt.data.setting.ScheduleConfig
 import com.bdalxy.edencourt.data.setting.ScheduleConfigStore
+import android.util.Log
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -84,6 +85,9 @@ class SettingsViewModel(
     private val characterCardDao: CharacterCardDao,
     private val seedDataTool: SeedDataTool,
 ) : ViewModel() {
+
+    /** 日志 TAG（S4 校验日志用） */
+    private val TAG = "SettingsVM"
 
     /** API 配置流（温度滑块等连续控件直接绑定此值） */
     val apiConfig: StateFlow<ApiConfig> = apiConfigStore.config
@@ -151,9 +155,17 @@ class SettingsViewModel(
     private val _seedState = MutableStateFlow<SeedState>(SeedState.Idle)
     val seedState: StateFlow<SeedState> = _seedState.asStateFlow()
 
-    /** Base URL：输入即保存 */
+    /** Base URL：输入即保存。
+     *  若非 HTTPS 会抛 [IllegalArgumentException]（S4 安全校验），此处捕获避免协程崩溃，
+     *  并跳过保存（保留原 https 值）；UI 字段不更新即实现「拒绝非安全地址」。
+     */
     fun updateBaseUrl(value: String) = viewModelScope.launch {
-        apiConfigStore.update { it.copy(baseUrl = value) }
+        try {
+            apiConfigStore.update { it.copy(baseUrl = value) }
+        } catch (e: IllegalArgumentException) {
+            // 非法（非 HTTPS）地址被 ApiConfigStore 拒绝——不保存、不崩溃；记录日志供排查
+            Log.w(TAG, "拒绝保存非 HTTPS API 地址：${value.take(40)}")
+        }
     }
 
     /** API Key：输入即保存（不打印日志） */

@@ -46,7 +46,8 @@ class ApiKeyCipher {
             key = it
             return it
         }
-        // 不存在则用 KeyGenParameterSpec 生成 AES-256/GCM 密钥（不可导出、需用户解锁）
+        // 不存在则用 KeyGenParameterSpec 生成 AES-256/GCM 密钥（不可导出；未设 userAuthenticationRequired，
+        // 即设备已解锁状态下即可加解密，供后台自动互动等无交互场景使用——与「每笔需用户解锁」不同）
         val generator = KeyGenerator.getInstance(
             KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore"
         )
@@ -99,7 +100,7 @@ class ApiKeyCipher {
                 init(Cipher.DECRYPT_MODE, secret, GCMParameterSpec(128, iv))
                 String(doFinal(ct), Charsets.UTF_8)
             }
-        } catch (e: Throwable) {
+        } catch (e: Exception) {
             Log.w(TAG, "解密 API Key 失败（可能 Keystore 被清除），返回空串", e)
             ""
         }
