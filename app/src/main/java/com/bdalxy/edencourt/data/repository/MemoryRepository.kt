@@ -374,6 +374,11 @@ class MemoryRepository(
             append("  若用户明确要求保密/仅对当前角色说（如「别告诉别人」「你知我知」「这是我的秘密」），或属于私密心事，标 \"visibility\": \"private\"；\n")
             append("  一般事实（姓名/喜好/事件等）标 \"visibility\": \"shared\"。\n")
             append("绝密规则（v1.2 绝密兜底）：若用户明确要求「绝对保密/绝不可让任何人知道/死了都要瞒着」（比一般私密更强硬的保密，如「绝对不能说出去」「谁都不能告诉」），除标 private 外，再加 \"top_secret\": true。只有一般私密（可对亲近者说）不标 top_secret。\n")
+            append("角色自我设定规则（v1.3 自补充闭环）：AI 回复中，如果【角色】【用自己的第一人称明确设定/自述了自己】的偏好、习惯或个人设定\n")
+            append("  （如「我喜欢喝奶茶」「我最近在听爵士」「我养了一只猫」这类角色对自己做的自我描述），也请把这类信息提取为一条记忆：\n")
+            append("  - 它是「关于角色自己」的记忆，务必标 \"type\": \"personal_info\" 或 \"preference\"；\n")
+            append("  - 务必标 \"visibility\": \"private\"（仅当前会话可见，避免同一张卡的不同会话角色互相混用彼此的自我设定）；\n")
+            append("  - 不要提取用户描述角色的话（那是用户视角，不属于角色自我设定）；只提取角色自己明确设定自己的话。\n")
             if (existingMemories.isNotEmpty()) {
                 append("该角色已有记忆（原文+类型）：\n")
                 existingMemories.forEach { m -> append("  - ").append(m.content).append("（").append(m.type.label).append("）\n") }
