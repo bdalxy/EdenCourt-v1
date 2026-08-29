@@ -16,8 +16,8 @@ kotlinxSerialization = "1.7.3"
 coil = "2.7.0"
 junit = "4.13.2"
 mockk = "1.13.10"
-testRunner = "1.5.2"
-testExtJunit = "1.1.5"
+testRunner = "1.6.1"
+testExtJunit = "1.2.1"
 
 [libraries]
 # —— 骨架阶段已启用 ——

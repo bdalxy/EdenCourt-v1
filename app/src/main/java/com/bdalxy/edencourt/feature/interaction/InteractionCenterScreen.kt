@@ -38,6 +38,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -480,7 +481,7 @@ private fun AutoDriveSection(
 ) {
     // 当前正在编辑的窗口字段（null=未编辑）；概率滑块本地状态（拖动只改本地，抬起才写 store，避免拖动卡顿）
     var editing by remember { mutableStateOf<WindowField?>(null) }
-    var prob by remember { mutableStateOf(autoConfig.probability) }
+    var prob by remember { mutableFloatStateOf(autoConfig.probability) }
     LaunchedEffect(autoConfig.probability) { prob = autoConfig.probability }
 
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {

@@ -57,6 +57,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -1089,8 +1090,8 @@ private fun LifeScheduleSheet(
     val baseCfg = CharacterSchedule.applyTrait(scheduleConfig, card?.scheduleTrait() ?: ScheduleTrait.NORMAL)
     // 会话级自定义作息（null=未单独设置）
     val convCfg = conv?.customSchedule
-    var wakeUp by remember { mutableStateOf(convCfg?.wakeUpMinute ?: baseCfg.wakeUpMinute) }
-    var sleep by remember { mutableStateOf(convCfg?.sleepMinute ?: baseCfg.sleepMinute) }
+    var wakeUp by remember { mutableIntStateOf(convCfg?.wakeUpMinute ?: baseCfg.wakeUpMinute) }
+    var sleep by remember { mutableIntStateOf(convCfg?.sleepMinute ?: baseCfg.sleepMinute) }
     val isCustom = convCfg != null
 
     ModalBottomSheet(onDismissRequest = onDismiss) {

@@ -11,11 +11,15 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.produceState
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
@@ -42,17 +46,17 @@ fun CharacterAvatar(
 ) {
     if (avatarPath != null) {
         // 异步加载头像图（小图 ≤256px，避免阻塞主线程）
-        val bitmap by produceState<androidx.compose.ui.graphics.ImageBitmap?>(
-            initialValue = null,
-            avatarPath,
-        ) {
-            value = withContext(Dispatchers.IO) { loadAvatarBitmap(avatarPath) }?.asImageBitmap()
+        // 用 remember + LaunchedEffect 而非 produceState：后者对带显式类型参数+位置 key 的
+        // 调用存在 ProduceStateDoesNotAssignValue 误报，等价写法规避 lint
+        var loaded by remember(avatarPath) { mutableStateOf<ImageBitmap?>(null) }
+        LaunchedEffect(avatarPath) {
+            loaded = withContext(Dispatchers.IO) { loadAvatarBitmap(avatarPath) }?.asImageBitmap()
         }
-        // 本地变量避免委托属性智能转换限制（Kotlin 委托属性无法 smart cast）
-        val loaded = bitmap
-        if (loaded != null) {
+        // 委托属性无法 smart cast，先取到本地变量再判空
+        val current = loaded
+        if (current != null) {
             Image(
-                bitmap = loaded,
+                bitmap = current,
                 contentDescription = name,
                 contentScale = ContentScale.Crop,
                 modifier = modifier.clip(CircleShape),
