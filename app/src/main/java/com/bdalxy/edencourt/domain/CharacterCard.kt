@@ -29,6 +29,11 @@ data class CharacterCard(
     val gender: String = "",
     /** 分类标签（可选） */
     val tags: List<String> = emptyList(),
+    /**
+     * 人设维度可选范围（T13.2 角色差异化/自补充方案）。key=fixed 6 维名（sociability/initiative/warmth/attachment/humor/casualness）。
+     * 数据党精确填；感觉党/中间党由 LLM 读卡生成（建卡时存卡上，见 TraitRangeResolver）；不填 = 让 LLM/启发式兜底。
+     */ 
+    val traitsRange: Map<String, TraitRange>? = null,
 ) {
     /**
      * 必填校验（企划书 3.4.1）：name/personality 均非空才算合法角色卡。
@@ -48,3 +53,27 @@ data class ExampleDialogue(
     /** 助手（角色）发言 */
     val assistant: String = "",
 )
+
+/**
+ * 人设维度范围（T13.2 角色差异化/自补充方案）。
+ * 存卡上 traitsRange 的单个维度取值：min..max 区间内由 TraitsGenerator 随即落点生成会话级数值。
+ * - 数据党：精确填 min/max；
+ * - 感觉党：LLM 读卡输出（带 confidence 表示该范围可靠度，越低越倾向降级兜底）；
+ * attention：min>max 或越界由 [clamped] 归一化到 0..100。
+ */
+@Serializable
+data class TraitRange(
+    /** 维度取值下界（0~100） */
+    val min: Int = 50,
+    /** 维度取值上界（0~100） */
+    val max: Int = 50,
+    /** 可靠度（感觉党 LLM 输出用；数据党不填默认 1.0=完全可信） */
+    val confidence: Double = 1.0,
+) {
+    /** 归一化到 0..100 且保证 min<=max 的合法范围 */
+    fun clamped(): IntRange {
+        val lo = min.coerceIn(0, 100)
+        val hi = max.coerceAtLeast(lo).coerceIn(lo, 100)
+        return lo..hi
+    }
+}
