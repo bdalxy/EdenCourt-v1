@@ -1,5 +1,6 @@
 package com.bdalxy.edencourt.domain
 
+import com.bdalxy.edencourt.data.local.entity.ConversationTraits
 import com.bdalxy.edencourt.data.local.entity.Message
 import com.bdalxy.edencourt.data.local.entity.Role
 import com.bdalxy.edencourt.data.local.entity.UserIdentity
@@ -60,6 +61,55 @@ object PromptBuilder {
     }
 
     /**
+     * 构建「会话独有人格」注入片段（T13.5 角色差异化/自补充方案）。
+     * 让每个会话角色在对话中表现「这一份」独有的偏好与人设差异，同一张卡的不同会话角色因此言行有区别：
+     * ① 印象摘要（identityBlurb）——第三人称概括，强化角色自我认同与可区分特征；
+     * ② 表面特质（平时）→ 依恋度 ≥ 阈值时流露隐藏特质（反差对，§9-A 数值联动优先）；
+     * ③ 自补充引导——未知偏好按性格推断并自述，沉淀记忆保持一致（T13.7 闭环入口）。
+     * @param traits 会话独有人格记录；null（默认助手/老会话无 traits）返回空串，不改变既有 prompt
+     * @param attachmentThreshold 反差触发阈值（依恋度 ≥ 此值允许流露隐藏特质，默认 65）
+     * @return 注入片段文本（为空则不注入，完全兼容旧行为）
+     */
+    fun buildTraitsPrompt(
+        traits: ConversationTraits?,
+        attachmentThreshold: Int = DEFAULT_ATTACHMENT_THRESHOLD,
+    ): String {
+        if (traits == null) return ""
+        return buildString {
+            append("【你的独有气质】\n")
+            // ① 印象摘要：强化角色此刻的自我认知与可区分特征
+            if (traits.identityBlurb.isNotBlank()) {
+                append("别人眼中的你：").append(traits.identityBlurb).append("\n")
+            }
+            // ② 反差对：表面特质平时外显；依恋度达标时允许流露隐藏特质
+            if (traits.contrastSurface.isNotBlank()) {
+                append("你平时给人的感觉是").append(traits.contrastSurface).append("。")
+                if (traits.contrastInner.isNotBlank()) {
+                    if (traits.attachment >= attachmentThreshold) {
+                        // 依恋度关键技术：关系亲近时，才在特定情境流露反差面（§9-A 数值联动优先）
+                        append("但你们已经很亲近，当")
+                            .append(traits.contrastTrigger.ifBlank { "某些情境" })
+                            .append("时，你会自然流露出不一样的自己：")
+                            .append(traits.contrastInner)
+                            .append("。")
+                    } else {
+                        // 未达阈值：仅在内心，克制不外露（反差尚未浮现）
+                        append("但内心深处你其实").append(traits.contrastInner).append("，只是现在还不完全展露。")
+                    }
+                }
+                append("\n")
+            }
+            // ③ 自补充引导：未知偏好按性格合理推断并自述，沉淀的记忆保持一致（T13.7）
+            append("对用户没有提到过的你的个人偏好（如喜欢的音乐、食物、生活方式），")
+                .append("请按你的性格合情合理地自我设定，并在对话中自然地表明；")
+                .append("一旦你定了说法，后续就一直保持一致，不要前后矛盾。")
+        }.trim()
+    }
+
+    /** 反差触发阈值默认值（依恋度 ≥ 此值允许流露隐藏特质，对应 6 维 attachment，T13.5） */
+    const val DEFAULT_ATTACHMENT_THRESHOLD = 65
+
+    /**
      * 构建「用户自设身份」注入片段（T8.13）。
      * 所有角色默认知道用户身份：统一的称呼/名字/自设描述，随角色卡 persona 注入，保证全角色统一称呼用户。
      * @param identity 用户自设身份（唯一一条，id=1）
@@ -86,6 +136,7 @@ object PromptBuilder {
      * @param relationshipEventsText 共同经历事件注入片段（T11.13：本会话与其他会话角色共同经历过的事，
      *   让对话有「我们经历过」的连续性；为空则不注入）
      * @param watchModeText 陪看模式注入片段（T11.16：用户主动分享内容时，角色以陪看口吻回应；为空则不注入）
+     * @param traitsPrompt 会话独有人格注入片段（T13.5：印象摘要+反差对+自补充引导；为空则不注入）
      */
     fun build(
         history: List<Message>,
@@ -97,6 +148,7 @@ object PromptBuilder {
         lifeStateText: String = "",
         relationshipEventsText: String = "",
         watchModeText: String = "",
+        traitsPrompt: String = "",
     ): List<ChatMessage> {
         // 1. system 消息（角色卡或默认助手）+ 当前时间注入（T6.11）+ 长期记忆（T5.4）+ 攒批提示（T6.9）
         val finalSystem = buildString {
@@ -114,6 +166,10 @@ object PromptBuilder {
             // T11.16：注入陪看模式——用户主动分享内容时，角色以陪看口吻回应（讨论/吐槽/猜后续）
             if (watchModeText.isNotBlank()) {
                 append("\n\n").append(watchModeText)
+            }
+            // T13.5：注入会话独有人格——印象摘要+反差对+自补充引导（角色差异化）
+            if (traitsPrompt.isNotBlank()) {
+                append("\n\n").append(traitsPrompt)
             }
             if (longTermMemories.isNotBlank()) {
                 append("\n\n").append(longTermMemories)

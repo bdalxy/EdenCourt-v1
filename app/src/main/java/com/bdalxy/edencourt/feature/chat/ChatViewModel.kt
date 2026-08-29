@@ -10,6 +10,7 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.bdalxy.edencourt.EdenCourtApp
 import com.bdalxy.edencourt.data.local.dao.CharacterCardDao
+import com.bdalxy.edencourt.data.local.dao.ConversationTraitsDao
 import com.bdalxy.edencourt.data.local.dao.InteractionDao
 import com.bdalxy.edencourt.data.local.dao.RelationshipDao
 import com.bdalxy.edencourt.data.local.dao.UserIdentityDao
@@ -111,6 +112,7 @@ class ChatViewModel(
     private val userIdentityDao: UserIdentityDao,
     private val scheduleConfigStore: ScheduleConfigStore,
     private val replyCursorStore: ReplyCursorStore,
+    private val conversationTraitsDao: ConversationTraitsDao,
 ) : ViewModel() {
 
     /** 该会话的消息流（按创建时间正序，数据库变化自动刷新） */
@@ -765,7 +767,19 @@ class ChatViewModel(
             relationshipEventsText = buildRelationshipEventFragment(),
             // T11.16：注入「陪看模式」——用户正在分享内容，角色以陪看口吻回应（未触发则为空）
             watchModeText = watchTogether.injectionText(),
+            // T13.5：注入「会话独有人格」——同一张卡的不同会话角色言行差异化（老会话无 traits 为空，兼容旧行为）
+            traitsPrompt = buildTraitsFragment(),
         )
+    }
+
+    /**
+     * T13.5：读取本会话的「独有人格」并生成注入片段（印象摘要 + 反差对 + 自补充引导）。
+     * 无 traits（默认助手/老会话）返回空串，不改变既有 prompt；依恋度阈值触发反差由 PromptBuilder 按
+     * 本会话 attachment 数值判断（老家话 attachment=0 < 阈值 65，即反差不外露，与旧行为一致）。
+     */
+    private suspend fun buildTraitsFragment(): String {
+        val traits = conversationTraitsDao.getByConversation(conversationId) ?: return ""
+        return PromptBuilder.buildTraitsPrompt(traits)
     }
 
     /**
@@ -890,6 +904,7 @@ class ChatViewModel(
                         userIdentityDao = app.userIdentityDao,
                         scheduleConfigStore = app.scheduleConfigStore,
                         replyCursorStore = app.replyCursorStore,
+                        conversationTraitsDao = app.conversationTraitsDao,
                     )
                 }
             }
