@@ -4,6 +4,7 @@ import android.app.Application
 import com.bdalxy.edencourt.data.local.AppDatabase
 import com.bdalxy.edencourt.data.local.dao.CharacterCardDao
 import com.bdalxy.edencourt.data.local.dao.ConversationDao
+import com.bdalxy.edencourt.data.local.dao.ConversationTraitsDao
 import com.bdalxy.edencourt.data.local.dao.InteractionDao
 import com.bdalxy.edencourt.data.local.dao.MemoryDao
 import com.bdalxy.edencourt.data.local.dao.MemorySearchDao
@@ -28,6 +29,9 @@ import com.bdalxy.edencourt.data.setting.InteractionConfigStore
 import com.bdalxy.edencourt.data.setting.OnboardingConfigStore
 import com.bdalxy.edencourt.data.setting.ReplyCursorStore
 import com.bdalxy.edencourt.data.setting.ScheduleConfigStore
+import com.bdalxy.edencourt.data.traits.ConversationTraitsGenerator
+import com.bdalxy.edencourt.data.traits.RangeReader
+import com.bdalxy.edencourt.data.traits.TraitsSummaryGenerator
 import com.bdalxy.edencourt.domain.BuiltInCards
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -94,6 +98,19 @@ class EdenCourtApp : Application() {
     /** AI 对话服务单例：OkHttp 流式实现（T3.5 起供 ChatViewModel 使用） */
     val aiChatService: RemoteApiChatService by lazy {
         RemoteApiChatService(RemoteApiChatService.defaultClient())
+    }
+
+    /** 会话角色「独有人格」表数据访问单例（T13.1 角色差异化底座） */
+    val conversationTraitsDao: ConversationTraitsDao by lazy {
+        AppDatabase.getInstance(this).conversationTraitsDao()
+    }
+
+    /** 会话角色人格生成统筹器单例（T13.4 建会话时生成印象摘要等，T13.2/T13.3 串联） */
+    val conversationTraitsGenerator: ConversationTraitsGenerator by lazy {
+        ConversationTraitsGenerator(
+            rangeReader = RangeReader(aiChatService, apiConfigStore),
+            summaryGenerator = TraitsSummaryGenerator(aiChatService, apiConfigStore),
+        )
     }
 
     /** 统一记忆检索服务单例（T9.3 起供管理页搜索 + 注入检索排序使用，覆盖 FTS + LIKE 兜底） */

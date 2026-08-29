@@ -8,11 +8,13 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.bdalxy.edencourt.EdenCourtApp
 import com.bdalxy.edencourt.data.local.dao.CharacterCardDao
+import com.bdalxy.edencourt.data.local.dao.ConversationTraitsDao
 import com.bdalxy.edencourt.data.local.entity.CharacterCardEntity
 import com.bdalxy.edencourt.data.local.entity.Conversation
 import com.bdalxy.edencourt.data.repository.ChatRepository
 import com.bdalxy.edencourt.data.setting.ScheduleConfig
 import com.bdalxy.edencourt.data.setting.ScheduleConfigStore
+import com.bdalxy.edencourt.data.traits.ConversationTraitsGenerator
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -31,6 +33,8 @@ class ConversationListViewModel(
     private val repository: ChatRepository,
     private val characterCardDao: CharacterCardDao,
     private val scheduleConfigStore: ScheduleConfigStore,
+    private val conversationTraitsDao: ConversationTraitsDao,
+    private val conversationTraitsGenerator: ConversationTraitsGenerator,
 ) : ViewModel() {
 
     /** 会话列表 UI 状态（按更新时间降序，数据库自动维护） */
@@ -81,13 +85,34 @@ class ConversationListViewModel(
 
     /**
      * 新建会话（T4.7：绑定角色卡）。
-     * @param cardId 绑定的角色卡 id；null = 默认助手
+     * 卡片会话建会话后后台生成「独有人格」（6 维数值 + 反差对 + 印象摘要，T13.4）：生成不阻塞跳转，
+     * LLM 调用失败自动走启发式/模板降级，任何异常都不影响会话建立。
+     * @param cardId 绑定的角色卡 id；null = 默认助手（不生成人格）
      * @param onCreated 回调新会话 id 供跳转聊天页
      */
     fun createConversation(cardId: Long?, onCreated: (Long) -> Unit) {
         viewModelScope.launch {
             val id = repository.createConversation(characterCardId = cardId)
+            if (cardId != null) {
+                generateTraits(id, cardId)
+            }
             onCreated(id)
+        }
+    }
+
+    /** 生成并落库该会话的独有人格（卡片会话专用；任何失败静默降级，不阻断建会话） */
+    private suspend fun generateTraits(conversationId: Long, cardId: Long) {
+        runCatching {
+            val card = characterCardDao.getById(cardId) ?: return
+            val traits = conversationTraitsGenerator.generateForConversation(
+                conversationId = conversationId,
+                characterCardId = cardId,
+                cardJson = card.jsonContent,
+            )
+            conversationTraitsDao.upsert(traits)
+        }.onFailure { e ->
+            // 生成失败不阻塞建会话；LLM 未配置/网络异常属预期降级路径
+            android.util.Log.w("TraitsGen", "会话($conversationId)人格生成失败，将无差异标识：${e.message}")
         }
     }
 
@@ -127,6 +152,8 @@ class ConversationListViewModel(
                     repository = app.chatRepository,
                     characterCardDao = app.characterCardDao,
                     scheduleConfigStore = app.scheduleConfigStore,
+                    conversationTraitsDao = app.conversationTraitsDao,
+                    conversationTraitsGenerator = app.conversationTraitsGenerator,
                 )
             }
         }
