@@ -32,11 +32,13 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.HorizontalDivider
@@ -90,6 +92,7 @@ import com.bdalxy.edencourt.data.local.entity.Role
 import com.bdalxy.edencourt.data.remote.ApiErrorKind
 import com.bdalxy.edencourt.data.setting.ScheduleConfig
 import kotlinx.coroutines.delay
+import kotlinx.serialization.json.contentOrNull
 import java.time.Instant
 import java.util.Locale
 import java.time.LocalTime
@@ -132,6 +135,8 @@ fun ChatScreen(
     val conversation by viewModel.conversation.collectAsStateWithLifecycle()
     // v1.2b T8.11：顶部「互动」图标未读红点
     val unreadInteractions by viewModel.unreadInteractions.collectAsStateWithLifecycle()
+    // T13.6：本会话「独有人格」（印象摘要 + 反差 + 编辑入口）
+    val traits by viewModel.traits.collectAsStateWithLifecycle()
 
     // v1.2b T8.11：进入会话即把本会话互动标记已读，消除顶部红点
     LaunchedEffect(conversationId) {
@@ -140,6 +145,8 @@ fun ChatScreen(
 
     // T11.10 深化：聊天页顶部作息面板（开启该会话角色作息 + 单独调节起床/入睡）
     var showLifeSheet by rememberSaveable { mutableStateOf(false) }
+    // T13.6：印象摘要编辑对话框（点击顶部「独有印象」弹出，用户可改摘要/标签）
+    var showTraitsEdit by rememberSaveable { mutableStateOf(false) }
 
     // 输入框内容状态（旋转/重建后保留）
     var input by rememberSaveable { mutableStateOf("") }
@@ -232,6 +239,33 @@ fun ChatScreen(
                                     modifier = Modifier
                                         .padding(start = 40.dp)
                                         .clickable { showLifeSheet = true },
+                                )
+                            }
+                        }
+                        // T13.6：会话「独有印象」——顶部显示本会话特有的印象摘要（同一张卡不同会话一眼区分）
+                        // 点击弹编辑对话框：用户可改摘要/标签（generatedBy→'user'，LLM 后续不再覆盖）
+                        val currentTraits = traits
+                        if (currentTraits?.identityBlurb?.isNotBlank() == true) {
+                            Row(
+                                modifier = Modifier
+                                    .padding(start = 40.dp, top = 2.dp)
+                                    .clickable { showTraitsEdit = true },
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    text = currentTraits.identityBlurb,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.secondary,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f, fill = false),
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Icon(
+                                    Icons.Filled.Edit,
+                                    contentDescription = "编辑印象",
+                                    modifier = Modifier.size(12.dp),
+                                    tint = MaterialTheme.colorScheme.secondary,
                                 )
                             }
                         }
@@ -346,6 +380,79 @@ fun ChatScreen(
             onDismiss = { showLifeSheet = false },
         )
     }
+    // T13.6：印象摘要编辑对话框（点击顶部「独有印象」弹出）
+    if (showTraitsEdit) {
+        TraitsEditDialog(
+            initialBlurb = traits?.identityBlurb.orEmpty(),
+            initialTags = traits?.identityTags?.let(::parseTagsJson).orEmpty().joinToString("、"),
+            onConfirm = { blurb, tags ->
+                viewModel.saveTraitsIdentity(blurb, tags)
+                showTraitsEdit = false
+            },
+            onDismiss = { showTraitsEdit = false },
+        )
+    }
+}
+
+/** 解析 tags JSON 数组为标签列表（T13.6，供聊天页编辑对话框预填） */
+private fun parseTagsJson(tagsJson: String): List<String> {
+    return runCatching {
+        kotlinx.serialization.json.Json.parseToJsonElement(tagsJson)
+            .let { it as? kotlinx.serialization.json.JsonArray ?: return emptyList() }
+            .mapNotNull { (it as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull?.trim() }
+            .filter { it.isNotEmpty() }
+    }.getOrElse { emptyList() }
+}
+
+/**
+ * 印象摘要编辑对话框（T13.6 可视化区分）：用户可修改本会话角色的印象摘要 + 标签。
+ * 保存后 generatedBy='user'，后续 LLM 生成不会覆盖用户的定义（T13.4 生成器只写非 user 来源）。
+ */
+@Composable
+private fun TraitsEditDialog(
+    initialBlurb: String,
+    initialTags: String,
+    onConfirm: (blurb: String, tags: String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var blurb by remember { mutableStateOf(initialBlurb) }
+    var tags by remember { mutableStateOf(initialTags) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("编辑角色印象") },
+        text = {
+            Column {
+                OutlinedTextField(
+                    value = blurb,
+                    onValueChange = { blurb = it },
+                    label = { Text("印象摘要（别人眼中的 TA）") },
+                    minLines = 2,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = tags,
+                    onValueChange = { tags = it },
+                    label = { Text("标签（用顿号或逗号分隔，最多 3 个）") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onConfirm(blurb, tags) },
+                enabled = blurb.isNotBlank(),
+            ) {
+                Text("保存")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("取消")
+            }
+        },
+    )
 }
 
 /** 单条消息气泡：AI 靠左、用户靠右，带头像（AI）与时间戳；失败消息带错误提示与重试 */

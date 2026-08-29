@@ -61,10 +61,12 @@ import com.bdalxy.edencourt.core.ui.CharacterAvatar
 import com.bdalxy.edencourt.core.ui.LifeStateIndicator
 import com.bdalxy.edencourt.data.local.entity.CharacterCardEntity
 import com.bdalxy.edencourt.data.local.entity.Conversation
+import com.bdalxy.edencourt.data.local.entity.ConversationTraits
 import com.bdalxy.edencourt.data.schedule.CharacterSchedule
 import com.bdalxy.edencourt.data.schedule.LifeState
 import com.bdalxy.edencourt.data.setting.ScheduleConfig
 import kotlinx.coroutines.delay
+import kotlinx.serialization.json.contentOrNull
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalTime
@@ -98,6 +100,8 @@ fun ConversationListScreen(
     val scheduleConfig by viewModel.scheduleConfig.collectAsStateWithLifecycle()
     // T11.10 深化：全局开关（两级开关第一级：关闭则不显示任何状态）
     val scheduleEnabled by viewModel.scheduleEnabled.collectAsStateWithLifecycle()
+    // T13.6：各会话「独有人格」标签（同一张卡的不同会话一眼区分）
+    val traitsByConversation by viewModel.traitsByConversation.collectAsStateWithLifecycle()
 
     var menuExpanded by remember { mutableStateOf(false) }
     var pendingDelete by remember { mutableStateOf<Conversation?>(null) }
@@ -192,6 +196,8 @@ fun ConversationListScreen(
                     ConversationListItem(
                         conversation = conversation,
                         card = card,
+                        // T13.6：该会话的「独有人格」（印象标签行；无则 null 不显示，兼容老会话）
+                        traits = traitsByConversation[conversation.id],
                         // T11.10 深化：两级开关（全局 && 会话）都开启才显示「此刻状态」；
                         // 生效作息按 resolveConfig 会话级解析（会话自定义 > 角色自定义 > 个性偏移 > 基础）
                         lifeState = if (scheduleEnabled && conversation.lifeEnabled && conversation.characterCardId != null) {
@@ -361,6 +367,7 @@ fun ConversationListScreen(
 private fun ConversationListItem(
     conversation: Conversation,
     card: CharacterCardEntity?,
+    traits: ConversationTraits?,
     lifeState: LifeState?,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
@@ -417,6 +424,30 @@ private fun ConversationListItem(
                 LifeStateIndicator(state = lifeState)
                 Spacer(modifier = Modifier.height(2.dp))
             }
+            // T13.6：会话「独有人格」标签行（同一张卡不同会话一眼区分；无则跳过）
+            val traitTags = traits?.identityTags?.let(::parseTagsJson).orEmpty()
+            if (traitTags.isNotEmpty()) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    traitTags.take(2).forEach { tag ->
+                        Surface(
+                            color = MaterialTheme.colorScheme.secondaryContainer,
+                            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                            shape = MaterialTheme.shapes.small,
+                        ) {
+                            Text(
+                                text = tag,
+                                style = MaterialTheme.typography.labelSmall,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                maxLines = 1,
+                            )
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(2.dp))
+            }
             Text(
                 text = conversation.lastMessagePreview.ifEmpty { "暂无消息" },
                 style = MaterialTheme.typography.bodyMedium,
@@ -461,6 +492,16 @@ private fun RemarkEditDialog(
             }
         },
     )
+}
+
+/** 解析 tags JSON 数组（如 `["温柔","要强"]`）为标签列表；非数组/失败返回空（T13.6） */
+private fun parseTagsJson(tagsJson: String): List<String> {
+    return runCatching {
+        kotlinx.serialization.json.Json.parseToJsonElement(tagsJson)
+            .let { it as? kotlinx.serialization.json.JsonArray ?: return emptyList() }
+            .mapNotNull { (it as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull?.trim() }
+            .filter { it.isNotEmpty() }
+    }.getOrElse { emptyList() }
 }
 
 /** 时间显示规则：当天只显 HH:mm；昨天显「昨天」；更早显日期 */

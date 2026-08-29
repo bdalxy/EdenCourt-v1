@@ -27,6 +27,7 @@ import com.bdalxy.edencourt.data.remote.ApiErrorKind
 import com.bdalxy.edencourt.data.remote.StreamPolicy
 import com.bdalxy.edencourt.data.remote.ApiException
 import com.bdalxy.edencourt.data.local.entity.Conversation
+import com.bdalxy.edencourt.data.local.entity.ConversationTraits
 import com.bdalxy.edencourt.data.remote.ChatMessage
 import com.bdalxy.edencourt.data.schedule.CharacterSchedule
 import com.bdalxy.edencourt.data.schedule.LifeState
@@ -218,6 +219,14 @@ class ChatViewModel(
 
     /** 本会话实体（T11.10 深化：聊天页顶部作息面板读取会话级开关/自定义作息） */
     val conversation: StateFlow<Conversation?> = repository.observeConversation(conversationId)
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = null,
+        )
+
+    /** 本会话的「独有人格」（T13.6：聊天页显示印象摘要 + 反差入口；无则 null，兼容默认助手/老会话） */
+    val traits: StateFlow<ConversationTraits?> = conversationTraitsDao.observeByConversation(conversationId)
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5_000),
@@ -780,6 +789,32 @@ class ChatViewModel(
     private suspend fun buildTraitsFragment(): String {
         val traits = conversationTraitsDao.getByConversation(conversationId) ?: return ""
         return PromptBuilder.buildTraitsPrompt(traits)
+    }
+
+    /**
+     * T13.6：用户手动编辑本会话的印象摘要 + 标签（generatedBy→'user'）。
+     * 用户改后即落库为「用户定义」，后续 LLM 重新生成不会再覆盖（生成器只写非 user 来源，T13.4）。
+     * @param blurb 新的印象摘要；@param tags 新标签（逗号分隔的文本）
+     */
+    fun saveTraitsIdentity(blurb: String, tags: String) {
+        viewModelScope.launch {
+            runCatching {
+                // 标签归一为 JSON 数组（去空白/去重/限 3 个），保证与生成格式一致
+                val parsed = tags.split('，', ',').map { it.trim() }.filter { it.isNotEmpty() }.distinct().take(3)
+                val json = kotlinx.serialization.json.Json.encodeToString(
+                    kotlinx.serialization.json.JsonArray.serializer(),
+                    kotlinx.serialization.json.JsonArray(parsed.map { kotlinx.serialization.json.JsonPrimitive(it) }),
+                )
+                conversationTraitsDao.updateBlurbAndTags(
+                    conversationId = conversationId,
+                    blurb = blurb.trim(),
+                    tags = json,
+                    generatedBy = ConversationTraits.GENERATED_BY_USER,
+                )
+            }.onFailure { e ->
+                android.util.Log.w("TraitsEdit", "保存印象摘要失败：${e.message}")
+            }
+        }
     }
 
     /**

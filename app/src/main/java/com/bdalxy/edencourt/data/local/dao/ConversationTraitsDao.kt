@@ -26,6 +26,10 @@ interface ConversationTraitsDao {
     @Query("SELECT * FROM conversation_traits WHERE conversationId = :conversationId LIMIT 1")
     fun observeByConversation(conversationId: Long): Flow<ConversationTraits?>
 
+    /** 观察全部人格记录（会话列表一次性取所有会话的标签行，T13.6） */
+    @Query("SELECT * FROM conversation_traits")
+    fun observeAll(): Flow<List<ConversationTraits>>
+
     /** 更新印象摘要 + 标签 + 来源（LLM 生成 / 用户手动编辑，T13.4；用户改后 generatedBy='user' 不被覆盖） */
     @Query(
         "UPDATE conversation_traits SET identityBlurb = :blurb, identityTags = :tags, " +

@@ -20,6 +20,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -81,6 +82,16 @@ class ConversationListViewModel(
                 scope = viewModelScope,
                 started = SharingStarted.WhileSubscribed(5_000),
                 initialValue = emptyList(),
+            )
+
+    /** 各会话的「独有人格」标签（T13.6 会话列表标签行：同一张卡的不同会话一眼区分） */
+    val traitsByConversation: StateFlow<Map<Long, com.bdalxy.edencourt.data.local.entity.ConversationTraits>> =
+        conversationTraitsDao.observeAll()
+            .map { list -> list.associateBy { it.conversationId } }
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(5_000),
+                initialValue = emptyMap(),
             )
 
     /**
