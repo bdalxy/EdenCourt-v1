@@ -62,4 +62,19 @@ class PromptBuilderTest {
         assertFalse("未达标不应说已很亲近", text.contains("你们已经很亲近"))
         assertFalse("未达标不应说很自然流露", text.contains("自然流露出不一样的自己"))
     }
+
+    @Test
+    fun `依恋度恰好等于阈值65_判定达标_流露反差`() {
+        val text = PromptBuilder.buildTraitsPrompt(traitsWith(PromptBuilder.DEFAULT_ATTACHMENT_THRESHOLD))
+        assertTrue("边界65应判定达标", text.contains("自然流露出不一样的自己"))
+        assertTrue("应包含隐藏特质内容", text.contains("很要强"))
+    }
+
+    @Test
+    fun `依恋度64_低于阈值_反差仅隐藏`() {
+        val text = PromptBuilder.buildTraitsPrompt(traitsWith(PromptBuilder.DEFAULT_ATTACHMENT_THRESHOLD - 1))
+        assertTrue("64应判定未达标", text.contains("内心深处"))
+        assertFalse("64不应说已很亲近", text.contains("你们已经很亲近"))
+        assertFalse("64不应自然流露", text.contains("自然流露出不一样的自己"))
+    }
 }
