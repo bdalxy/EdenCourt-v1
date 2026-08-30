@@ -120,6 +120,24 @@ class MemorySearchService(
     }
 
     /**
+     * 方案 F v2「触发增强」：从候选记忆里挑一条「适合主动提起」的记忆。
+     * 触发条件 = 当前用户消息 query 与某条记忆主题相关（该记忆关键词命中 ≥1）。
+     * 返回命中里相关性得分最高的一条（并列取最近更新）；query 为空 / 无命中返回 null（不触发主动引用）。
+     * 上层拿到非 null 后，在记忆注入片段里追加「你可以主动提起」引导，让角色自然带出记忆而非被动当背景。
+     * @return 命中记忆；无可主动提起的记忆返回 null
+     */
+    fun findProactiveReference(items: List<MemoryItem>, query: String?): MemoryItem? {
+        val q = query?.trim().orEmpty()
+        if (q.isEmpty()) return null
+        return items
+            .filter { relevanceScore(it, q) >= 1 }
+            .maxWithOrNull(
+                compareBy<MemoryItem> { relevanceScore(it, q) }
+                    .thenBy { it.updatedAt },
+            )
+    }
+
+    /**
      * 方案 F v1：计算某条记忆与当前对话 query 的「相关性得分」（0~2）。
      * 判定方向反着来：取记忆自身的关键词（AI 提取时落库的核心词，如「热奶茶/小夏/买」），
      * 看其中有多少个「较长词（≥2 字）」出现在当前用户消息整段里。

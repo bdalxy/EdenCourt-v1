@@ -196,6 +196,17 @@ class MemoryRepository(
     }
 
     /**
+     * 方案 F v2「触发增强」：从「可注入记忆」里挑一条与当前用户消息主题相关的记忆，
+     * 供上层追加「你可以主动提起」引导——让角色自然带出记忆（而非只被动当背景知识），强化「它记得我」。
+     * @return 命中的记忆；当前消息与任何记忆都无关（或 query 为空）返回 null，不触发主动引用
+     */
+    suspend fun findProactiveReference(cardId: Long, conversationId: Long, query: String?): MemoryItem? {
+        if (query.isNullOrBlank()) return null
+        val injectable = getInjectableMemories(cardId, conversationId, query = query)
+        return searchService.findProactiveReference(injectable, query)
+    }
+
+    /**
      * 定位打听目标会话 B（v1.2 跨会话打听，T8.1）。
      * 按打听主题拆词、检索各会话的记忆概况，返回「可能知道该话题」的候选会话 id 列表。
      * @param terms 打听主题拆词（用户输入按逗号/空格拆分）

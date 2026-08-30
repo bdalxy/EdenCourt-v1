@@ -892,6 +892,15 @@ class ChatViewModel(
             memories.forEach { m ->
                 append("- ").append(m.content).append("\n")
             }
+            // 方案 F v2「触发增强」：当前用户消息与某条记忆主题相关时，追加「主动提起」引导，
+            // 让角色自然带出记忆（而不只是被动当背景知识），强化「它记得我说过的 X」。
+            // 无关时返回 null，不注入引导、完全兼容旧行为。
+            val proactive = memoryRepository.findProactiveReference(cardId, conversationId, query)
+            if (proactive != null) {
+                append("\n【你可以主动提起】")
+                    .append(proactive.content)
+                    .append("。如果合适，自然地提起这件事，让对话更有连续性；不要生硬地背诵。")
+            }
         }.trim()
     }
 

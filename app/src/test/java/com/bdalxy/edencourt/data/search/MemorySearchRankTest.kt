@@ -6,6 +6,7 @@ import com.bdalxy.edencourt.data.local.entity.MemoryItem
 import com.bdalxy.edencourt.data.local.entity.MemoryType
 import io.mockk.mockk
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Test
 
 /**
@@ -115,5 +116,42 @@ class MemorySearchRankTest {
     fun `topK截断生效`() {
         val items = listOf(mem(1, "a"), mem(2, "b"), mem(3, "c"))
         assertEquals(2, service.rankByRelevance(items, topK = 2).size)
+    }
+
+    // ---- 方案 F v2：触发增强（findProactiveReference 主动引用时机）----
+
+    @Test
+    fun `触发增强_命中关键词返回该记忆`() {
+        val items = listOf(
+            mem(1, "小夏喜欢喝热奶茶", "热奶茶,小夏"),
+            mem(2, "小夏在图书馆看书", "图书馆,小夏"),
+        )
+        val hit = service.findProactiveReference(items, query = "你还记得我喜欢喝热奶茶吗")
+        assertEquals(1L, hit?.id)
+    }
+
+    @Test
+    fun `触发增强_多条命中取相关性最高且最近更新`() {
+        val items = listOf(
+            mem(1, "小夏买了奶茶", "奶茶,小夏", updatedAt = 100),
+            mem(2, "小夏在图书馆", "图书馆,小夏", updatedAt = 200),
+            mem(3, "小夏又买了杯奶茶", "奶茶,小夏,买", updatedAt = 300),
+        )
+        // query「奶茶好喝吗」：记忆1/3 均命中「奶茶」且得分相同 → 取最近更新(3)
+        val hit = service.findProactiveReference(items, query = "奶茶好喝吗")
+        assertEquals(3L, hit?.id)
+    }
+
+    @Test
+    fun `触发增强_query为空或空白_不触发返回null`() {
+        val items = listOf(mem(1, "小夏喜欢喝热奶茶", "热奶茶,小夏"))
+        assertNull(service.findProactiveReference(items, null))
+        assertNull(service.findProactiveReference(items, "   "))
+    }
+
+    @Test
+    fun `触发增强_无相关命中返回null`() {
+        val items = listOf(mem(1, "小夏喜欢喝热奶茶", "热奶茶,小夏"))
+        assertNull(service.findProactiveReference(items, "打车去火车站"))
     }
 }
