@@ -51,4 +51,26 @@ internal object MemoryConflictResolver {
 
         return byContent ?: byKeywords
     }
+
+    /**
+     * 显式覆盖定位（T6.13.2）：用户更正条目携带的 replace_content → 在既有记忆中定位被更正的目标。
+     *
+     * 匹配采用「完全相等 或 任一方包含另一方」的宽松规则，与既有内联逻辑逐字等价（T15.7 抽为纯函数以便单测固化）。
+     * 注意与 resolveConflict 的三点差异，调用方须保持原语义：
+     * 1. 不设最小长度阈值（replace 是用户明确指认，不按「宁可新增」保守）；
+     * 2. 不主动跳过已删除项——是否应用由调用方复核（!isDeleted），命中已删除视为放弃本次覆盖；
+     * 3. 仅返回第一条命中（firstOrNull），不涉及多证据优先级。
+     * @param existing      既有记忆（通常为当前角色卡范围）
+     * @param replaceContent 用户指认要被替换的旧内容（首个命中被覆盖）
+     * @return 命中的旧记忆；未命中返回 null
+     */
+    fun findReplaceTarget(
+        existing: List<MemoryItem>,
+        replaceContent: String,
+    ): MemoryItem? =
+        existing.firstOrNull {
+            it.content == replaceContent ||
+                replaceContent.contains(it.content) ||
+                it.content.contains(replaceContent)
+        }
 }

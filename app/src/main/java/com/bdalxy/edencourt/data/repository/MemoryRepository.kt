@@ -525,9 +525,8 @@ class MemoryRepository(
         // 0. 显式覆盖：用户更正的条目带了 replace_content → 找到对应旧记忆并改为新内容（T6.13.2 修「记忆还是紫色」）
         val replaceContent = item.replaceContent?.trim()
         if (!replaceContent.isNullOrBlank()) {
-            val target = existingMemories.firstOrNull {
-                it.content == replaceContent || replaceContent.contains(it.content) || it.content.contains(replaceContent)
-            }
+            // T15.7：定位逻辑抽为纯函数 MemoryConflictResolver.findReplaceTarget（与内联逐字等价，便于单测固化）
+            val target = MemoryConflictResolver.findReplaceTarget(existingMemories, replaceContent)
             if (target != null && !target.isDeleted) {
                 dao.update(
                     target.copy(

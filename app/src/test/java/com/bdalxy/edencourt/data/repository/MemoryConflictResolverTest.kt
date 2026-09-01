@@ -109,4 +109,49 @@ class MemoryConflictResolverTest {
     fun `空池_不判同事实_返回null`() {
         assertNull(MemoryConflictResolver.resolveConflict(emptyList(), content = "用户喜欢喝奶茶", keywords = "奶茶,喜欢"))
     }
+
+    // ---------- findReplaceTarget：replace_content 显式覆盖定位（T15.7，与 resolveConflict 语义不同） ----------
+
+    @Test
+    fun `replace_完全相等_命中旧记忆`() {
+        val old = mem(content = "用户喜欢喝奶茶", id = 1L)
+        assertEquals(1L, MemoryConflictResolver.findReplaceTarget(listOf(old), "用户喜欢喝奶茶")?.id)
+    }
+
+    @Test
+    fun `replace_新内容包含旧内容_命中`() {
+        // 用户更正为更长描述（replace_content=旧短内容，新内容更长且包含旧内容）→ 宽松命中
+        val old = mem(content = "喜欢喝奶茶", id = 1L)
+        assertEquals(1L, MemoryConflictResolver.findReplaceTarget(listOf(old), "喜欢喝奶茶")?.id)
+    }
+
+    @Test
+    fun `replace_旧内容包含指认内容_命中`() {
+        // 指认内容更短，被旧内容包含 → 命中（replace 是用户明确指认，不等同于保守合并）
+        val old = mem(content = "用户喜欢喝奶茶并且每天一杯", id = 1L)
+        assertEquals(1L, MemoryConflictResolver.findReplaceTarget(listOf(old), "喝奶茶")?.id)
+    }
+
+    @Test
+    fun `replace_完全不相关_不命中_返回null`() {
+        val old = mem(content = "用户在图书馆安静地看书", id = 1L)
+        assertNull(MemoryConflictResolver.findReplaceTarget(listOf(old), "用户每天晨跑五公里"))
+    }
+
+    @Test
+    fun `replace_返回第一条命中`() {
+        // 多条匹配时只返回第一条（firstOrNull 语义），供调用方覆盖
+        val pool = listOf(
+            mem(content = "用户喜欢喝奶茶", id = 1L),
+            mem(content = "用户喜欢奶茶", id = 2L),
+        )
+        assertEquals(1L, MemoryConflictResolver.findReplaceTarget(pool, "奶茶")?.id)
+    }
+
+    @Test
+    fun `replace_命中已删除项_由调用方跳过_但函数本身仍返回该命中`() {
+        // findReplaceTarget 不主动过滤删除项（是否应用由调用方复核 !isDeleted）——本用例固化该边界
+        val deleted = mem(content = "用户喜欢喝奶茶", isDeleted = true, id = 1L)
+        assertEquals(1L, MemoryConflictResolver.findReplaceTarget(listOf(deleted), "用户喜欢喝奶茶")?.id)
+    }
 }
