@@ -4,7 +4,7 @@ import android.app.AlarmManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
-import android.util.Log
+import android.os.Build
 import com.bdalxy.edencourt.data.setting.DailyConsultConfig
 import com.bdalxy.edencourt.data.setting.DailyConsultConfigStore
 import java.time.ZonedDateTime
@@ -31,11 +31,13 @@ class DailyConsultScheduler(
         }
         val alarm = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
         val triggerAt = nextWindowStartMillis(cfg.windowStartMinute)
-        runCatching {
-            alarm.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pendingIntent(context))
-        }.onFailure { e ->
-            Log.w(TAG, "精确闹钟不可用，退回非精确：${e.message}")
-            alarm.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pendingIntent(context))
+        val pi = pendingIntent(context)
+        // lint 修复：显式判断精确闹钟是否可用（Android 12+ 需 SCHEDULE_EXACT_ALARM），
+        // 未授权退回非精确；行为与原 runCatching 兜底一致，但静态可识别、不依赖抛异常。
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !alarm.canScheduleExactAlarms()) {
+            alarm.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pi)
+        } else {
+            alarm.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pi)
         }
     }
 
@@ -77,6 +79,5 @@ class DailyConsultScheduler(
 
     private companion object {
         const val REQUEST_CODE = 0xDCA1
-        const val TAG = "DailyConsultScheduler"
     }
 }

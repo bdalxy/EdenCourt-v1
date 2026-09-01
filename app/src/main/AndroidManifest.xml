@@ -1,12 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- v1.2 P2（T8.5）：设备重启后重排每日打听闹钟 -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <!-- 精确闹钟（T8.5 每日打听 / T11.7 互动自动驱动）：Android 12+ 需声明；
-         未被系统授权时 setExactAndAllowWhileIdle 抛异常，调度器已 runCatching 兜底退回非精确（不崩溃） -->
-    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+         未被系统授权时退回非精确（canScheduleExactAlarms 判断，不崩溃）。
+         tools:ignore=ProtectedPermissions：SCHEDULE_EXACT_ALARM 在 Android 12+ 为用户可授权权限，
+         lint 列为系统权限属已知误报 -->
+    <uses-permission
+        android:name="android.permission.SCHEDULE_EXACT_ALARM"
+        tools:ignore="ProtectedPermissions" />
 
     <application
         android:name=".EdenCourtApp"
