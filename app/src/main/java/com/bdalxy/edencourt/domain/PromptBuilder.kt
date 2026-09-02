@@ -137,6 +137,9 @@ object PromptBuilder {
      *   让对话有「我们经历过」的连续性；为空则不注入）
      * @param watchModeText 陪看模式注入片段（T11.16：用户主动分享内容时，角色以陪看口吻回应；为空则不注入）
      * @param traitsPrompt 会话独有人格注入片段（T13.5：印象摘要+反差对+自补充引导；为空则不注入）
+     * @param affinityText 用户↔角色亲密度注入片段（A1：角色按亲疏自然调整口吻；为空则不注入）
+     * @param moodText 角色此刻情绪注入片段（A2：自主/交互双源合成，反哺语气；为空则不注入）
+     * @param worldInfoText 世界书背景设定注入片段（A3：聊到相关关键词才注入对应条目；为空则不注入）
      */
     fun build(
         history: List<Message>,
@@ -149,6 +152,9 @@ object PromptBuilder {
         relationshipEventsText: String = "",
         watchModeText: String = "",
         traitsPrompt: String = "",
+        affinityText: String = "",
+        moodText: String = "",
+        worldInfoText: String = "",
     ): List<ChatMessage> {
         // 1. system 消息（角色卡或默认助手）+ 当前时间注入（T6.11）+ 长期记忆（T5.4）+ 攒批提示（T6.9）
         val finalSystem = buildString {
@@ -170,6 +176,18 @@ object PromptBuilder {
             // T13.5：注入会话独有人格——印象摘要+反差对+自补充引导（角色差异化）
             if (traitsPrompt.isNotBlank()) {
                 append("\n\n").append(traitsPrompt)
+            }
+            // A1：注入用户↔角色亲密度——角色按与用户的亲疏自然调整口吻（越亲近越自然）
+            if (affinityText.isNotBlank()) {
+                append("\n\n").append(affinityText)
+            }
+            // A2：注入角色此刻情绪——自主/交互双源合成，反哺语气（为空则不注入）
+            if (moodText.isNotBlank()) {
+                append("\n\n").append(moodText)
+            }
+            // A3：注入世界书背景设定——聊到相关关键词才注入对应条目（为空则不注入）
+            if (worldInfoText.isNotBlank()) {
+                append("\n\n").append(worldInfoText)
             }
             if (longTermMemories.isNotBlank()) {
                 append("\n\n").append(longTermMemories)

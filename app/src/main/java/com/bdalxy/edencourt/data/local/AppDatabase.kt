@@ -12,11 +12,14 @@ import com.bdalxy.edencourt.data.local.dao.ConversationTraitsDao
 import com.bdalxy.edencourt.data.local.dao.MemoryDao
 import com.bdalxy.edencourt.data.local.dao.MemorySearchDao
 import com.bdalxy.edencourt.data.local.dao.MessageDao
+import com.bdalxy.edencourt.data.local.dao.MoodDao
 import com.bdalxy.edencourt.data.local.dao.RelationshipDao
 import com.bdalxy.edencourt.data.local.dao.InteractionDao
 import com.bdalxy.edencourt.data.local.dao.UserIdentityDao
+import com.bdalxy.edencourt.data.local.dao.WorldInfoDao
 import com.bdalxy.edencourt.data.local.entity.CharacterCardEntity
 import com.bdalxy.edencourt.data.local.entity.Conversation
+import com.bdalxy.edencourt.data.local.entity.ConversationMood
 import com.bdalxy.edencourt.data.local.entity.ConversationRelationship
 import com.bdalxy.edencourt.data.local.entity.ConversationTraits
 import com.bdalxy.edencourt.data.local.entity.Interaction
@@ -26,16 +29,18 @@ import com.bdalxy.edencourt.data.local.entity.MemoryItem
 import com.bdalxy.edencourt.data.local.entity.Message
 import com.bdalxy.edencourt.data.local.entity.RelationshipEvent
 import com.bdalxy.edencourt.data.local.entity.UserIdentity
+import com.bdalxy.edencourt.data.local.entity.WorldInfoBook
+import com.bdalxy.edencourt.data.local.entity.WorldInfoEntry
 
 /**
  * 本地数据库单例（企划书 3.3.2 / T2.4）。
  * - 挂载：Conversation、Message、CharacterCardEntity、MemoryItem 四个实体与对应 DAO
- * - version=20：v5→v6 character_cards 加 avatar；v6→v7 memory_items 加 characterCardId；v7→v8 character_cards/conversations 加 remark（T6.14）；v8→v9 memory_items 加 visibility（共享/私有，T7.1）；v9→v10 character_cards/conversations 加 code（会话唯一身份，T8.0）；v10→v11 memory_items 加 isTopSecret（绝密兜底，T8.2）；v11→v12 conversations 加 interactionEnabled（互动资格开关，T8.7）；v12→v13 新增 conv_relationship 关系表（互动关系底座，T8.8）；v13→v14 新增 interaction/interaction_participant/interaction_turn 三层互动表（T8.10）；v14→v15 新增 user_identity 用户自设身份表（T8.13）；v15→v16 memory_items 补多类型管理字段；v16→v17 新增 FTS4 记忆检索虚拟表；v17→v18 interaction 加 source 列；v18→v19 character_cards 加自定义作息 6 列；v19→v20 conversations 加会话作息 3 列（lifeEnabled+起床/入睡，T11.10 深化：每个会话角色单独调整）；v20→v21 interaction 加 motive 列（T11.12 事件驱动）；v21→v22 新增 relationship_event 关系事件表（T11.13 关系事件叙事）；v22→v23 relationship_event 加 type 列；v23→v24 relationship_event convBId 改可空列；v24→v25 新增 conversation_traits 会话独有人格表（T13.1 角色差异化）
+ * - version=28：v5→v6 character_cards 加 avatar；v6→v7 memory_items 加 characterCardId；v7→v8 character_cards/conversations 加 remark（T6.14）；v8→v9 memory_items 加 visibility（共享/私有，T7.1）；v9→v10 character_cards/conversations 加 code（会话唯一身份，T8.0）；v10→v11 memory_items 加 isTopSecret（绝密兜底，T8.2）；v11→v12 conversations 加 interactionEnabled（互动资格开关，T8.7）；v12→v13 新增 conv_relationship 关系表（互动关系底座，T8.8）；v13→v14 新增 interaction/interaction_participant/interaction_turn 三层互动表（T8.10）；v14→v15 新增 user_identity 用户自设身份表（T8.13）；v15→v16 memory_items 补多类型管理字段；v16→v17 新增 FTS4 记忆检索虚拟表；v17→v18 interaction 加 source 列；v18→v19 character_cards 加自定义作息 6 列；v19→v20 conversations 加会话作息 3 列（lifeEnabled+起床/入睡，T11.10 深化：每个会话角色单独调整）；v20→v21 interaction 加 motive 列（T11.12 事件驱动）；v21→v22 新增 relationship_event 关系事件表（T11.13 关系事件叙事）；v22→v23 relationship_event 加 type 列；v23→v24 relationship_event convBId 改可空列；v24→v25 新增 conversation_traits 会话独有人格表（T13.1 角色差异化）；v25→v26 conversations 加 affinityScore 列（A1 用户↔角色亲密度）；v26→v27 新增 conversation_mood 会话情绪表（A2 实时情绪）；v27→v28 conversations 加 worldBookId + 新增 world_info_book/world_info_entry（A3 世界书）
  * - schema 已导出到 app/schemas（企划书 4.1.5）
  */
 @Database(
-    entities = [Conversation::class, Message::class, CharacterCardEntity::class, MemoryItem::class, ConversationRelationship::class, RelationshipEvent::class, Interaction::class, InteractionParticipant::class, InteractionTurn::class, UserIdentity::class, ConversationTraits::class],
-    version = 25,
+    entities = [Conversation::class, Message::class, CharacterCardEntity::class, MemoryItem::class, ConversationRelationship::class, RelationshipEvent::class, Interaction::class, InteractionParticipant::class, InteractionTurn::class, UserIdentity::class, ConversationTraits::class, ConversationMood::class, WorldInfoBook::class, WorldInfoEntry::class],
+    version = 28,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -66,6 +71,12 @@ abstract class AppDatabase : RoomDatabase() {
 
     /** 会话独有人格表数据访问（v1.3 角色差异化，T13.1） */
     abstract fun conversationTraitsDao(): ConversationTraitsDao
+
+    /** 会话情绪表数据访问（v1.5-A2 实时情绪） */
+    abstract fun moodDao(): MoodDao
+
+    /** 世界书数据访问（v1.5-A3 世界书） */
+    abstract fun worldInfoDao(): WorldInfoDao
 
     companion object {
         @Volatile
@@ -381,6 +392,68 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /** v25→v26：conversations 表新增 affinityScore 列（A1 用户↔角色亲密度，随对话非线性增长，默认 0） */
+        private val MIGRATION_25_26 = object : Migration(25, 26) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE conversations ADD COLUMN affinityScore INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
+        /** v26→v27：新增 conversation_mood 会话情绪表（A2 实时情绪，会话唯一一条） */
+        private val MIGRATION_26_27 = object : Migration(26, 27) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `conversation_mood` (" +
+                        "`conversationId` INTEGER NOT NULL, " +
+                        "`moodTag` TEXT NOT NULL, " +
+                        "`intensity` INTEGER NOT NULL, " +
+                        "`source` TEXT NOT NULL, " +
+                        "`updatedAt` INTEGER NOT NULL, " +
+                        "`expiresAt` INTEGER, " +
+                        "PRIMARY KEY(`conversationId`) " +
+                        ")",
+                )
+                db.execSQL(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS `index_conversation_mood_conversationId` " +
+                        "ON `conversation_mood` (`conversationId`)",
+                )
+            }
+        }
+
+        /** v27→v28：conversations 加 worldBookId 挂载列 + 新增世界书/条目两张表（A3 世界书） */
+        private val MIGRATION_27_28 = object : Migration(27, 28) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE conversations ADD COLUMN worldBookId INTEGER")
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `world_info_book` (" +
+                        "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "`name` TEXT NOT NULL, " +
+                        "`description` TEXT NOT NULL, " +
+                        "`createdAt` INTEGER NOT NULL" +
+                        ")",
+                )
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `world_info_entry` (" +
+                        "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "`bookId` INTEGER NOT NULL, " +
+                        "`title` TEXT NOT NULL, " +
+                        "`keys` TEXT NOT NULL, " +
+                        "`secondaryKeys` TEXT NOT NULL, " +
+                        "`logic` TEXT NOT NULL, " +
+                        "`content` TEXT NOT NULL, " +
+                        "`priority` INTEGER NOT NULL, " +
+                        "`constant` INTEGER NOT NULL, " +
+                        "`enabled` INTEGER NOT NULL, " +
+                        "`createdAt` INTEGER NOT NULL" +
+                        ")",
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_world_info_entry_bookId` " +
+                        "ON `world_info_entry` (`bookId`)",
+                )
+            }
+        }
+
         /** v1→v2：messages 表新增 reasoning 列，默认空串（兼容旧数据） */
         private val MIGRATION_1_2 = object : Migration(1, 2) {
             override fun migrate(db: SupportSQLiteDatabase) {
@@ -469,6 +542,7 @@ abstract class AppDatabase : RoomDatabase() {
             MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13,
             MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18, MIGRATION_18_19,
             MIGRATION_19_20, MIGRATION_20_21, MIGRATION_21_22, MIGRATION_22_23, MIGRATION_23_24, MIGRATION_24_25,
+            MIGRATION_25_26, MIGRATION_26_27, MIGRATION_27_28,
         )
 
         /** 获取单例（双重检查锁，避免并发重复建库） */

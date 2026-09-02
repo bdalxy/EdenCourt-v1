@@ -4,6 +4,7 @@ import com.bdalxy.edencourt.data.local.dao.ConversationDao
 import com.bdalxy.edencourt.data.local.dao.MessageDao
 import com.bdalxy.edencourt.data.local.entity.Conversation
 import com.bdalxy.edencourt.data.local.entity.Message
+import com.bdalxy.edencourt.domain.UserAffinity
 import kotlinx.coroutines.flow.Flow
 
 /**
@@ -39,6 +40,20 @@ class ChatRepository(
 
     /** 更新会话 */
     suspend fun updateConversation(conversation: Conversation) = conversationDao.update(conversation)
+
+    /**
+     * A1：推进用户↔本会话角色亲密度（非线性饱和增长）。
+     * 读取当前 affinityScore，经 UserAffinity.advance 计算新值后写回；无变化（封顶）则不落库。
+     * @param conversationId 目标会话
+     * @param boost 深化加成（命中共同经历/记忆时由调用方判定传入，初版默认 0）
+     */
+    suspend fun advanceAffinity(conversationId: Long, boost: Int = 0) {
+        val conv = conversationDao.getById(conversationId) ?: return
+        val next = UserAffinity.advance(conv.affinityScore, boost)
+        if (next != conv.affinityScore) {
+            conversationDao.update(conv.copy(affinityScore = next))
+        }
+    }
 
     /** 删除会话（消息由外键级联删除） */
     suspend fun deleteConversation(conversation: Conversation) = conversationDao.delete(conversation)

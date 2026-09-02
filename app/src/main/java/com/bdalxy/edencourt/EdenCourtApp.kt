@@ -9,6 +9,8 @@ import com.bdalxy.edencourt.data.local.dao.InteractionDao
 import com.bdalxy.edencourt.data.local.dao.MemoryDao
 import com.bdalxy.edencourt.data.local.dao.MemorySearchDao
 import com.bdalxy.edencourt.data.local.dao.MessageDao
+import com.bdalxy.edencourt.data.local.dao.MoodDao
+import com.bdalxy.edencourt.data.local.dao.WorldInfoDao
 import com.bdalxy.edencourt.data.local.dao.RelationshipDao
 import com.bdalxy.edencourt.data.local.dao.UserIdentityDao
 import com.bdalxy.edencourt.data.remote.RemoteApiChatService
@@ -188,6 +190,16 @@ class EdenCourtApp : Application() {
     /** 用户自设身份表数据访问单例（v1.2b，T8.13：我的身份，唯一一条） */
     val userIdentityDao: UserIdentityDao by lazy {
         AppDatabase.getInstance(this).userIdentityDao()
+    }
+
+    /** 会话情绪表数据访问单例（v1.5-A2 实时情绪） */
+    val moodDao: MoodDao by lazy {
+        AppDatabase.getInstance(this).moodDao()
+    }
+
+    /** 世界书数据访问单例（v1.5-A3：背景设定动态词典，供注入检索与后续管理面板） */
+    val worldInfoDao: WorldInfoDao by lazy {
+        AppDatabase.getInstance(this).worldInfoDao()
     }
 
     /** 角色间互动执行器单例（v1.2b，T8.9：双向多轮状态机，供手动触发入口调用） */

@@ -12,12 +12,16 @@ import com.bdalxy.edencourt.EdenCourtApp
 import com.bdalxy.edencourt.data.local.dao.CharacterCardDao
 import com.bdalxy.edencourt.data.local.dao.ConversationTraitsDao
 import com.bdalxy.edencourt.data.local.dao.InteractionDao
+import com.bdalxy.edencourt.data.local.dao.MoodDao
 import com.bdalxy.edencourt.data.local.dao.RelationshipDao
 import com.bdalxy.edencourt.data.local.dao.UserIdentityDao
+import com.bdalxy.edencourt.data.local.dao.WorldInfoDao
 import com.bdalxy.edencourt.data.local.entity.CharacterCardEntity
+import com.bdalxy.edencourt.data.local.entity.ConversationMood
 import com.bdalxy.edencourt.data.local.entity.ConversationRelationship
 import com.bdalxy.edencourt.data.local.entity.InteractionStatus
 import com.bdalxy.edencourt.data.local.entity.MemoryItem
+import com.bdalxy.edencourt.data.local.entity.MoodSource
 import com.bdalxy.edencourt.data.local.entity.Message
 import com.bdalxy.edencourt.data.local.entity.MessageStatus
 import com.bdalxy.edencourt.data.local.entity.ParticipantRole
@@ -36,6 +40,7 @@ import com.bdalxy.edencourt.data.setting.ApiConfigStore
 import com.bdalxy.edencourt.data.setting.ReplyCursorStore
 import com.bdalxy.edencourt.data.setting.ScheduleConfig
 import com.bdalxy.edencourt.data.setting.ScheduleConfigStore
+import com.bdalxy.edencourt.domain.MoodRules
 import com.bdalxy.edencourt.domain.PromptBuilder
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -108,6 +113,8 @@ class ChatViewModel(
     private val scheduleConfigStore: ScheduleConfigStore,
     private val replyCursorStore: ReplyCursorStore,
     private val conversationTraitsDao: ConversationTraitsDao,
+    private val moodDao: MoodDao,
+    private val worldInfoDao: WorldInfoDao,
 ) : ViewModel() {
 
     /** 该会话的消息流（按创建时间正序，数据库变化自动刷新） */
@@ -416,6 +423,8 @@ class ChatViewModel(
         relationshipDao = relationshipDao,
         memoryRepository = memoryRepository,
         scheduleConfigStore = scheduleConfigStore,
+        moodDao = moodDao,
+        worldInfoDao = worldInfoDao,
     )
 
     init {
@@ -455,6 +464,8 @@ class ChatViewModel(
             )
             // 2. 会话标题/时间/排序更新（T6.15：不再用用户内容覆盖预览，预览跟随 AI 最后回复）
             updateConversationOnSend(content)
+            // 3. A2：用户言行触发的交互情绪——命中轻量规则则写入当前会话情绪（未命中不改变）
+            applyMoodReaction(content)
             // 3. v1.2 用户触发跨会话打听（T8.4）：命中则走旁路打听并原地回传，不走正常回复泵
             val conversations = repository.observeConversations().first()
             val consult = chatSideEffects.detectConsult(content, conversations)
@@ -512,6 +523,25 @@ class ChatViewModel(
                 )
             }
         }
+    }
+
+    /**
+     * A2：根据用户输入应用「交互情绪」轻量规则。
+     * 命中关键词 → 覆盖当前会话情绪（temp 源、带有效期）；未命中 → 不改（维持既有情绪）。
+     * 到期后 ChatPromptAssembler.buildMoodFragment 回落自主基线，本方法不处理回落写库。
+     */
+    private suspend fun applyMoodReaction(text: String) {
+        val reaction = MoodRules.react(text) ?: return
+        moodDao.upsert(
+            ConversationMood(
+                conversationId = conversationId,
+                moodTag = reaction.tag.name,
+                intensity = reaction.intensity,
+                source = MoodSource.REACT.name,
+                updatedAt = System.currentTimeMillis(),
+                expiresAt = System.currentTimeMillis() + reaction.durationMs,
+            ),
+        )
     }
 
     /**
@@ -729,15 +759,15 @@ class ChatViewModel(
 
     /** AI 完成回复时更新会话（T6.15）：预览显示 AI 最后一条（类微信），并刷新时间/排序 */
     private suspend fun updateConversationOnReply(content: String) {
-        val conv = repository.getConversation(conversationId) ?: return
-        val now = System.currentTimeMillis()
         repository.updateConversation(
-            conv.copy(
+            repository.getConversation(conversationId)?.copy(
                 lastMessagePreview = content.replace('\n', ' ').take(50),
-                lastMessageTime = now,
-                updatedAt = now,
-            ),
+                lastMessageTime = System.currentTimeMillis(),
+                updatedAt = System.currentTimeMillis(),
+            ) ?: return,
         )
+        // A1：AI 成功完成回复视为一次有效对话，自然推进用户↔角色亲密度
+        repository.advanceAffinity(conversationId)
     }
 
     /**
@@ -834,6 +864,8 @@ class ChatViewModel(
                         scheduleConfigStore = app.scheduleConfigStore,
                         replyCursorStore = app.replyCursorStore,
                         conversationTraitsDao = app.conversationTraitsDao,
+                        moodDao = app.moodDao,
+                        worldInfoDao = app.worldInfoDao,
                     )
                 }
             }

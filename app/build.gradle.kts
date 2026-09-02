@@ -5,6 +5,7 @@ plugins {
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
+    // Room 注释处理器走 KSP1（Kotlin 2.0 官方 KSP 链路，kapt 对 Kotlin 2.0+ 仅 fallback 到 1.9）
     alias(libs.plugins.ksp)
 }
 

@@ -37,6 +37,10 @@ data class Conversation(
     val isPinned: Boolean = false,
     val lastMessagePreview: String = "",
     val lastMessageTime: Long? = null,
+    /** 用户与本会话角色的亲密度（A1，0~100，随对话自然非线性增长；用于反哺对话口吻） */
+    val affinityScore: Int = 0,
+    /** 本会话挂载的世界书 id（A3，null=未挂载；第一版一个会话最多挂 1 本） */
+    val worldBookId: Long? = null,
 ) {
     /**
      * 该会话手动设置的自定义作息（T11.10 深化：会话级）。

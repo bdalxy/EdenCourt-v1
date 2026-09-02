@@ -2,8 +2,10 @@ package com.bdalxy.edencourt.feature.chat
 
 import com.bdalxy.edencourt.data.local.dao.CharacterCardDao
 import com.bdalxy.edencourt.data.local.dao.ConversationTraitsDao
+import com.bdalxy.edencourt.data.local.dao.MoodDao
 import com.bdalxy.edencourt.data.local.dao.RelationshipDao
 import com.bdalxy.edencourt.data.local.dao.UserIdentityDao
+import com.bdalxy.edencourt.data.local.dao.WorldInfoDao
 import com.bdalxy.edencourt.data.local.entity.Conversation
 import com.bdalxy.edencourt.data.local.entity.Message
 import com.bdalxy.edencourt.data.remote.ChatMessage
@@ -15,6 +17,9 @@ import com.bdalxy.edencourt.data.setting.ScheduleConfigStore
 import com.bdalxy.edencourt.domain.CharacterCard
 import com.bdalxy.edencourt.domain.CharacterCardParser
 import com.bdalxy.edencourt.domain.PromptBuilder
+import com.bdalxy.edencourt.domain.UserAffinity
+import com.bdalxy.edencourt.domain.MoodRules
+import com.bdalxy.edencourt.domain.WorldInfoMatcher
 import java.time.LocalTime
 import kotlinx.coroutines.flow.first
 
@@ -38,6 +43,8 @@ class ChatPromptAssembler(
     private val relationshipDao: RelationshipDao,
     private val memoryRepository: MemoryRepository,
     private val scheduleConfigStore: ScheduleConfigStore,
+    private val moodDao: MoodDao,
+    private val worldInfoDao: WorldInfoDao,
 ) {
 
     /**
@@ -70,7 +77,43 @@ class ChatPromptAssembler(
             watchModeText = watchModeText,
             // T13.5：注入「会话独有人格」——同一张卡的不同会话角色言行差异化（老会话无 traits 为空，兼容旧行为）
             traitsPrompt = buildTraitsFragment(),
+            // A1：注入「用户↔角色亲密度」——角色按与用户的亲疏自然调整口吻（0=陌生/高=亲密）
+            affinityText = buildAffinityFragment(),
+            // A2：注入「角色此刻情绪」——自主/交互双源合成，反哺语气
+            moodText = buildMoodFragment(scheduleEnabled),
+            // A3：注入「世界书背景设定」——扫描最近对话+当前输入，命中关键词才注入对应条目
+            worldInfoText = buildWorldInfoFragment(history, userInput),
         )
+    }
+
+    /**
+     * A3：构建「世界书背景设定」注入片段（初版轻量：数据挂载 + 关键词命中 + 预算注入，跑通无 UI）。
+     * 会话挂载了世界书（conv.worldBookId）且有条目时，扫描最近对话与当前输入命中关键词，
+     * 经 priority 排序 + token 预算截断后拼装注入。未挂载/无条目/全未命中 → 空串，不影响既有 prompt。
+     */
+    private suspend fun buildWorldInfoFragment(history: List<Message>, userInput: String): String {
+        val conv = repository.getConversation(conversationId) ?: return ""
+        val bookId = conv.worldBookId ?: return ""
+        val entries = worldInfoDao.getEntriesByBook(bookId)
+        if (entries.isEmpty()) return ""
+        val texts = history.takeLast(DEFAULT_WORLD_SCAN_HISTORY).map { it.content } + userInput
+        val matched = WorldInfoMatcher.matched(entries, texts)
+        return WorldInfoMatcher.buildFragment(WorldInfoMatcher.budget(matched))
+    }
+
+    /** A3：世界书关键词扫描的历史条数（轻量初版：只扫最近几轮，兼顾命中率与开销） */
+    private companion object {
+        const val DEFAULT_WORLD_SCAN_HISTORY = 10
+    }
+
+    /**
+     * A1：构建「用户↔本会话角色亲密度」注入片段。
+     * 亲密度存于 conversation.affinityScore，随对话非线性增长；分档复用 affinityTierLabel。
+     * 未绑定角色卡（默认助手）或 value=0 时也注入「陌生」分档，让口吻有起点；异常读取返回空串兜底。
+     */
+    private suspend fun buildAffinityFragment(): String {
+        val conv = repository.getConversation(conversationId) ?: return ""
+        return UserAffinity.buildAffinityFragment(conv.affinityScore)
     }
 
     /**
@@ -146,17 +189,39 @@ class ChatPromptAssembler(
      * 生效作息按 resolveConfig 会话级解析（会话自定义 > 角色自定义 > 个性派生 > 基础）。
      */
     private suspend fun currentLifeStateText(scheduleEnabled: Boolean): String {
-        if (!scheduleEnabled) return ""
-        val conv = repository.getConversation(conversationId) ?: return ""
-        if (!conv.lifeEnabled) return ""
-        val cardEntity = conv.characterCardId?.let { characterCardDao.getById(it) } ?: return ""
-        val cfg = CharacterSchedule.resolveConfig(scheduleConfigStore.config.first(), cardEntity, conv)
-        return when (CharacterSchedule.computeState(cfg, LocalTime.now())) {
+        val state = computeLifeState(scheduleEnabled) ?: return ""
+        return when (state) {
             LifeState.SLEEPING -> "你此刻正在睡眠中，被吵醒了会带着睡意和起床气，说话迷迷糊糊、懒洋洋的。"
             LifeState.WAKING -> "你此刻刚起床不久，精神正在恢复，回复带着清晨的清爽与活力。"
             LifeState.ACTIVE -> "你此刻正处于活跃时段，精力充沛，回复干脆利落、不拖沓。"
             LifeState.EVENING -> "你此刻正处在晚间放松时段，语气放松惬意，像忙完一天后的闲聊。"
         }
+    }
+
+    /**
+     * A2：构建「角色此刻情绪」注入片段（自主 + 交互双源合成）。
+     * - 自主基线：作息开启时由生活状态派生（睡/醒/活跃/晚间）；否则归为「平静」。
+     * - 交互情绪：用户言行触发的情绪（未过期则以交互为主；已过期回落自主基线）。
+     * 合成本逻辑在 MoodRules.resolve（纯函数，可单测）；此处只负责读取与拼装，不写库。
+     */
+    private suspend fun buildMoodFragment(scheduleEnabled: Boolean): String {
+        val mood = moodDao.get(conversationId)
+        val baseline = MoodRules.baselineFor(computeLifeState(scheduleEnabled))
+        val resolved = MoodRules.resolve(mood, System.currentTimeMillis(), baseline)
+        return MoodRules.buildMoodText(resolved.tag, resolved.intensity)
+    }
+
+    /**
+     * 计算本会话角色当前生活状态（作息两级开关都开启才计算；否则 null）。
+     * 供「此刻状态」与「情绪自主基线」复用，避免重复解析逻辑（A2）。
+     */
+    private suspend fun computeLifeState(scheduleEnabled: Boolean): LifeState? {
+        if (!scheduleEnabled) return null
+        val conv = repository.getConversation(conversationId) ?: return null
+        if (!conv.lifeEnabled) return null
+        val cardEntity = conv.characterCardId?.let { characterCardDao.getById(it) } ?: return null
+        val cfg = CharacterSchedule.resolveConfig(scheduleConfigStore.config.first(), cardEntity, conv)
+        return CharacterSchedule.computeState(cfg, LocalTime.now())
     }
 
     /**
