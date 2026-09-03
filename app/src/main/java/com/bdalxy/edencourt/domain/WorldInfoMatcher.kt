@@ -20,9 +20,6 @@ object WorldInfoMatcher {
     const val MIN_MAX_TOKEN = 500
     const val MAX_MAX_TOKEN = 5000
 
-    /** 中文粗略 token 估算：1 个字符 ≈ 1 token（够用即可，不引分词） */
-    fun estimatedTokens(text: String): Int = text.length
-
     /**
      * 规则命中：在主关键词范围里，判断复关键词逻辑是否收窄。
      * AND_ANY：主命中的前提下，任一复关键字命中即通过（无复关键字也通过）；
@@ -64,7 +61,7 @@ object WorldInfoMatcher {
     fun budget(sorted: List<WorldInfoEntry>, maxEntries: Int = DEFAULT_MAX_ENTRIES, maxToken: Int = DEFAULT_MAX_TOKEN): List<WorldInfoEntry> {
         var used = 0
         return sorted.take(maxEntries).filter { e ->
-            val t = estimatedTokens(e.content)
+            val t = TokenEstimator.count(e.content)
             if (used + t > maxToken) false else { used += t; true }
         }
     }

@@ -8,6 +8,7 @@ import com.bdalxy.edencourt.data.local.dao.UserIdentityDao
 import com.bdalxy.edencourt.data.local.dao.WorldInfoDao
 import com.bdalxy.edencourt.data.local.entity.Conversation
 import com.bdalxy.edencourt.data.local.entity.Message
+import com.bdalxy.edencourt.data.local.entity.WorldInfoEntry
 import com.bdalxy.edencourt.data.remote.ChatMessage
 import com.bdalxy.edencourt.data.repository.ChatRepository
 import com.bdalxy.edencourt.data.repository.MemoryRepository
@@ -16,6 +17,7 @@ import com.bdalxy.edencourt.data.schedule.LifeState
 import com.bdalxy.edencourt.data.setting.ScheduleConfigStore
 import com.bdalxy.edencourt.domain.CharacterCard
 import com.bdalxy.edencourt.domain.CharacterCardParser
+import com.bdalxy.edencourt.domain.ContextBudget
 import com.bdalxy.edencourt.domain.PromptBuilder
 import com.bdalxy.edencourt.domain.UserAffinity
 import com.bdalxy.edencourt.domain.MoodRules
@@ -81,24 +83,47 @@ class ChatPromptAssembler(
             affinityText = buildAffinityFragment(),
             // A2：注入「角色此刻情绪」——自主/交互双源合成，反哺语气
             moodText = buildMoodFragment(scheduleEnabled),
-            // A3：注入「世界书背景设定」——扫描最近对话+当前输入，命中关键词才注入对应条目
-            worldInfoText = buildWorldInfoFragment(history, userInput),
+            // A3：注入「世界书」——恒定条目(恒常规则) + 命中条目(关键词触发)，
+            //    v1.5 上下文注入层《①恒/③恒/⑤弹》交给 PromptBuilder 统一按优先级链与预算组装
+            constantWorldInfoText = buildConstantWorldFragment(history, userInput),
+            worldInfoText = buildMatchedWorldFragment(history, userInput),
+            // v1.5 统一上下文注入预算：恒久身份1400 + 恒久世界书400 + 相关性弹性(总3200-1800)；旧行为兼容可用 null
+            budget = ContextBudget(),
         )
     }
 
     /**
-     * A3：构建「世界书背景设定」注入片段（初版轻量：数据挂载 + 关键词命中 + 预算注入，跑通无 UI）。
-     * 会话挂载了世界书（conv.worldBookId）且有条目时，扫描最近对话与当前输入命中关键词，
-     * 经 priority 排序 + token 预算截断后拼装注入。未挂载/无条目/全未命中 → 空串，不影响既有 prompt。
+     * A3：读取本会话挂载的世界书条目（未挂载/无条目返回空列表）。
+     * 恒定条目与命中条目分离：恒定走「③恒久世界规则」每次都注入；命中走「⑤相关性知识」按关键词触发。
      */
-    private suspend fun buildWorldInfoFragment(history: List<Message>, userInput: String): String {
-        val conv = repository.getConversation(conversationId) ?: return ""
-        val bookId = conv.worldBookId ?: return ""
+    private suspend fun loadWorldEntries(history: List<Message>, userInput: String): List<WorldInfoEntry> {
+        val conv = repository.getConversation(conversationId) ?: return emptyList()
+        val bookId = conv.worldBookId ?: return emptyList()
         val entries = worldInfoDao.getEntriesByBook(bookId)
+        return entries.filter { it.enabled }
+    }
+
+    /**
+     * A3：构建「恒定世界书」注入片段（③恒久世界规则）。
+     * constant=true 的条目是最核心的世界规则，每次必注入，不随关键词命中浮动（不参与⑤的弹性截断）。
+     */
+    private suspend fun buildConstantWorldFragment(history: List<Message>, userInput: String): String {
+        val constant = loadWorldEntries(history, userInput).filter { it.constant }
+        if (constant.isEmpty()) return ""
+        return WorldInfoMatcher.buildFragment(constant.sortedBy { it.priority })
+    }
+
+    /**
+     * A3：构建「世界书命中条目」注入片段（⑤相关性知识，弹性配额）。
+     * 非恒定条目靠关键词触发：扫描最近对话与当前输入命中主关键词（含副关键词收窄），
+     * 经 priority 排序后拼装注入。预算截断由 PromptBuilder 按统一预算（ContextBudget）负责。
+     */
+    private suspend fun buildMatchedWorldFragment(history: List<Message>, userInput: String): String {
+        val entries = loadWorldEntries(history, userInput).filter { !it.constant }
         if (entries.isEmpty()) return ""
         val texts = history.takeLast(DEFAULT_WORLD_SCAN_HISTORY).map { it.content } + userInput
         val matched = WorldInfoMatcher.matched(entries, texts)
-        return WorldInfoMatcher.buildFragment(WorldInfoMatcher.budget(matched))
+        return WorldInfoMatcher.buildFragment(matched.sortedBy { it.priority })
     }
 
     /** A3：世界书关键词扫描的历史条数（轻量初版：只扫最近几轮，兼顾命中率与开销） */

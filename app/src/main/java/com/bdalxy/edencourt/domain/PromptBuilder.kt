@@ -139,7 +139,10 @@ object PromptBuilder {
      * @param traitsPrompt 会话独有人格注入片段（T13.5：印象摘要+反差对+自补充引导；为空则不注入）
      * @param affinityText 用户↔角色亲密度注入片段（A1：角色按亲疏自然调整口吻；为空则不注入）
      * @param moodText 角色此刻情绪注入片段（A2：自主/交互双源合成，反哺语气；为空则不注入）
-     * @param worldInfoText 世界书背景设定注入片段（A3：聊到相关关键词才注入对应条目；为空则不注入）
+     * @param worldInfoText 世界书命中条目注入片段（A3：聊到相关关键词才注入对应条目；为空则不注入）
+     * @param constantWorldInfoText 世界书恒定条目（constant=true）注入片段（v1.5 上下文注入层③恒久世界规则；
+     *   每次必注入的核心世界规则；为空则不注入）
+     * @param budget 上下文注入预算统一分配器（v1.5：按优先级链 ①~⑤ 分配并可配；传 null=不启用预算截断，旧行为完全不变）
      */
     fun build(
         history: List<Message>,
@@ -155,42 +158,59 @@ object PromptBuilder {
         affinityText: String = "",
         moodText: String = "",
         worldInfoText: String = "",
+        constantWorldInfoText: String = "",
+        budget: ContextBudget? = null,
     ): List<ChatMessage> {
-        // 1. system 消息（角色卡或默认助手）+ 当前时间注入（T6.11）+ 长期记忆（T5.4）+ 攒批提示（T6.9）
+        // 1. system 消息。按「优先级链」组装（v1.5 上下文注入层）：
+        //   ①时间（忽略预算）→ ②恒久身份(systemPrompt+traitsPrompt) → ③恒久世界规则(constantWorldInfoText)
+        //   → ④当下状态(lifeState+watchMode+affinity+mood) → ⑤相关性知识(关系事件→长期记忆→世界书命中)。
+        //   budget 非空时，对⑤弹性块按 remaining=flexible 统一截断（整块保留/丢弃，不中途切字）。
         val finalSystem = buildString {
-            // T6.11：注入当前现实时间，让 AI 明确感知三次元时间（每次发送时刷新）
+            // ① 环境·当前现实时间（T6.11：每次发送时刷新，让 AI 感知三次元时间）
             append("【当前现实时间】").append(currentTimeText()).append("\n\n")
+            // ② 恒久身份：角色卡核心 + 用户自设身份
             append(systemPrompt)
-            // T11.11：注入当前角色生活状态，让 AI 按状态调整语气与内容（深夜被叫醒会困倦、忙碌时简短等）
-            if (lifeStateText.isNotBlank()) {
-                append("\n\n【当前角色状态】").append(lifeStateText)
-            }
-            // T11.13：注入共同经历事件——角色记得自己和其他会话角色共同经历过的事（关系连续性）
-            if (relationshipEventsText.isNotBlank()) {
-                append("\n\n").append(relationshipEventsText)
-            }
-            // T11.16：注入陪看模式——用户主动分享内容时，角色以陪看口吻回应（讨论/吐槽/猜后续）
-            if (watchModeText.isNotBlank()) {
-                append("\n\n").append(watchModeText)
-            }
-            // T13.5：注入会话独有人格——印象摘要+反差对+自补充引导（角色差异化）
+            // ② 恒久身份：会话独有人格——印象摘要+反差对+自补充引导（T13.5 角色差异化）
             if (traitsPrompt.isNotBlank()) {
                 append("\n\n").append(traitsPrompt)
             }
-            // A1：注入用户↔角色亲密度——角色按与用户的亲疏自然调整口吻（越亲近越自然）
+            // ③ 恒久世界规则：世界书 constant=true 条目——核心世界规则每次必注入，不随关键词命中浮动
+            if (constantWorldInfoText.isNotBlank()) {
+                append("\n\n").append(constantWorldInfoText)
+            }
+            // ④ 当下状态（固定短句，开销自负）：生活状态（T11.11）+ 陪看（T11.16）+ 亲密度（A1）+ 情绪（A2）
+            if (lifeStateText.isNotBlank()) {
+                append("\n\n【当前角色状态】").append(lifeStateText)
+            }
+            if (watchModeText.isNotBlank()) {
+                append("\n\n").append(watchModeText)
+            }
             if (affinityText.isNotBlank()) {
                 append("\n\n").append(affinityText)
             }
-            // A2：注入角色此刻情绪——自主/交互双源合成，反哺语气（为空则不注入）
             if (moodText.isNotBlank()) {
                 append("\n\n").append(moodText)
             }
-            // A3：注入世界书背景设定——聊到相关关键词才注入对应条目（为空则不注入）
-            if (worldInfoText.isNotBlank()) {
-                append("\n\n").append(worldInfoText)
-            }
-            if (longTermMemories.isNotBlank()) {
-                append("\n\n").append(longTermMemories)
+            // ⑤ 相关性知识（弹性配额）：优先关系事件→长期记忆→世界书命中；预算充足则全注入，不足按此序截断
+            if (budget != null) {
+                val remainingIds = budget.truncate(
+                    listOf(relationshipEventsText, longTermMemories, worldInfoText).filter { it.isNotBlank() },
+                    maxToken = budget.flexibleBudget,
+                )
+                // 按优先级顺序拼接被保留的块（truncate 保持原顺序）
+                val joined = remainingIds.joinToString("\n\n")
+                if (joined.isNotBlank()) append("\n\n").append(joined)
+            } else {
+                // 未传 budget：维持旧拼接行为（关系事件→世界书→长期记忆）
+                if (relationshipEventsText.isNotBlank()) {
+                    append("\n\n").append(relationshipEventsText)
+                }
+                if (worldInfoText.isNotBlank()) {
+                    append("\n\n").append(worldInfoText)
+                }
+                if (longTermMemories.isNotBlank()) {
+                    append("\n\n").append(longTermMemories)
+                }
             }
             // T6.9：连发多条时提示 AI 像真人一样按性格决定回应方式（不逐条秒回）
             if (userBatchCount > 1) {
