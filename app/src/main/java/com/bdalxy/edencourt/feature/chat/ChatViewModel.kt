@@ -51,6 +51,7 @@ import com.bdalxy.edencourt.domain.PromptBuilder
 import com.bdalxy.edencourt.domain.TokenEstimator
 import com.bdalxy.edencourt.domain.WorldInfoMatcher
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
@@ -425,10 +426,14 @@ class ChatViewModel(
 
     /** 是否正在生成 AI 回复（UI 据此切换 停止/发送 按钮） */
     /** 刷新知识库抽屉展示数据（A2：聚合恒久身份/世界书/记忆/关系与状态/预算，显示与注入同 TokenEstimator 口径）。
-     *  打开抽屉前调用一次，生成一次快照；数据变化较大时可在抽屉关闭后再次刷新。 */
+     *  打开抽屉前调用一次，生成一次快照；数据变化较大时可在抽屉关闭后再次刷新。
+     *  注意：构建快照会同步读取 Room DAO（getBook/getEntriesByBook 等为非 suspend），必须在 IO 线程执行，
+     *  否则主线程访问数据库触发 Room 的 assertNotMainThread 异常而被 runCatching 吞掉，抽屉仍显示旧值。 */
     fun refreshKnowledgeDrawer() {
         viewModelScope.launch {
-            runCatching { _knowledgeDrawer.value = buildKnowledgeDrawerState() }
+            runCatching {
+                withContext(Dispatchers.IO) { _knowledgeDrawer.value = buildKnowledgeDrawerState() }
+            }
                 .onFailure { Log.w("ChatViewModel", "refreshKnowledgeDrawer failed", it) }
         }
     }
@@ -456,9 +461,11 @@ class ChatViewModel(
         return CharacterSchedule.computeState(cfg, LocalTime.now())
     }
 
-    /** 计算知识库抽屉展示聚合（一次性快照：读数据库 + 组合当前流值） */
+    /** 计算知识库抽屉展示聚合（一次性快照：读数据库 + 组合当前流值）。
+     *  注意：会话信息改为实时从数据库读取（而非内存 conversation.value 流），
+     *  避免挂载/卸下后内存流异步发射延迟导致抽屉展示旧的 worldBookId。 */
     private suspend fun buildKnowledgeDrawerState(): KnowledgeDrawerState {
-        val conv = conversation.value
+        val conv = repository.getConversation(conversationId)
         val card = roleCard.value
         // —— 恒久身份（角色卡核心文本）估算 ——
         val characterTokens = TokenEstimator.count(buildIdentityText(card))
