@@ -26,6 +26,7 @@ import com.bdalxy.edencourt.data.local.entity.Message
 import com.bdalxy.edencourt.data.local.entity.MessageStatus
 import com.bdalxy.edencourt.data.local.entity.ParticipantRole
 import com.bdalxy.edencourt.data.local.entity.Role
+import com.bdalxy.edencourt.data.local.entity.WorldInfoBook
 import com.bdalxy.edencourt.data.remote.AiChatService
 import com.bdalxy.edencourt.data.remote.ApiErrorKind
 import com.bdalxy.edencourt.data.remote.StreamPolicy
@@ -36,12 +37,19 @@ import com.bdalxy.edencourt.data.remote.ChatMessage
 import com.bdalxy.edencourt.data.repository.ChatRepository
 import com.bdalxy.edencourt.data.repository.CrossSessionConsultService
 import com.bdalxy.edencourt.data.repository.MemoryRepository
+import com.bdalxy.edencourt.data.schedule.CharacterSchedule
+import com.bdalxy.edencourt.data.schedule.LifeState
 import com.bdalxy.edencourt.data.setting.ApiConfigStore
 import com.bdalxy.edencourt.data.setting.ReplyCursorStore
 import com.bdalxy.edencourt.data.setting.ScheduleConfig
 import com.bdalxy.edencourt.data.setting.ScheduleConfigStore
+import com.bdalxy.edencourt.domain.CharacterCard
+import com.bdalxy.edencourt.domain.CharacterCardParser
+import com.bdalxy.edencourt.domain.MoodTag
 import com.bdalxy.edencourt.domain.MoodRules
 import com.bdalxy.edencourt.domain.PromptBuilder
+import com.bdalxy.edencourt.domain.TokenEstimator
+import com.bdalxy.edencourt.domain.WorldInfoMatcher
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
@@ -63,6 +71,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.coroutines.coroutineContext
 import java.io.IOException
+import java.time.LocalTime
 
 /**
  * 单条消息的错误提示（T6.1）。
@@ -88,6 +97,34 @@ data class RelationshipItem(
     val affinityScore: Int,
     val tierLabel: String,
     val interactionCount: Int,
+)
+
+/**
+ * 聊天页知识库抽屉（KnowledgeDrawer）的展示聚合快照（v1.5 上下文注入层 UI）。
+ * 由 refreshKnowledgeDrawer() 一次性拉取，供抽屉展示「角色此刻脑子里装了什么」。
+ * token 展示统一走 TokenEstimator（1 字符≈1 token），保证显示 ≈ 注入口径一致（UI 标「估」/「~」）。
+ */
+data class KnowledgeDrawerState(
+    /** 恒久身份（角色卡核心文本 name/性格/背景/说话风格）估算 token */
+    val characterTokens: Int,
+    /** 世界书行文案：未挂载 / 已挂「书名」 */
+    val worldBookLabel: String,
+    /** 世界书命中条目 token 合计（浮动态，~值） */
+    val worldTokens: Int,
+    /** 世界书命中条数（>0 表示正在生效，抽屉绿点） */
+    val worldHitCount: Int,
+    /** 记忆行文案：如「共享 12 · 私有 5」 */
+    val memoryLabel: String,
+    /** 记忆 token 合计（浮动态，~值） */
+    val memoryTokens: Int,
+    /** 亲密度文案：如「63 / 100」 */
+    val affinityText: String,
+    /** 生活状态文案：如「活跃中」；作息未开启显示「未开启」 */
+    val lifeStateText: String,
+    /** 当前情绪文案：如「欢喜 · 72」（自主/交互双源合成） */
+    val moodText: String,
+    /** 本次注入预算已用估算（恒久身份 + 世界书 + 记忆 合计，用于底部分配条） */
+    val budgetUsed: Int,
 )
 
 /**
@@ -225,6 +262,19 @@ class ChatViewModel(
             started = SharingStarted.WhileSubscribed(5_000),
             initialValue = null,
         )
+
+    /** 知识库抽屉展示快照（null=尚未刷新；打开抽屉前调 refreshKnowledgeDrawer() 拉取，见 A2） */
+    private val _knowledgeDrawer = MutableStateFlow<KnowledgeDrawerState?>(null)
+    val knowledgeDrawer: StateFlow<KnowledgeDrawerState?> = _knowledgeDrawer.asStateFlow()
+
+    /** 全部世界书（供 B1 挂载弹层选择） */
+    val worldBooks: StateFlow<List<WorldInfoBook>> =
+        worldInfoDao.observeBooks()
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(5_000),
+                initialValue = emptyList(),
+            )
 
     /** 本会话的「独有人格」（T13.6：聊天页显示印象摘要 + 反差入口；无则 null，兼容默认助手/老会话） */
     val traits: StateFlow<ConversationTraits?> = conversationTraitsDao.observeByConversation(conversationId)
@@ -374,6 +424,97 @@ class ChatViewModel(
     }
 
     /** 是否正在生成 AI 回复（UI 据此切换 停止/发送 按钮） */
+    /** 刷新知识库抽屉展示数据（A2：聚合恒久身份/世界书/记忆/关系与状态/预算，显示与注入同 TokenEstimator 口径）。
+     *  打开抽屉前调用一次，生成一次快照；数据变化较大时可在抽屉关闭后再次刷新。 */
+    fun refreshKnowledgeDrawer() {
+        viewModelScope.launch {
+            runCatching { _knowledgeDrawer.value = buildKnowledgeDrawerState() }
+                .onFailure { Log.w("ChatViewModel", "refreshKnowledgeDrawer failed", it) }
+        }
+    }
+
+    /** 提取角色卡「恒久身份」核心文本，用于 token 估算（对齐恒久身份注入片段 ≈ name/性格/背景/说话风格） */
+    private fun buildIdentityText(card: CharacterCardEntity?): String {
+        if (card == null) return ""
+        val cc = runCatching { CharacterCardParser.parse(card.jsonContent) }.getOrNull()
+        if (cc == null) return card.name
+        return buildString {
+            append(cc.name).append("\n")
+            append(cc.personality).append("\n")
+            append(cc.background).append("\n")
+            append(cc.speakingStyle)
+        }
+    }
+
+    /** 计算本会话角色当前生活状态（作息两级开关都开启才返回具体状态；否则 null）——对齐 ChatPromptAssembler 注入口径 */
+    private suspend fun currentLifeState(): LifeState? {
+        if (!scheduleEnabled.value) return null
+        val conv = conversation.value ?: return null
+        if (!conv.lifeEnabled) return null
+        val cardEntity = conv.characterCardId?.let { characterCardDao.getById(it) } ?: return null
+        val cfg = CharacterSchedule.resolveConfig(scheduleConfigStore.config.first(), cardEntity, conv)
+        return CharacterSchedule.computeState(cfg, LocalTime.now())
+    }
+
+    /** 计算知识库抽屉展示聚合（一次性快照：读数据库 + 组合当前流值） */
+    private suspend fun buildKnowledgeDrawerState(): KnowledgeDrawerState {
+        val conv = conversation.value
+        val card = roleCard.value
+        // —— 恒久身份（角色卡核心文本）估算 ——
+        val characterTokens = TokenEstimator.count(buildIdentityText(card))
+        // —— 世界书：挂载名 + 命中（扫最近对话历史，对齐注入关键词命中） ——
+        var worldBookLabel = "未挂载"
+        var worldTokens = 0
+        var worldHitCount = 0
+        val bookId = conv?.worldBookId
+        if (bookId != null) {
+            worldInfoDao.getBook(bookId)?.let { book ->
+                val entries = worldInfoDao.getEntriesByBook(bookId).filter { it.enabled }
+                worldBookLabel = "已挂「${book.name}」"
+                val texts = messages.value.takeLast(20).map { it.content }
+                val matched = WorldInfoMatcher.matched(entries, texts)
+                worldHitCount = matched.size
+                worldTokens = matched.sumOf { TokenEstimator.count(it.content) }
+            }
+        }
+        // —— 记忆：共享 + 私有 ——
+        val shared = sharedMemories.value
+        val priv = privateMemories.value
+        val memoryLabel = "共享 ${shared.size} · 私有 ${priv.size}"
+        val memoryTokens = (shared + priv).sumOf { TokenEstimator.count(it.content) }
+        // —— 关系与状态 ——
+        val lifeState = currentLifeState()
+        val affinityText = "${conv?.affinityScore ?: 0} / 100"
+        val lifeStateText = lifeState?.label ?: "未开启"
+        val mood = moodDao.get(conversationId)
+        val baseline = MoodRules.baselineFor(lifeState)
+        val resolved = MoodRules.resolve(mood, System.currentTimeMillis(), baseline)
+        val moodText = "${MoodRules.tagName(resolved.tag)} · ${resolved.intensity}"
+        // —— 预算已用估算（恒久身份 + 世界书 + 记忆） ——
+        val budgetUsed = characterTokens + worldTokens + memoryTokens
+        return KnowledgeDrawerState(
+            characterTokens = characterTokens,
+            worldBookLabel = worldBookLabel,
+            worldTokens = worldTokens,
+            worldHitCount = worldHitCount,
+            memoryLabel = memoryLabel,
+            memoryTokens = memoryTokens,
+            affinityText = affinityText,
+            lifeStateText = lifeStateText,
+            moodText = moodText,
+            budgetUsed = budgetUsed,
+        )
+    }
+
+    /** 挂载/卸下世界书（B1）：更新本会话的 worldBookId；null 表示卸下。挂载变动后刷新知识库抽屉 */
+    fun mountWorldBook(bookId: Long?) {
+        viewModelScope.launch {
+            val conv = repository.getConversation(conversationId) ?: return@launch
+            repository.updateConversation(conv.copy(worldBookId = bookId))
+            refreshKnowledgeDrawer()
+        }
+    }
+
     private val _isGenerating = MutableStateFlow(false)
     val isGenerating: StateFlow<Boolean> = _isGenerating.asStateFlow()
 

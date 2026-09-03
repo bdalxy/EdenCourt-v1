@@ -20,6 +20,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.AutoStories
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -81,6 +82,8 @@ fun SettingsScreen(
     onBack: () -> Unit,
     // T11.13：互动中心入口（从设置页也能进入）
     onOpenInteraction: () -> Unit,
+    // C：世界书管理入口（从设置页也能进入）
+    onOpenWorldBook: () -> Unit,
 ) {
     val context = LocalContext.current.applicationContext as Application
     val viewModel: SettingsViewModel = viewModel(factory = SettingsViewModel.factory(context))
@@ -110,6 +113,8 @@ fun SettingsScreen(
             item { SettingsSectionCard { ScheduleSettingsSection(viewModel = viewModel) } }
             // 第 4 区：互动中心入口（T11.13，从设置页也能进入：查看/发起互动、自动驱动、关系故事）
             item { InteractionCenterSection(onOpenInteraction = onOpenInteraction) }
+            // 第 5 区：世界书入口（C，从设置页也能进入：管理书籍与条目）
+            item { WorldBookSection(onOpenWorldBook = onOpenWorldBook) }
             // 开发者工具区：仅 debug 构建可见（性能压测种子数据，M3 验收前提）
             if (isDebugBuild(context)) {
                 item { DebugSection(viewModel = viewModel) }
@@ -631,6 +636,55 @@ private fun InteractionCenterSection(onOpenInteraction: () -> Unit) {
                 )
                 Text(
                     text = "查看与发起角色互动、自动驱动、关系故事（共同经历）",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Text(
+                text = "›",
+                style = MaterialTheme.typography.titleLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+/**
+ * 世界书管理入口（C 阶段，v1.5-A3）：点卡片进入世界书列表页，统一管理书籍与条目。
+ */
+@Composable
+private fun WorldBookSection(onOpenWorldBook: () -> Unit) {
+    Card(
+        onClick = onOpenWorldBook,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+        ),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                imageVector = Icons.Filled.AutoStories,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(20.dp),
+            )
+            Spacer(modifier = Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "世界书",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                )
+                Text(
+                    text = "管理世界观书籍与条目，聊到关键词时注入对应设定",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

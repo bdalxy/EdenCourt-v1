@@ -21,6 +21,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Email
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -82,6 +83,8 @@ fun ChatScreen(
     onOpenSettings: () -> Unit,
     onOpenInteraction: () -> Unit,
     onOpenMemoryManagement: () -> Unit,
+    // C：聊天页内「世界书」管理入口（知识库抽屉「管理」/ 挂载弹层空态引导）
+    onOpenWorldBook: () -> Unit,
 ) {
     val app = LocalContext.current.applicationContext as EdenCourtApp
     val viewModel: ChatViewModel = viewModel(
@@ -127,6 +130,18 @@ fun ChatScreen(
 
     // v1.2b T8.11：互动面板（本会话互动记录 + 开放互动开关 + 前往互动中心）
     var showInteractionSheet by rememberSaveable { mutableStateOf(false) }
+    // A2：右侧「知识库」抽屉开关（恒久身份/世界书/记忆/关系与状态/预算 可视化）
+    var showKnowledgeDrawer by rememberSaveable { mutableStateOf(false) }
+    // B1：世界书挂载/卸下弹层开关（从知识库抽屉「世界书」行进入）
+    var showWorldBookMountSheet by rememberSaveable { mutableStateOf(false) }
+    // A2：知识库抽屉聚合快照（打开时刷新一次；null=尚未生成，卷面各值回落默认占位）
+    val knowledgeDrawerState by viewModel.knowledgeDrawer.collectAsStateWithLifecycle()
+    // A2：打开「知识库」抽屉时刷新聚合数据（世界书命中/记忆/情绪等随最近对话变化）
+    LaunchedEffect(showKnowledgeDrawer) {
+        if (showKnowledgeDrawer) viewModel.refreshKnowledgeDrawer()
+    }
+    // B1：供挂载弹层选书的全部世界书（含挂载本标识）
+    val worldBooks by viewModel.worldBooks.collectAsStateWithLifecycle()
     val interactionEnabled by viewModel.interactionEnabled.collectAsStateWithLifecycle()
     val interactionRecords by viewModel.interactionRecords.collectAsStateWithLifecycle()
     // T11.6 好感度细分：本会话角色的关系一览（互动面板「我的关系（好感度）」区）
@@ -246,22 +261,10 @@ fun ChatScreen(
                     }
                 },
                 actions = {
-                    // v1.2b T8.11：互动入口（带未读红点），点击弹出本会话互动面板
-                    IconButton(onClick = { showInteractionSheet = true }) {
-                        BadgedBox(badge = {
-                            if (unreadInteractions > 0) {
-                                Badge { Text("${unreadInteractions.coerceAtMost(99)}") }
-                            }
-                        }) {
-                            Icon(Icons.Filled.Email, contentDescription = "角色互动")
-                        }
-                    }
-                    // T7.4：会话记忆入口（共享 + 本会话私有），点击先刷新数据再弹出
-                    IconButton(onClick = {
-                        showMemorySheet = true
-                        viewModel.refreshSessionMemories()
-                    }) {
-                        Icon(Icons.AutoMirrored.Filled.List, contentDescription = "记忆")
+                    // A2（v1.5 上下文注入层 UI）：会话操作收敛为单「⋯」入口——点开「知识库」抽屉，
+                    // 集中承载 互动（未读红点）/记忆/世界书挂载/关系与状态/注入预算 等可视化入口
+                    IconButton(onClick = { showKnowledgeDrawer = true }) {
+                        Icon(Icons.Filled.MoreVert, contentDescription = "更多")
                     }
                 },
             )
@@ -359,6 +362,61 @@ fun ChatScreen(
                 showTraitsEdit = false
             },
             onDismiss = { showTraitsEdit = false },
+        )
+    }
+    // A2：右侧「知识库」抽屉（恒久身份/世界书/记忆/关系与状态/注入预算 可视化，显示与注入口径一致）
+    // 互动/记忆行的点击把入口回收到抽屉内；世界书挂载(B1)/管理页(C)待后续阶段接入
+    KnowledgeDrawer(
+        visible = showKnowledgeDrawer,
+        roleName = roleName,
+        avatarPath = roleCard?.avatar,
+        characterTokens = knowledgeDrawerState?.characterTokens ?: 0,
+        worldBookLabel = knowledgeDrawerState?.worldBookLabel ?: "未挂载",
+        worldTokens = knowledgeDrawerState?.worldTokens ?: 0,
+        worldHitCount = knowledgeDrawerState?.worldHitCount ?: 0,
+        memoryLabel = knowledgeDrawerState?.memoryLabel ?: "",
+        memoryTokens = knowledgeDrawerState?.memoryTokens ?: 0,
+        affinityText = knowledgeDrawerState?.affinityText ?: "0 / 100",
+        lifeStateText = knowledgeDrawerState?.lifeStateText ?: "未开启",
+        moodText = knowledgeDrawerState?.moodText ?: "—",
+        unreadInteractions = unreadInteractions,
+        budgetUsed = knowledgeDrawerState?.budgetUsed ?: 0,
+        onOpenMemory = {
+            showKnowledgeDrawer = false
+            showMemorySheet = true
+            viewModel.refreshSessionMemories()
+        },
+        onOpenInteraction = {
+            showKnowledgeDrawer = false
+            showInteractionSheet = true
+        },
+        onMountWorldBook = {
+            // B1：世界书挂载弹层——关闭抽屉后打开选书弹层
+            showKnowledgeDrawer = false
+            showWorldBookMountSheet = true
+        },
+        onManageWorldBook = {
+            // C：世界书管理页导航
+            showKnowledgeDrawer = false
+            onOpenWorldBook()
+        },
+        onDismiss = { showKnowledgeDrawer = false },
+    )
+    // B1：世界书挂载/卸下弹层（关抽屉后弹出；选书即挂载、卸下置空）
+    if (showWorldBookMountSheet) {
+        WorldBookMountSheet(
+            books = worldBooks,
+            currentBookId = conversation?.worldBookId,
+            onSelect = { id ->
+                viewModel.mountWorldBook(id)
+                showWorldBookMountSheet = false
+            },
+            onUnmount = { viewModel.mountWorldBook(null) },
+            onDismiss = { showWorldBookMountSheet = false },
+            onManage = {
+                showWorldBookMountSheet = false
+                onOpenWorldBook()
+            },
         )
     }
 }

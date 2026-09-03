@@ -13,6 +13,8 @@ import com.bdalxy.edencourt.feature.conversationlist.ConversationListScreen
 import com.bdalxy.edencourt.feature.interaction.InteractionCenterScreen
 import com.bdalxy.edencourt.feature.memory.MemoryScreen
 import com.bdalxy.edencourt.feature.settings.SettingsScreen
+import com.bdalxy.edencourt.feature.worldbook.WorldBookEditScreen
+import com.bdalxy.edencourt.feature.worldbook.WorldBookScreen
 
 @Composable
 fun AppRoot() {
@@ -42,6 +44,8 @@ fun AppRoot() {
                 onOpenInteraction = { navController.navigate(NavRoutes.INTERACTION_CENTER) },
                 // T11.6：会话记忆面板「前往记忆管理页」入口
                 onOpenMemoryManagement = { navController.navigate(NavRoutes.MEMORY_LIST) },
+                // C：聊天页内「世界书」管理入口（知识库抽屉「管理」/ 挂载弹层引导）
+                onOpenWorldBook = { navController.navigate(NavRoutes.WORLD_BOOK) },
             )
         }
         // v1.2b T8.11：互动中心（列表 + 全局开关 + 发起互动）
@@ -59,6 +63,26 @@ fun AppRoot() {
                 onBack = { navController.popBackStack() },
                 // T11.13：设置页也能进入互动中心
                 onOpenInteraction = { navController.navigate(NavRoutes.INTERACTION_CENTER) },
+                // C：设置页「世界书」入口
+                onOpenWorldBook = { navController.navigate(NavRoutes.WORLD_BOOK) },
+            )
+        }
+        // C 阶段：世界书管理（书列表）
+        composable(NavRoutes.WORLD_BOOK) {
+            WorldBookScreen(
+                onBack = { navController.popBackStack() },
+                onOpenBook = { id -> navController.navigate(NavRoutes.worldBookEdit(id)) },
+            )
+        }
+        // C 阶段：世界书编辑（bookId<=0 新建）
+        composable(
+            route = NavRoutes.WORLD_BOOK_EDIT,
+            arguments = listOf(navArgument("bookId") { type = NavType.LongType }),
+        ) { entry ->
+            WorldBookEditScreen(
+                bookId = entry.arguments?.getLong("bookId") ?: 0L,
+                onBack = { navController.popBackStack() },
+                onDone = { navController.popBackStack() },
             )
         }
         composable(NavRoutes.ABOUT) {
