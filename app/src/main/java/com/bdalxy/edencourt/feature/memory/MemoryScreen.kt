@@ -36,6 +36,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.AlertDialog
@@ -126,6 +127,8 @@ fun MemoryScreen(onBack: () -> Unit) {
     var showHotwords by remember { mutableStateOf(false) }
     // 是否显示关系图谱页（阶段三 T11.5：共现网络可视化，与列表/时间轴/热词互斥）
     var showGraph by remember { mutableStateOf(false) }
+    // B4：是否显示「角色关系图谱」页（我置顶独占行 + 其它开启角色两两成行，与列表/时间轴/热词/共现图互斥）
+    var showRoleGraph by remember { mutableStateOf(false) }
     // 批量管理多选状态（T11.3：长按进入多选，勾选多项后批量删除/设重要/置顶）
     var selectionMode by remember { mutableStateOf(false) }
     var selectedIds by remember { mutableStateOf(setOf<Long>()) }
@@ -191,6 +194,9 @@ fun MemoryScreen(onBack: () -> Unit) {
     } else if (showGraph) {
         // 关系图谱页（阶段三 T11.5：共现网络可视化 → 点节点看关联记忆）
         GraphScreen(onBack = { showGraph = false })
+    } else if (showRoleGraph) {
+        // B4 角色关系图谱页（我置顶独占行 + 其它开启角色两两成行 + 点角色看关系）
+        RoleRelationGraphScreen(onBack = { showRoleGraph = false })
     } else {
         Scaffold(
         topBar = {
@@ -345,6 +351,13 @@ fun MemoryScreen(onBack: () -> Unit) {
                     label = { Text("关系图谱") },
                     leadingIcon = {
                         Icon(Icons.Filled.Share, contentDescription = null, modifier = Modifier.size(16.dp))
+                    },
+                )
+                AssistChip(
+                    onClick = { showRoleGraph = true },
+                    label = { Text("角色关系") },
+                    leadingIcon = {
+                        Icon(Icons.Filled.Person, contentDescription = null, modifier = Modifier.size(16.dp))
                     },
                 )
             }

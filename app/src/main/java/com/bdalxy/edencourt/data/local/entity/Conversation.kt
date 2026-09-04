@@ -41,6 +41,8 @@ data class Conversation(
     val affinityScore: Int = 0,
     /** 本会话挂载的世界书 id（A3，null=未挂载；第一版一个会话最多挂 1 本） */
     val worldBookId: Long? = null,
+    /** 是否开启关系图谱（B4：会话级图谱开关；true=该会话角色出现在「我」的下方关系图中，并与其它开启角色成两两行）。「我」本身恒开启无需此字段 */
+    val graphEnabled: Boolean = false,
 ) {
     /**
      * 该会话手动设置的自定义作息（T11.10 深化：会话级）。
