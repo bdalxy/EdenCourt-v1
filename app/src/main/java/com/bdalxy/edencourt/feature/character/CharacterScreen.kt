@@ -4,27 +4,43 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AutoStories
+import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
@@ -44,6 +60,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -51,6 +68,11 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -61,14 +83,19 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.bdalxy.edencourt.EdenCourtApp
 import com.bdalxy.edencourt.core.ui.CharacterAvatar
 import com.bdalxy.edencourt.core.ui.saveAvatarFromUri
+import com.bdalxy.edencourt.core.ui.loadArtworkBitmap
+import com.bdalxy.edencourt.core.ui.saveArtworkFromUri
 import com.bdalxy.edencourt.data.local.entity.CharacterCardEntity
 import com.bdalxy.edencourt.data.schedule.CharacterSchedule
 import com.bdalxy.edencourt.data.schedule.scheduleTrait
 import com.bdalxy.edencourt.data.setting.ScheduleConfig
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * 角色卡管理页（T4.3，参考企划书 5.3.3/5.8.3 原型）。
+ * - 顶部：世界书入口卡（B3：展示世界书数量，点击进世界书管理页）
  * - 列表：头像+角色名+描述+「内置/导入」标签；内置卡优先
  * - FAB 导入 JSON 文件（基础解析；Tavern 兼容映射 T4.5 增强）
  * - 点击进详情：可编辑名称/简介，JSON 只读
@@ -76,12 +103,20 @@ import kotlinx.coroutines.launch
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
-fun CharacterScreen(onBack: () -> Unit) {
+fun CharacterScreen(onBack: () -> Unit, onOpenWorldBook: () -> Unit) {
     val context = LocalContext.current
     val app = context.applicationContext as EdenCourtApp
     val viewModel: CharacterViewModel = viewModel(factory = CharacterViewModel.factory(app))
     val cards by viewModel.cards.collectAsStateWithLifecycle()
     val importing by viewModel.importing.collectAsStateWithLifecycle()
+    // B3：待裁剪立绘路径（非空时显示头像框裁剪对话框）
+    var croppingArtwork by remember { mutableStateOf<String?>(null) }
+
+    // B3：世界书数量（顶部入口卡副标题）
+    val worldBookCount by viewModel.worldBookCount.collectAsStateWithLifecycle()
+    // B3：置顶卡独享顶部横滑区，其余回落下方网格（多张置顶可横滑不互相挤）
+    val pinnedCards = cards.filter { it.isPinned }
+    val normalCards = cards.filter { !it.isPinned }
     // T11.10 深化：全局基础作息（角色详情页「基于基础作息单独调节」的起点）
     val scheduleConfig by viewModel.scheduleConfig.collectAsStateWithLifecycle()
 
@@ -145,6 +180,25 @@ fun CharacterScreen(onBack: () -> Unit) {
         }
     }
 
+    // B3：立绘选择器（与头像独立的系统图选器）；选中后等比缩放大图保存到 artworks/，写库供置顶大卡背景用
+    val artworkPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia(),
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            val path = saveArtworkFromUri(context, uri)
+            val card = editingCard
+            if (card == null) return@launch
+            if (path != null) {
+                viewModel.setArtwork(card, path)
+                // B3-3b：保存立绘后弹出头像框裁剪器，让用户从立绘上框选头像
+                croppingArtwork = path
+            } else {
+                snackbarHostState.showSnackbar("立绘处理失败，请重试")
+            }
+        }
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -181,23 +235,53 @@ fun CharacterScreen(onBack: () -> Unit) {
                 Text("还没有角色卡，点击右下角导入")
             }
         } else {
-            LazyColumn(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
-                items(items = cards, key = { it.id }) { card ->
-                    CharacterCardListItem(
-                        card = card,
-                        onClick = { editingCard = card },
-                        onLongClick = {
-                            if (card.isBuiltIn) {
-                                // 内置卡不可删（企划书 3.4.3），轻提示
-                                scope.launch { snackbarHostState.showSnackbar("内置角色卡不可删除") }
-                            } else {
-                                pendingDelete = card
-                            }
-                        },
-                    )
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+            // B3：角色卡页整体改双列网格；顶部世界书入口卡 + 置顶横滑区为全宽项
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(2),
+            modifier = Modifier.fillMaxSize().padding(innerPadding),
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 24.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            // B3：顶部世界书入口卡（全宽）
+            item(span = { GridItemSpan(maxLineSpan) }) {
+                WorldBookEntryCard(
+                    count = worldBookCount,
+                    onClick = onOpenWorldBook,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+            // B3：置顶卡横滑大卡区（置顶 0 张则不显示；多张可横向滑动）
+            if (pinnedCards.isNotEmpty()) {
+                item(span = { GridItemSpan(maxLineSpan) }) {
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        items(pinnedCards, key = { it.id }) { card ->
+                            PinnedCard(
+                                card = card,
+                                onClick = { editingCard = card },
+                                onTogglePin = { viewModel.togglePin(card) },
+                            )
+                        }
+                    }
                 }
             }
+            // B3：其余普通卡两列网格（点击进详情，长按删除）
+            items(items = normalCards, key = { it.id }) { card ->
+                CharacterGridCard(
+                    card = card,
+                    onClick = { editingCard = card },
+                    onLongClick = {
+                        if (card.isBuiltIn) {
+                            // 内置卡不可删（企划书 3.4.3），轻提示
+                            scope.launch { snackbarHostState.showSnackbar("内置角色卡不可删除") }
+                        } else {
+                            pendingDelete = card
+                        }
+                    },
+                    onTogglePin = { viewModel.togglePin(card) },
+                )
+            }
+        }
         }
     }
 
@@ -241,7 +325,27 @@ fun CharacterScreen(onBack: () -> Unit) {
                 )
             },
             onClearAvatar = { viewModel.updateAvatar(liveCard, null) },
+            // B3：立绘设置/清除
+            onPickArtwork = {
+                artworkPicker.launch(
+                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
+                )
+            },
+            onClearArtwork = { viewModel.setArtwork(liveCard, null) },
             onDismiss = { editingCard = null },
+        )
+    }
+    // B3-3b：立绘头像框裁剪器（立绘保存后弹出；完成后把框内区域生成头像，覆盖该卡头像）
+    croppingArtwork?.let { path ->
+        ArtworkCropperDialog(
+            artworkPath = path,
+            onCancel = { croppingArtwork = null },
+            onConfirm = { avatarPath ->
+                val card = editingCard
+                if (card != null) viewModel.updateAvatar(card, avatarPath)
+                croppingArtwork = null
+                scope.launch { snackbarHostState.showSnackbar("头像已从立绘裁剪生成") }
+            },
         )
     }
 
@@ -373,71 +477,152 @@ private fun CreateCardDialog(
     )
 }
 
-/** 单个角色卡列表项：圆形头像（首字符）+ 名称 + 简介 + 内置/导入标签 */
+/** B3：普通角色卡网格格卡（两列）：上部头像+置顶图标，下部备注/名称 + 简介 */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun CharacterCardListItem(
+private fun CharacterGridCard(
     card: CharacterCardEntity,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
+    onTogglePin: () -> Unit,
 ) {
-    Row(
+    Card(
         modifier = Modifier
             .fillMaxWidth()
-            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick),
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+        ),
     ) {
-        // 头像：有自定义头像显示图片，否则默认主题色圆形色块 + 角色名首字（T6.2B）
-        CharacterAvatar(
-            avatarPath = card.avatar,
-            name = card.name,
-            modifier = Modifier.size(48.dp),
-        )
-
-        Spacer(modifier = Modifier.width(12.dp))
-
-        // 右侧：名称 + 标签（纵向），简介（下一行）
-        Column(modifier = Modifier.weight(1f)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    // T6.14：备注别名展示，未设则用原名（头像首字仍取 card.name，类微信）
-                    text = card.remark.ifBlank { card.name },
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Medium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f),
+        Column(modifier = Modifier.fillMaxWidth().padding(12.dp)) {
+            // 上部：居中头像 + 右上角置顶图标（点击切换置顶）
+            Box(modifier = Modifier.fillMaxWidth().height(96.dp), contentAlignment = Alignment.Center) {
+                CharacterAvatar(
+                    avatarPath = card.avatar,
+                    name = card.name,
+                    modifier = Modifier.size(64.dp),
                 )
-                Spacer(modifier = Modifier.width(8.dp))
-                // 内置/导入标签
-                Surface(
-                    shape = MaterialTheme.shapes.small,
-                    color = if (card.isBuiltIn) {
-                        MaterialTheme.colorScheme.secondaryContainer
-                    } else {
-                        MaterialTheme.colorScheme.tertiaryContainer
-                    },
+                IconButton(
+                    onClick = onTogglePin,
+                    modifier = Modifier.align(Alignment.TopEnd).size(28.dp),
                 ) {
-                    Text(
-                        text = if (card.isBuiltIn) "内置" else "导入",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = if (card.isBuiltIn) {
-                            MaterialTheme.colorScheme.onSecondaryContainer
+                    Icon(
+                        imageVector = Icons.Filled.PushPin,
+                        contentDescription = if (card.isPinned) "取消置顶" else "置顶角色卡",
+                        tint = if (card.isPinned) {
+                            MaterialTheme.colorScheme.primary
                         } else {
-                            MaterialTheme.colorScheme.onTertiaryContainer
+                            MaterialTheme.colorScheme.onSurfaceVariant
                         },
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                        modifier = Modifier.size(18.dp),
                     )
                 }
             }
+            // 下部：备注/名称 + 简介（备注别名展示，T6.14）
+            Text(
+                text = card.remark.ifBlank { card.name },
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
             Spacer(modifier = Modifier.height(4.dp))
             Text(
                 text = card.description.ifEmpty { "暂无简介" },
-                style = MaterialTheme.typography.bodyMedium,
+                style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+/**
+ * B3：置顶大卡（独占顶部横滑区；多张置顶可横向滑动）。
+ * 背景优先使用上传的立绘大图（artwork），无立绘时回退主题色 + 居中头像；
+ * 底部叠加柔和渐变压暗以衬托角色名。
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun PinnedCard(
+    card: CharacterCardEntity,
+    onClick: () -> Unit,
+    onTogglePin: () -> Unit,
+) {
+    // 异步加载立绘背景（IO 解码，采样压缩防内存）
+    var artwork by remember(card.artwork) { mutableStateOf<ImageBitmap?>(null) }
+    LaunchedEffect(card.artwork) {
+        artwork = card.artwork?.let { path ->
+            withContext(Dispatchers.IO) { loadArtworkBitmap(path) }?.asImageBitmap()
+        }
+    }
+    Card(
+        modifier = Modifier
+            .width(150.dp)
+            .height(200.dp)
+            .combinedClickable(onClick = onClick),
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f),
+        ),
+    ) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            if (artwork != null) {
+                // 立绘背景：整图 Crop 填满卡片
+                Image(
+                    bitmap = artwork!!,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                )
+                // 底部渐变遮罩：保证角色名清晰可读
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(
+                            Brush.verticalGradient(
+                                colors = listOf(
+                                    Color.Transparent,
+                                    Color.Black.copy(alpha = 0.55f),
+                                ),
+                                startY = 0f,
+                                endY = 140f,
+                            ),
+                        ),
+                )
+            } else {
+                // 无立绘：居中头像 + 主题色占位
+                CharacterAvatar(
+                    avatarPath = card.avatar,
+                    name = card.name,
+                    textSize = MaterialTheme.typography.headlineSmall.fontSize,
+                    modifier = Modifier.align(Alignment.Center).size(88.dp),
+                )
+            }
+            // 右上角置顶图标（置顶卡恒高亮，点击取消置顶回落网格）
+            IconButton(
+                onClick = onTogglePin,
+                modifier = Modifier.align(Alignment.TopEnd).padding(4.dp),
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.PushPin,
+                    contentDescription = "取消置顶",
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+            }
+            // 底部名称（立绘时压暗背景衬托）
+            Text(
+                text = card.remark.ifBlank { card.name },
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .fillMaxWidth()
+                    .padding(12.dp),
             )
         }
     }
@@ -455,6 +640,9 @@ private fun CharacterDetailDialog(
     onSave: (name: String, description: String, remark: String, schedule: ScheduleConfig?) -> Unit,
     onPickAvatar: () -> Unit,
     onClearAvatar: () -> Unit,
+    // B3：立绘背景（置顶大卡背景图）
+    onPickArtwork: () -> Unit,
+    onClearArtwork: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     var name by remember(card.id) { mutableStateOf(card.name) }
@@ -496,6 +684,30 @@ private fun CharacterDetailDialog(
                             TextButton(onClick = onClearAvatar) {
                                 Text("恢复默认头像")
                             }
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+                // 立绘设置区（B3：置顶大卡背景；当前使用上传的立绘大图）
+                HorizontalDivider()
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "立绘背景（置顶大卡展示）",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Medium,
+                )
+                Text(
+                    text = "上传立绘大图，置顶该角色时以立绘作为大卡背景；头像用立绘上的头像框裁剪（后续支持）。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    TextButton(onClick = onPickArtwork) {
+                        Text(if (card.artwork != null) "更换立绘" else "设置立绘")
+                    }
+                    if (card.artwork != null) {
+                        TextButton(onClick = onClearArtwork) {
+                            Text("清除立绘", color = MaterialTheme.colorScheme.error)
                         }
                     }
                 }
@@ -647,5 +859,51 @@ private fun formatMinute(minute: Int): String {
         "次日 %02d:%02d".format(h - 24, m)
     } else {
         "%02d:%02d".format(h, m)
+    }
+}
+
+/**
+ * B3：角色卡页顶部「世界书」入口卡。
+ * 展示世界书数量副标题，点击进入世界书管理页；浅色圆角卡片 + 左侧书本图标。
+ */
+@Composable
+private fun WorldBookEntryCard(count: Int, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    Surface(
+        onClick = onClick,
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                imageVector = Icons.Filled.AutoStories,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(28.dp),
+            )
+            Spacer(modifier = Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "世界书",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                )
+                Text(
+                    text = if (count > 0) "已建 $count 本，可挂载到会话中" else "还没有世界书，去创建一本吧",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }

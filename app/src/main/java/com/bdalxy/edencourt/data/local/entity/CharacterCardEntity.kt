@@ -37,6 +37,10 @@ data class CharacterCardEntity(
     val jsonContent: String,
     /** 自定义头像本地文件路径（T6.2B；null=使用默认首字头像） */
     val avatar: String? = null,
+    /** 立绘大图本地文件路径（B3：置顶大卡背景用；null=暂无立绘，用主题色+头像占位） */
+    val artwork: String? = null,
+    /** 是否置顶（B3：置顶卡独占顶部横滑大卡区，取消置顶回落普通网格；0=否） */
+    val isPinned: Boolean = false,
     /** 是否内置卡（内置卡不可删除） */
     val isBuiltIn: Boolean = false,
     /** 建档随机短码（v1.2 会话唯一身份，T8.0） */

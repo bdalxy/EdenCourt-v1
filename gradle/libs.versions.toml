@@ -14,6 +14,7 @@ datastore = "1.1.1"
 okhttp = "4.12.0"
 kotlinxSerialization = "1.7.3"
 coil = "2.7.0"
+exifinterface = "1.3.7"
 junit = "4.13.2"
 mockk = "1.13.10"
 testRunner = "1.6.1"
@@ -46,6 +47,8 @@ androidx-datastore-preferences = { group = "androidx.datastore", name = "datasto
 okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttp" }
 kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "kotlinxSerialization" }
 coil-compose = { group = "io.coil-kt", name = "coil-compose", version.ref = "coil" }
+# 图片 EXIF 方向读取（选图后纠正照片旋转；从 content:// 流安全读取不读全图）
+androidx-exifinterface = { group = "androidx.exifinterface", name = "exifinterface", version.ref = "exifinterface" }
 
 # —— 单元测试（方案 G-③ 自动化回归集 Phase1：核心纯逻辑单测）——
 junit = { group = "junit", name = "junit", version.ref = "junit" }

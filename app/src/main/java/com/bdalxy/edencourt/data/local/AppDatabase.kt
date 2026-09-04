@@ -35,12 +35,13 @@ import com.bdalxy.edencourt.data.local.entity.WorldInfoEntry
 /**
  * 本地数据库单例（企划书 3.3.2 / T2.4）。
  * - 挂载：Conversation、Message、CharacterCardEntity、MemoryItem 四个实体与对应 DAO
- * - version=28：v5→v6 character_cards 加 avatar；v6→v7 memory_items 加 characterCardId；v7→v8 character_cards/conversations 加 remark（T6.14）；v8→v9 memory_items 加 visibility（共享/私有，T7.1）；v9→v10 character_cards/conversations 加 code（会话唯一身份，T8.0）；v10→v11 memory_items 加 isTopSecret（绝密兜底，T8.2）；v11→v12 conversations 加 interactionEnabled（互动资格开关，T8.7）；v12→v13 新增 conv_relationship 关系表（互动关系底座，T8.8）；v13→v14 新增 interaction/interaction_participant/interaction_turn 三层互动表（T8.10）；v14→v15 新增 user_identity 用户自设身份表（T8.13）；v15→v16 memory_items 补多类型管理字段；v16→v17 新增 FTS4 记忆检索虚拟表；v17→v18 interaction 加 source 列；v18→v19 character_cards 加自定义作息 6 列；v19→v20 conversations 加会话作息 3 列（lifeEnabled+起床/入睡，T11.10 深化：每个会话角色单独调整）；v20→v21 interaction 加 motive 列（T11.12 事件驱动）；v21→v22 新增 relationship_event 关系事件表（T11.13 关系事件叙事）；v22→v23 relationship_event 加 type 列；v23→v24 relationship_event convBId 改可空列；v24→v25 新增 conversation_traits 会话独有人格表（T13.1 角色差异化）；v25→v26 conversations 加 affinityScore 列（A1 用户↔角色亲密度）；v26→v27 新增 conversation_mood 会话情绪表（A2 实时情绪）；v27→v28 conversations 加 worldBookId + 新增 world_info_book/world_info_entry（A3 世界书）
+ * - version=30：v28→v29 character_cards 加 isPinned 置顶列；v29→v30 character_cards 加 artwork 立绘列（B3 立绘大卡）
+ * - 早期：v5→v6 character_cards 加 avatar；v6→v7 memory_items 加 characterCardId；v7→v8 character_cards/conversations 加 remark（T6.14）；v8→v9 memory_items 加 visibility（共享/私有，T7.1）；v9→v10 character_cards/conversations 加 code（会话唯一身份，T8.0）；v10→v11 memory_items 加 isTopSecret（绝密兜底，T8.2）；v11→v12 conversations 加 interactionEnabled（互动资格开关，T8.7）；v12→v13 新增 conv_relationship 关系表（互动关系底座，T8.8）；v13→v14 新增 interaction/interaction_participant/interaction_turn 三层互动表（T8.10）；v14→v15 新增 user_identity 用户自设身份表（T8.13）；v15→v16 memory_items 补多类型管理字段；v16→v17 新增 FTS4 记忆检索虚拟表；v17→v18 interaction 加 source 列；v18→v19 character_cards 加自定义作息 6 列；v19→v20 conversations 加会话作息 3 列（lifeEnabled+起床/入睡，T11.10 深化：每个会话角色单独调整）；v20→v21 interaction 加 motive 列（T11.12 事件驱动）；v21→v22 新增 relationship_event 关系事件表（T11.13 关系事件叙事）；v22→v23 relationship_event 加 type 列；v23→v24 relationship_event convBId 改可空列；v24→v25 新增 conversation_traits 会话独有人格表（T13.1 角色差异化）；v25→v26 conversations 加 affinityScore 列（A1 用户↔角色亲密度）；v26→v27 新增 conversation_mood 会话情绪表（A2 实时情绪）；v27→v28 conversations 加 worldBookId + 新增 world_info_book/world_info_entry（A3 世界书）
  * - schema 已导出到 app/schemas（企划书 4.1.5）
  */
 @Database(
     entities = [Conversation::class, Message::class, CharacterCardEntity::class, MemoryItem::class, ConversationRelationship::class, RelationshipEvent::class, Interaction::class, InteractionParticipant::class, InteractionTurn::class, UserIdentity::class, ConversationTraits::class, ConversationMood::class, WorldInfoBook::class, WorldInfoEntry::class],
-    version = 28,
+    version = 30,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -454,6 +455,20 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /** v29→v30：character_cards 加 artwork 立绘列（B3 置顶大卡背景，可空） */
+        private val MIGRATION_29_30 = object : Migration(29, 30) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE character_cards ADD COLUMN artwork TEXT")
+            }
+        }
+
+        /** v28→v29：character_cards 加 isPinned 置顶列（B3 置顶大卡，默认 0=不置顶） */
+        private val MIGRATION_28_29 = object : Migration(28, 29) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE character_cards ADD COLUMN isPinned INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
         /** v1→v2：messages 表新增 reasoning 列，默认空串（兼容旧数据） */
         private val MIGRATION_1_2 = object : Migration(1, 2) {
             override fun migrate(db: SupportSQLiteDatabase) {
@@ -542,7 +557,7 @@ abstract class AppDatabase : RoomDatabase() {
             MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13,
             MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18, MIGRATION_18_19,
             MIGRATION_19_20, MIGRATION_20_21, MIGRATION_21_22, MIGRATION_22_23, MIGRATION_23_24, MIGRATION_24_25,
-            MIGRATION_25_26, MIGRATION_26_27, MIGRATION_27_28,
+            MIGRATION_25_26, MIGRATION_26_27, MIGRATION_27_28, MIGRATION_28_29, MIGRATION_29_30,
         )
 
         /** 获取单例（双重检查锁，避免并发重复建库） */

@@ -1,6 +1,8 @@
 package com.bdalxy.edencourt.feature.settings
 
 import android.app.Application
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -47,6 +49,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -105,12 +108,24 @@ fun SettingsScreen(
             contentPadding = PaddingValues(vertical = 16.dp),
             verticalArrangement = Arrangement.spacedBy(24.dp),
         ) {
-            // 第 1 区：AI API 配置（T3.3）
-            item { SettingsSectionCard { ApiSettingsSection(viewModel = viewModel) } }
-            // 第 2 区：我的身份（用户自设角色卡身份，T8.13）
-            item { SettingsSectionCard { IdentitySettingsSection(viewModel = viewModel) } }
-            // 第 3 区：角色作息（T11.10，可调，即时生效）
-            item { SettingsSectionCard { ScheduleSettingsSection(viewModel = viewModel) } }
+            // 第 1 区：AI API 配置（T3.3）；长分组改为可折叠（B2 设置页单栏折叠），默认收起
+            item {
+                CollapsibleSection(title = "AI API 配置") {
+                    SettingsSectionCard { ApiSettingsSection(viewModel = viewModel) }
+                }
+            }
+            // 第 2 区：我的身份（用户自设角色卡身份，T8.13）；可折叠
+            item {
+                CollapsibleSection(title = "我的身份") {
+                    SettingsSectionCard { IdentitySettingsSection(viewModel = viewModel) }
+                }
+            }
+            // 第 3 区：角色作息（T11.10，可调，即时生效）；可折叠
+            item {
+                CollapsibleSection(title = "角色作息") {
+                    SettingsSectionCard { ScheduleSettingsSection(viewModel = viewModel) }
+                }
+            }
             // 第 4 区：互动中心入口（T11.13，从设置页也能进入：查看/发起互动、自动驱动、关系故事）
             item { InteractionCenterSection(onOpenInteraction = onOpenInteraction) }
             // 第 5 区：世界书入口（C，从设置页也能进入：管理书籍与条目）
@@ -126,6 +141,47 @@ fun SettingsScreen(
 /** 是否为 debug 构建（无 BuildConfig 时用 ApplicationInfo 调试标志判断，release 恒为 false） */
 private fun isDebugBuild(application: Application): Boolean =
     (application.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
+
+/**
+ * B2：设置页可折叠分组（单栏折叠）。
+ * 标题行点击展开/收起；收起时页面紧凑不超长，展开后展示内部分区卡片。
+ */
+@Composable
+private fun CollapsibleSection(
+    title: String,
+    defaultExpanded: Boolean = false,
+    content: @Composable () -> Unit,
+) {
+    var expanded by rememberSaveable { mutableStateOf(defaultExpanded) }
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { expanded = !expanded }
+                .padding(start = 20.dp, end = 12.dp, top = 4.dp, bottom = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.weight(1f),
+            )
+            Icon(
+                imageVector = Icons.Filled.ArrowDropDown,
+                contentDescription = if (expanded) "收起" else "展开",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                // 展开时箭头旋转 180° 朝上
+                modifier = Modifier
+                    .size(24.dp)
+                    .rotate(if (expanded) 180f else 0f),
+            )
+        }
+        AnimatedVisibility(visible = expanded) {
+            content()
+        }
+    }
+}
 
 /**
  * 设置页分组卡片（P0-3 设置页分组整理）：把每个功能区用一个柔和圆角卡片包起来，

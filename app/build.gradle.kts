@@ -100,6 +100,9 @@ dependencies {
     implementation(libs.okhttp)
     implementation(libs.kotlinx.serialization.json)
 
+    // 图片 EXIF 方向读取（选图后纠正照片旋转；T6.2B 图片处理）
+    implementation(libs.androidx.exifinterface)
+
     debugImplementation(libs.androidx.ui.tooling)
 
     // 方案 G-③ 自动化回归集 Phase1：核心纯逻辑 JVM 单元测试（好感度分档/记忆排序/冲突判定等）

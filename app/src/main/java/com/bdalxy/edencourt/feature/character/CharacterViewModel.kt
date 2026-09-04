@@ -8,6 +8,7 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.bdalxy.edencourt.EdenCourtApp
 import com.bdalxy.edencourt.data.local.dao.CharacterCardDao
+import com.bdalxy.edencourt.data.local.dao.WorldInfoDao
 import com.bdalxy.edencourt.data.local.entity.CharacterCardEntity
 import com.bdalxy.edencourt.data.setting.ScheduleConfig
 import com.bdalxy.edencourt.data.setting.ScheduleConfigStore
@@ -16,6 +17,7 @@ import com.bdalxy.edencourt.domain.CharacterCardParser
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -27,6 +29,7 @@ import kotlinx.coroutines.launch
 class CharacterViewModel(
     private val dao: CharacterCardDao,
     private val scheduleConfigStore: ScheduleConfigStore,
+    private val worldInfoDao: WorldInfoDao,
 ) : ViewModel() {
 
     /** 角色卡列表（内置卡优先，再按创建时间降序，数据库自动维护） */
@@ -36,6 +39,16 @@ class CharacterViewModel(
                 scope = viewModelScope,
                 started = SharingStarted.WhileSubscribed(5_000),
                 initialValue = emptyList(),
+            )
+
+    /** 世界书数量（B3：角色卡页顶部「世界书」入口卡副标题展示，随库实时刷新） */
+    val worldBookCount: StateFlow<Int> =
+        worldInfoDao.observeBooks()
+            .map { it.size }
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(5_000),
+                initialValue = 0,
             )
 
     /** 全局基础作息（T11.10 深化：角色详情页「基于基础作息单独调节」的起点） */
@@ -49,6 +62,16 @@ class CharacterViewModel(
     /** 导入中标志（控制 FAB 加载态，防止重复导入） */
     private val _importing = MutableStateFlow(false)
     val importing: StateFlow<Boolean> = _importing
+
+    /** 置顶/取消置顶（B3：置顶卡独占顶部横滑大卡区；写库后 observeAll 自动重发刷新列表） */
+    fun togglePin(card: CharacterCardEntity) {
+        viewModelScope.launch { dao.setPinned(card.id, !card.isPinned) }
+    }
+
+    /** 设置/清除立绘（B3：path 为保存后的立绘大图路径，null 表示清除；置顶大卡背景用） */
+    fun setArtwork(card: CharacterCardEntity, path: String?) {
+        viewModelScope.launch { dao.setArtwork(card.id, path) }
+    }
 
     /**
      * 导入角色卡 JSON（T4.5：标准格式 + Tavern CCv3 兼容映射）。
@@ -191,7 +214,11 @@ class CharacterViewModel(
         fun factory(application: Application): ViewModelProvider.Factory = viewModelFactory {
             initializer {
                 val app = this[ViewModelProvider.AndroidViewModelFactory.APPLICATION_KEY] as EdenCourtApp
-                CharacterViewModel(dao = app.characterCardDao, scheduleConfigStore = app.scheduleConfigStore)
+                CharacterViewModel(
+                    dao = app.characterCardDao,
+                    scheduleConfigStore = app.scheduleConfigStore,
+                    worldInfoDao = app.worldInfoDao,
+                )
             }
         }
     }

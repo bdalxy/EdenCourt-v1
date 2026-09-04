@@ -27,9 +27,17 @@ interface CharacterCardDao {
     @Delete
     suspend fun delete(card: CharacterCardEntity)
 
-    /** 观察全部角色卡：内置卡优先，再按创建时间降序 */
-    @Query("SELECT * FROM character_cards ORDER BY isBuiltIn DESC, createdAt DESC")
+    /** 观察全部角色卡：置顶优先，再内置卡，再按创建时间降序（B3 置顶排序） */
+    @Query("SELECT * FROM character_cards ORDER BY isPinned DESC, isBuiltIn DESC, createdAt DESC")
     fun observeAll(): Flow<List<CharacterCardEntity>>
+
+    /** 置顶/取消置顶（B3：置顶卡独占顶部横滑大卡区，取消置顶回落普通网格） */
+    @Query("UPDATE character_cards SET isPinned = :pinned WHERE id = :id")
+    suspend fun setPinned(id: Long, pinned: Boolean)
+
+    /** 更新立绘路径（B3：置顶大卡背景；null 表示清除立绘） */
+    @Query("UPDATE character_cards SET artwork = :path WHERE id = :id")
+    suspend fun setArtwork(id: Long, path: String?)
 
     /** 按 id 观察单张角色卡（详情页实时跟随） */
     @Query("SELECT * FROM character_cards WHERE id = :id")

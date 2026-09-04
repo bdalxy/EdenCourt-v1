@@ -53,7 +53,11 @@ fun AppRoot() {
             InteractionCenterScreen(onBack = { navController.popBackStack() })
         }
         composable(NavRoutes.CHARACTER_CARDS) {
-            CharacterScreen(onBack = { navController.popBackStack() })
+            CharacterScreen(
+                onBack = { navController.popBackStack() },
+                // B3：角色卡页顶部「世界书」入口卡 → 世界书管理页
+                onOpenWorldBook = { navController.navigate(NavRoutes.WORLD_BOOK) },
+            )
         }
         composable(NavRoutes.MEMORY_LIST) {
             MemoryScreen(onBack = { navController.popBackStack() })

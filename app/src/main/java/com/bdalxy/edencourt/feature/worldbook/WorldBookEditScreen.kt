@@ -76,21 +76,35 @@ class WorldBookEditViewModel(
     private val dao: WorldInfoDao,
 ) : ViewModel() {
 
-    /** 当前书（新建场景 bookId<=0 时为 null，创建成功后再回填） */
-    private val _book = MutableStateFlow(if (bookId > 0) dao.getBook(bookId) else null)
+    /** 当前书（新建场景 bookId<=0 时为 null；初始值异步从 IO 加载，避免主线程访问数据库触发 Room assertNotMainThread 崩溃） */
+    private val _book = MutableStateFlow<WorldInfoBook?>(null)
     val book: StateFlow<WorldInfoBook?> = _book.asStateFlow()
 
     /** 该书条目列表 */
-    private val _entries = MutableStateFlow(if (bookId > 0) dao.getEntriesByBook(bookId) else emptyList())
+    private val _entries = MutableStateFlow<List<WorldInfoEntry>>(emptyList())
     val entries: StateFlow<List<WorldInfoEntry>> = _entries.asStateFlow()
+
+    init {
+        // 构造期不直接在主线程调同步 DAO：转到 IO 异步加载首屏数据
+        if (bookId > 0) {
+            viewModelScope.launch {
+                withContext(Dispatchers.IO) {
+                    _book.value = dao.getBook(bookId)
+                    _entries.value = dao.getEntriesByBook(bookId)
+                }
+            }
+        }
+    }
 
     /** 一次性操作反馈（保存/删除后提示） */
     val toast = MutableStateFlow<String?>(null)
 
-    /** 一次性读取即重查条目（新增/删除/更新后调用保证列表最新） */
-    private fun reloadEntries() {
+    /** 一次性读取即重查条目（新增/删除/更新后调用保证列表最新）；同步查询放 IO 执行 */
+    private suspend fun reloadEntries() {
         val current = _book.value?.id
-        if (current != null) _entries.value = dao.getEntriesByBook(current)
+        if (current != null) {
+            withContext(Dispatchers.IO) { _entries.value = dao.getEntriesByBook(current) }
+        }
     }
 
     /** 新建世界书（bookId<=0 时调用）。返回新 id，成功后写入 _book 并重查条目 */
@@ -99,7 +113,7 @@ class WorldBookEditViewModel(
             val id = withContext(Dispatchers.IO) {
                 dao.insertBook(WorldInfoBook(name = name.trim(), description = description.trim()))
             }
-            _book.value = dao.getBook(id)
+            _book.value = withContext(Dispatchers.IO) { dao.getBook(id) }
             reloadEntries()
             toast.value = "已创建"
         }
