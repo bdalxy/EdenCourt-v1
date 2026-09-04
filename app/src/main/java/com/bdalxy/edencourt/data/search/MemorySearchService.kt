@@ -112,6 +112,9 @@ class MemorySearchService(
 
         val ranked = items.sortedWith(
             compareByDescending<MemoryItem> { relevanceScore(it, q) }
+                // A4 情感记忆优先：与当前话题相关之上、置顶之下，插入「情感」档位——
+                // 把角色对用户的情感态度(EMOTION)顶到前面，让「知道你在像我」等感受优先注入口吻
+                .thenByDescending { it.type == MemoryType.EMOTION }
                 .thenByDescending { it.isPinned }
                 .thenByDescending { it.importance == MemoryImportance.IMPORTANT }
                 .thenByDescending { it.updatedAt },

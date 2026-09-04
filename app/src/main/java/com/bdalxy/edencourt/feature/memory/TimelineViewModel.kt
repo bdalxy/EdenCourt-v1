@@ -71,6 +71,7 @@ class TimelineViewModel(
         MemoryType.SKILL -> "技能"
         MemoryType.SITUATION -> "情景"
         MemoryType.RELATION -> "关系"
+        MemoryType.EMOTION -> "情感"
         MemoryType.OTHER -> "其他"
     }
 

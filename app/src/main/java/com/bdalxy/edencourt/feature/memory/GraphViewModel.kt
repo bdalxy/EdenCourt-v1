@@ -234,6 +234,7 @@ class GraphViewModel(
         com.bdalxy.edencourt.data.local.entity.MemoryType.SKILL -> "技能"
         com.bdalxy.edencourt.data.local.entity.MemoryType.SITUATION -> "情景"
         com.bdalxy.edencourt.data.local.entity.MemoryType.RELATION -> "关系"
+        com.bdalxy.edencourt.data.local.entity.MemoryType.EMOTION -> "情感"
         com.bdalxy.edencourt.data.local.entity.MemoryType.OTHER -> "其他"
     }
 

@@ -27,11 +27,12 @@ class MemorySearchRankTest {
         importance: MemoryImportance = MemoryImportance.NORMAL,
         isPinned: Boolean = false,
         updatedAt: Long = id, // 默认按 id 递增使更新时间唯一，便于断言
+        type: MemoryType = MemoryType.OTHER, // A4：可通过 type 指定情感记忆等类型
     ) = MemoryItem(
         id = id,
         content = content,
         keywords = keywords,
-        type = MemoryType.OTHER,
+        type = type,
         importance = importance,
         isPinned = isPinned,
         updatedAt = updatedAt,
@@ -116,6 +117,39 @@ class MemorySearchRankTest {
     fun `topK截断生效`() {
         val items = listOf(mem(1, "a"), mem(2, "b"), mem(3, "c"))
         assertEquals(2, service.rankByRelevance(items, topK = 2).size)
+    }
+
+    // ---- A4 情感记忆优先（EMOTION 类型提权）----
+
+    @Test
+    fun `情感记忆_无query时优先于置顶普通`() {
+        // 情感记忆整体应先于(即便被置顶的)普通记忆
+        val items = listOf(
+            mem(1, "小夏记着羽爱喝奶茶", isPinned = true),
+            mem(2, "小夏其实很在意羽", type = MemoryType.EMOTION),
+        )
+        assertEquals(2L, service.rankByRelevance(items, 20, query = null)[0].id)
+    }
+
+    @Test
+    fun `情感记忆_优先于重要普通记忆`() {
+        val items = listOf(
+            mem(1, "羽的职业是设计师", importance = MemoryImportance.IMPORTANT),
+            mem(2, "小夏对羽有好感，说话会不自觉变软", type = MemoryType.EMOTION),
+        )
+        assertEquals(2L, service.rankByRelevance(items, 20, query = null)[0].id)
+    }
+
+    @Test
+    fun `情感记忆_仍让位于当前话题相关性`() {
+        // 聊天正聊奶茶时，相关记忆优先；无关的情感记忆排在相关之后、普通之前
+        val items = listOf(
+            mem(1, "小夏其实很在意羽", type = MemoryType.EMOTION),
+            mem(2, "小夏前天买了杯奶茶", "奶茶,小夏"),
+        )
+        val ranked = service.rankByRelevance(items, 20, query = "还记得那次买奶茶吗")
+        assertEquals(2L, ranked[0].id) // 相关(奶茶)最前
+        assertEquals(1L, ranked[1].id) // 情感记忆紧随
     }
 
     // ---- 方案 F v2：触发增强（findProactiveReference 主动引用时机）----

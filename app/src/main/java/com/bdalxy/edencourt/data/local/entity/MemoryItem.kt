@@ -19,6 +19,8 @@ enum class MemoryType {
     SITUATION,
     /** 关系（如「小夏是我的青梅竹马」） */
     RELATION,
+    /** 情感（A4 新增：角色对用户的情感态度/亲密感受，如「小夏其实很在意我」。注入时优先，让角色口吻带温度） */
+    EMOTION,
     /** 其他（未归类） */
     OTHER,
 }
