@@ -8,6 +8,7 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.bdalxy.edencourt.EdenCourtApp
 import com.bdalxy.edencourt.data.local.dao.CharacterCardDao
+import com.bdalxy.edencourt.data.local.dao.ConversationParticipantDao
 import com.bdalxy.edencourt.data.local.dao.ConversationTraitsDao
 import com.bdalxy.edencourt.data.local.entity.CharacterCardEntity
 import com.bdalxy.edencourt.data.local.entity.Conversation
@@ -36,6 +37,7 @@ class ConversationListViewModel(
     private val scheduleConfigStore: ScheduleConfigStore,
     private val conversationTraitsDao: ConversationTraitsDao,
     private val conversationTraitsGenerator: ConversationTraitsGenerator,
+    private val conversationParticipantDao: ConversationParticipantDao,
 ) : ViewModel() {
 
     /** 会话列表 UI 状态（按更新时间降序，数据库自动维护） */
@@ -127,6 +129,26 @@ class ConversationListViewModel(
         }
     }
 
+    /** 创建群聊（v2.0 A6-5）：新建 isGroup=true 的会话并写入参与者关联 */
+    fun createGroupConversation(title: String, participantIds: List<Long>, onCreated: (Long) -> Unit) {
+        viewModelScope.launch {
+            val id = repository.createConversation(
+                characterCardId = null,
+                title = title,
+                isGroup = true,
+            )
+            participantIds.forEach { pid ->
+                conversationParticipantDao.insert(
+                    com.bdalxy.edencourt.data.local.entity.ConversationParticipant(
+                        conversationId = id,
+                        participantConversationId = pid,
+                    ),
+                )
+            }
+            onCreated(id)
+        }
+    }
+
     /** 删除会话（长按二次确认后调用；消息由外键级联删除） */
     fun deleteConversation(conversation: Conversation) {
         viewModelScope.launch {
@@ -165,6 +187,7 @@ class ConversationListViewModel(
                     scheduleConfigStore = app.scheduleConfigStore,
                     conversationTraitsDao = app.conversationTraitsDao,
                     conversationTraitsGenerator = app.conversationTraitsGenerator,
+                    conversationParticipantDao = app.conversationParticipantDao,
                 )
             }
         }

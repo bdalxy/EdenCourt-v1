@@ -111,6 +111,10 @@ fun ConversationListScreen(
     var remarkTarget by remember { mutableStateOf<Conversation?>(null) }
     // 新建会话选卡弹窗开关（T4.7）
     var showCardPicker by remember { mutableStateOf(false) }
+    // v2.0 A6-5：创建群聊对话框状态
+    var showGroupCreator by remember { mutableStateOf(false) }
+    var groupTitle by remember { mutableStateOf("") }
+    var groupSelectedIds by remember { mutableStateOf<Set<Long>>(emptySet()) }
 
     Scaffold(
         topBar = {
@@ -146,6 +150,10 @@ fun ConversationListScreen(
                         DropdownMenuItem(
                             text = { Text("关于") },
                             onClick = { menuExpanded = false; onOpenAbout() },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("创建群聊") },
+                            onClick = { menuExpanded = false; showGroupCreator = true },
                         )
                     }
                 },
@@ -257,6 +265,105 @@ fun ConversationListScreen(
             }
             Spacer(modifier = Modifier.height(16.dp))
         }
+    }
+
+    // v2.0 A6-5：创建群聊对话框（输入群名 + 勾选参与者会话）
+    if (showGroupCreator) {
+        val nonGroupConversations = conversations.filter { !it.isGroup }
+        AlertDialog(
+            onDismissRequest = {
+                showGroupCreator = false
+                groupTitle = ""
+                groupSelectedIds = emptySet()
+            },
+            title = { Text("创建群聊") },
+            text = {
+                Column {
+                    OutlinedTextField(
+                        value = groupTitle,
+                        onValueChange = { groupTitle = it },
+                        label = { Text("群聊名称") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        "选择参与者（至少 2 人）：",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    if (nonGroupConversations.isEmpty()) {
+                        Text(
+                            "暂无可用会话，请先创建 1v1 对话",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 4.dp),
+                        )
+                    }
+                    LazyColumn(
+                        modifier = Modifier.fillMaxWidth().heightIn(max = 240.dp),
+                    ) {
+                        items(nonGroupConversations) { conv ->
+                            val card = characterCards.firstOrNull { it.id == conv.characterCardId }
+                            val name = conv.remark.takeIf { it.isNotBlank() }
+                                ?: card?.remark?.takeIf { it.isNotBlank() }
+                                ?: card?.name
+                                ?: "默认助手"
+                            val checked = conv.id in groupSelectedIds
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        groupSelectedIds = if (checked) {
+                                            groupSelectedIds - conv.id
+                                        } else {
+                                            groupSelectedIds + conv.id
+                                        }
+                                    }
+                                    .padding(vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    text = if (checked) "☑" else "☐",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    modifier = Modifier.padding(end = 8.dp),
+                                )
+                                Text(name)
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        if (groupTitle.isNotBlank() && groupSelectedIds.size >= 2) {
+                            viewModel.createGroupConversation(
+                                title = groupTitle,
+                                participantIds = groupSelectedIds.toList(),
+                                onCreated = onNavigateToChat,
+                            )
+                            showGroupCreator = false
+                            groupTitle = ""
+                            groupSelectedIds = emptySet()
+                        }
+                    },
+                    enabled = groupTitle.isNotBlank() && groupSelectedIds.size >= 2,
+                ) {
+                    Text("创建")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        showGroupCreator = false
+                        groupTitle = ""
+                        groupSelectedIds = emptySet()
+                    },
+                ) {
+                    Text("取消")
+                }
+            },
+        )
     }
 
     // 长按操作菜单（T6.10 + 6.5 体验修正）：底部弹窗「置顶/取消置顶 + 删除」（更贴近微信长按交互）

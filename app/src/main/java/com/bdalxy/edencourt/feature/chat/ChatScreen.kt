@@ -200,12 +200,18 @@ fun ChatScreen(
             ) {
                 items(items = displayMessages, key = { it.id }) { message ->
                     // G-①：只渲染展示窗口子集 displayMessages（含向上加载的更多历史）
+                    // v2.0 A6-5：群聊中解析发送者名（senderConversationId → 显示名）
+                    var senderName by remember { mutableStateOf<String?>(null) }
+                    LaunchedEffect(message.senderConversationId) {
+                        senderName = viewModel.senderNameFor(message.senderConversationId)
+                    }
                     MessageBubble(
                         message = message,
                         error = errorMessages[message.id],
                         // T6.6：把会话绑定角色卡的头像/角色名传给气泡，AI 头像跟随角色卡（自定义/默认首字）
                         assistantAvatar = roleCard?.avatar,
                         assistantName = roleName,
+                        senderName = senderName,
                         onRetry = { viewModel.retry(message.id) },
                         onDismissError = { viewModel.dismissError(message.id) },
                         onOpenSettings = onOpenSettings,

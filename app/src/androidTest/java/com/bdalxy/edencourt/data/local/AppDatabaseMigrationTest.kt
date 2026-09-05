@@ -195,7 +195,40 @@ class AppDatabaseMigrationTest {
     }
 
     /**
-     * 把 ALL_MIGRATIONS 当作纯函数按版本升序链式执行（与生产 builder.addMigrations 用的是同一批对象）。
+     * 用例6：迁移 v33→v34（v2.0 A6-1 群聊数据层：conversations 加 isGroup、messages 加 senderConversationId、新增 conversation_participants 表）。
+     * 验证：存量会话 isGroup 默认 0、存量消息 senderConversationId 默认 NULL、新表可创建并插入。
+     */
+    @Test
+    fun migrateFrom_v33_to_v34_addsGroupChatFields() {
+        helper.createDatabase(TEST_DB6, 33).use { db ->
+            // 埋入 v33 形态的存量会话和消息
+            db.execSQL(
+                "INSERT INTO conversations (title, remark, code, interactionEnabled, createdAt, updatedAt, " +
+                    "isPinned, lastMessagePreview, lastMessageTime, affinityScore, relationDirection, " +
+                    "candidateDirection, candidateCount) " +
+                    "VALUES ('存量会话', '', 'V-test34', 0, 1000, 2000, 0, '你好', 2000, 30, 'NONE', 'NONE', 0)",
+            )
+            db.execSQL(
+                "INSERT INTO messages (conversationId, role, content, createdAt, status) " +
+                    "VALUES (1, 'USER', '测试消息', 3000, 'DONE')",
+            )
+
+            migrateChain(db, from = 33, to = 34)
+
+            // isGroup 默认 0（存量 1v1 会话不是群聊）
+            val isGroup = queryInt(db, "SELECT isGroup FROM conversations WHERE code = 'V-test34' LIMIT 1")
+            check(isGroup == 0) { "isGroup 默认值不对: $isGroup" }
+            // senderConversationId 默认 NULL（存量消息无发送者归属）
+            val senderNull = queryInt(db, "SELECT COUNT(*) FROM messages WHERE senderConversationId IS NULL")
+            check(senderNull == 1) { "存量消息 senderConversationId 应为 NULL，实测非空数: $senderNull" }
+            // 新表 conversation_participants 可写入
+            db.execSQL("INSERT INTO conversation_participants (conversationId, participantConversationId) VALUES (1, 1)")
+            val count = queryInt(db, "SELECT COUNT(*) FROM conversation_participants")
+            check(count == 1) { "conversation_participants 应可插入，实测: $count" }
+        }
+    }
+
+    /**
      * 中途任一迁移抛异常即测试失败——从而捕获「某次迁移在真实数据形态下跑不通」的回归。
      */
     private fun migrateChain(db: SupportSQLiteDatabase, from: Int, to: Int) {
@@ -216,5 +249,6 @@ class AppDatabaseMigrationTest {
         private const val TEST_DB3 = "migration-test-v24.db"
         private const val TEST_DB4 = "migration-test-v31.db"
         private const val TEST_DB5 = "migration-test-v32.db"
+        private const val TEST_DB6 = "migration-test-v33.db"
     }
 }

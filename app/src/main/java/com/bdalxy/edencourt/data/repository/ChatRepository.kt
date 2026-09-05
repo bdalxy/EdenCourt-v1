@@ -36,8 +36,8 @@ class ChatRepository(
      * 新建会话，返回生成的会话 id（T4.7：支持绑定角色卡）。
      * @param characterCardId 绑定的角色卡 id（可空 = 默认助手；绑定规则见企划书 2.2.2）
      */
-    suspend fun createConversation(characterCardId: Long? = null): Long =
-        conversationDao.insert(Conversation(characterCardId = characterCardId))
+    suspend fun createConversation(characterCardId: Long? = null, title: String? = null, isGroup: Boolean = false): Long =
+        conversationDao.insert(Conversation(characterCardId = characterCardId, title = title ?: "", isGroup = isGroup))
 
     /** 更新会话 */
     suspend fun updateConversation(conversation: Conversation) = conversationDao.update(conversation)

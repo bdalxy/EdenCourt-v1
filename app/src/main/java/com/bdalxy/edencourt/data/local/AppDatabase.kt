@@ -20,8 +20,10 @@ import com.bdalxy.edencourt.data.local.dao.WorldInfoDao
 import com.bdalxy.edencourt.data.local.entity.CharacterCardEntity
 import com.bdalxy.edencourt.data.local.entity.Conversation
 import com.bdalxy.edencourt.data.local.entity.ConversationMood
+import com.bdalxy.edencourt.data.local.entity.ConversationParticipant
 import com.bdalxy.edencourt.data.local.entity.ConversationRelationship
 import com.bdalxy.edencourt.data.local.entity.ConversationTraits
+import com.bdalxy.edencourt.data.local.dao.ConversationParticipantDao
 import com.bdalxy.edencourt.data.local.entity.Interaction
 import com.bdalxy.edencourt.data.local.entity.InteractionParticipant
 import com.bdalxy.edencourt.data.local.entity.InteractionTurn
@@ -42,8 +44,8 @@ import com.bdalxy.edencourt.data.local.entity.WorldInfoEntry
  * - schema 已导出到 app/schemas（企划书 4.1.5）
  */
 @Database(
-    entities = [Conversation::class, Message::class, CharacterCardEntity::class, MemoryItem::class, ConversationRelationship::class, RelationshipEvent::class, Interaction::class, InteractionParticipant::class, InteractionTurn::class, UserIdentity::class, ConversationTraits::class, ConversationMood::class, WorldInfoBook::class, WorldInfoEntry::class],
-    version = 33,
+    entities = [Conversation::class, Message::class, CharacterCardEntity::class, MemoryItem::class, ConversationRelationship::class, RelationshipEvent::class, Interaction::class, InteractionParticipant::class, InteractionTurn::class, UserIdentity::class, ConversationTraits::class, ConversationMood::class, WorldInfoBook::class, WorldInfoEntry::class, ConversationParticipant::class],
+    version = 34,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -80,6 +82,9 @@ abstract class AppDatabase : RoomDatabase() {
 
     /** 世界书数据访问（v1.5-A3 世界书） */
     abstract fun worldInfoDao(): WorldInfoDao
+
+    /** 群聊参与者数据访问（v2.0 A6-1） */
+    abstract fun conversationParticipantDao(): ConversationParticipantDao
 
     companion object {
         @Volatile
@@ -488,6 +493,25 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /** v33→v34：conversations 加 isGroup 群聊标记 + messages 加 senderConversationId 发送者归属 + 新增 conversation_participants 群参与者表（v2.0 A6-1 群聊数据层） */
+        private val MIGRATION_33_34 = object : Migration(33, 34) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE conversations ADD COLUMN isGroup INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE messages ADD COLUMN senderConversationId INTEGER")
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS `conversation_participants` (
+                        `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        `conversationId` INTEGER NOT NULL,
+                        `participantConversationId` INTEGER NOT NULL,
+                        FOREIGN KEY(`conversationId`) REFERENCES `conversations`(`id`) ON DELETE CASCADE,
+                        FOREIGN KEY(`participantConversationId`) REFERENCES `conversations`(`id`) ON DELETE CASCADE
+                    )
+                """.trimIndent())
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_cp_conversationId` ON `conversation_participants` (`conversationId`)")
+                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_cp_unique` ON `conversation_participants` (`conversationId`, `participantConversationId`)")
+            }
+        }
+
         /** v28→v29：character_cards 加 isPinned 置顶列（B3 置顶大卡，默认 0=不置顶） */
         private val MIGRATION_28_29 = object : Migration(28, 29) {
             override fun migrate(db: SupportSQLiteDatabase) {
@@ -584,7 +608,7 @@ abstract class AppDatabase : RoomDatabase() {
             MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18, MIGRATION_18_19,
             MIGRATION_19_20, MIGRATION_20_21, MIGRATION_21_22, MIGRATION_22_23, MIGRATION_23_24, MIGRATION_24_25,
             MIGRATION_25_26, MIGRATION_26_27, MIGRATION_27_28, MIGRATION_28_29, MIGRATION_29_30, MIGRATION_30_31,
-            MIGRATION_31_32, MIGRATION_32_33,
+            MIGRATION_31_32, MIGRATION_32_33, MIGRATION_33_34,
         )
 
         /** 获取单例（双重检查锁，避免并发重复建库） */

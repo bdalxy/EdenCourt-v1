@@ -69,4 +69,6 @@ data class Message(
     val tokenCount: Int = 0,
     /** 使用的模型名（如 deepseek-chat / local-1.5b） */
     val modelUsed: String = "",
+    /** 发送者归属会话 id（v2.0 A6-1：群聊中标识消息是哪个参与者角色发的；null=用户「我」发的，非 null=对应参与者 1v1 会话） */
+    val senderConversationId: Long? = null,
 )

@@ -45,6 +45,8 @@ internal fun MessageBubble(
     error: ChatError?,
     assistantAvatar: String?,
     assistantName: String,
+    /** 群聊发送者显示名（v2.0 A6-5：非 null 时显示在气泡上方，1v1 会话为 null） */
+    senderName: String? = null,
     onRetry: () -> Unit,
     onDismissError: () -> Unit,
     onOpenSettings: () -> Unit,
@@ -73,6 +75,15 @@ internal fun MessageBubble(
             modifier = Modifier.widthIn(max = 280.dp),
             horizontalAlignment = if (isUser) Alignment.End else Alignment.Start,
         ) {
+            // v2.0 A6-5：群聊中显示发送者名（非用户消息 + senderName 非空）
+            if (!isUser && !senderName.isNullOrBlank()) {
+                Text(
+                    text = senderName,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 12.dp, bottom = 2.dp),
+                )
+            }
             Surface(
                 shape = RoundedCornerShape(16.dp),
                 color = if (isUser) {

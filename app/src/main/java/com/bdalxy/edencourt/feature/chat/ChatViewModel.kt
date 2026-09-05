@@ -10,6 +10,7 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.bdalxy.edencourt.EdenCourtApp
 import com.bdalxy.edencourt.data.local.dao.CharacterCardDao
+import com.bdalxy.edencourt.data.local.dao.ConversationParticipantDao
 import com.bdalxy.edencourt.data.local.dao.ConversationTraitsDao
 import com.bdalxy.edencourt.data.local.dao.InteractionDao
 import com.bdalxy.edencourt.data.local.dao.MoodDao
@@ -47,6 +48,8 @@ import com.bdalxy.edencourt.data.setting.ScheduleConfigStore
 import com.bdalxy.edencourt.domain.CharacterCard
 import com.bdalxy.edencourt.domain.CharacterCardParser
 import com.bdalxy.edencourt.domain.MoodTag
+import com.bdalxy.edencourt.domain.GroupChatParser
+import com.bdalxy.edencourt.domain.buildGroupChatPrompt
 import com.bdalxy.edencourt.domain.MoodRules
 import com.bdalxy.edencourt.domain.PromptBuilder
 import com.bdalxy.edencourt.domain.TokenEstimator
@@ -160,8 +163,9 @@ class ChatViewModel(
     private val replyCursorStore: ReplyCursorStore,
     private val conversationTraitsDao: ConversationTraitsDao,
     private val moodDao: MoodDao,
-    private val worldInfoDao: WorldInfoDao,
-) : ViewModel() {
+        private val worldInfoDao: WorldInfoDao,
+        private val conversationParticipantDao: ConversationParticipantDao,
+    ) : ViewModel() {
 
     /** 该会话的消息流（按创建时间正序，数据库变化自动刷新） */
     val messages: StateFlow<List<Message>> =
@@ -569,6 +573,30 @@ class ChatViewModel(
         crossSessionConsultService = crossSessionConsultService,
     )
 
+    /** v2.0 A6-5：群聊发送者名缓存（senderConversationId → 显示名），首次调用时懒加载 */
+    private var senderNameCache: Map<Long, String>? = null
+
+    /** 解析发送者显示名（v2.0 A6-5：群聊消息气泡上方显示是谁说的） */
+    suspend fun senderNameFor(senderConversationId: Long?): String? {
+        if (senderConversationId == null) return null
+        if (senderNameCache == null) {
+            // 懒加载：从群聊参与者列表构建缓存
+            val participants = conversationParticipantDao.getByConversation(conversationId)
+            senderNameCache = participants.mapNotNull { p ->
+                val conv = repository.getConversation(p.participantConversationId)
+                val card = conv?.characterCardId?.let { characterCardDao.getById(it) }
+                val name = card?.let {
+                    runCatching { CharacterCardParser.parse(it.jsonContent).name }.getOrNull()
+                } ?: "未知"
+                val displayName = conv?.remark?.takeIf { it.isNotBlank() }
+                    ?: card?.remark?.takeIf { it.isNotBlank() }
+                    ?: name
+                p.participantConversationId to displayName
+            }.toMap()
+        }
+        return senderNameCache?.get(senderConversationId)
+    }
+
     /** Prompt 片段构建器（T15.6 拆分：记忆/关系事件/此刻状态/独有人格/system prompt 组装独立成类，纯数据读与组装） */
     private val promptAssembler = ChatPromptAssembler(
         conversationId = conversationId,
@@ -673,13 +701,105 @@ class ChatViewModel(
                 replyCursorStore.save(conversationId, lastProcessedUserMessageId!!)
                 // 合并为一次「来信」：多条以换行分隔，AI 按性格决定怎么回（T6.9）
                 val mergedInput = ReplyPumpCalculator.buildBatchInput(newUserMessages)
-                // 推进代际号（先自增成员变量，再作为本请求代际传入，语义同 ++generationCounter）
+                // 推进代际号
                 generationCounter = GenerationGate.next(generationCounter)
-                streamReply(
-                    promptMessages = buildPrompt(history, mergedInput, newUserMessages.size),
-                    generation = generationCounter,
-                )
+
+                // v2.0 A6-4：群聊分支——非流式调用群聊引擎，解析多角色一幕并逐条写入
+                val conv = repository.getConversation(conversationId)
+                if (conv?.isGroup == true) {
+                    generateGroupReply(history, mergedInput, generationCounter)
+                } else {
+                    streamReply(
+                        promptMessages = buildPrompt(history, mergedInput, newUserMessages.size),
+                        generation = generationCounter,
+                    )
+                }
             }
+        }
+    }
+
+    /**
+     * v2.0 A6-4：群聊回复生成（非流式）。
+     * 1. 组装群聊参与者身份块
+     * 2. 构建群聊 prompt（含最近消息 + 用户最新发言）
+     * 3. 调 AI 非流式获取一幕场景
+     * 4. 解析 JSON → 构建发言者映射 → 逐条写入消息（带节奏延迟）
+     */
+    private suspend fun generateGroupReply(
+        history: List<Message>,
+        mergedInput: String,
+        generation: Long,
+    ) {
+        if (!GenerationGate.isCurrent(generation, generationCounter)) return
+        _isGenerating.value = true
+        try {
+            // 1. 组装参与者身份块
+            val assembler = GroupPromptAssembler(
+                groupConversationId = conversationId,
+                repository = repository,
+                characterCardDao = characterCardDao,
+                conversationTraitsDao = conversationTraitsDao,
+                moodDao = moodDao,
+                participantDao = conversationParticipantDao,
+                scheduleConfigStore = scheduleConfigStore,
+            )
+            val blocks = assembler.assemble()
+            if (blocks.isEmpty()) {
+                Log.w(TAG, "群聊回复跳过：无参与者")
+                _isGenerating.value = false
+                return
+            }
+
+            // 2. 构建 prompt
+            val identityText = assembler.buildGroupIdentityText(blocks)
+            val recentMessages = history.takeLast(20).joinToString("\n") { msg ->
+                val speaker = blocks.firstOrNull { it.conversationId == msg.senderConversationId }?.displayName
+                    ?: "用户"
+                "$speaker：${msg.content}"
+            }
+            val prompt = buildGroupChatPrompt(identityText, recentMessages, mergedInput)
+
+            // 3. 调 AI 非流式获取一幕
+            val config = apiConfigStore.config.first()
+            val raw = aiChatService.completeChat(
+                messages = listOf(ChatMessage(role = "user", content = prompt)),
+                config = config,
+            )
+            val scene = GroupChatParser.parse(raw)
+            if (scene == null || scene.lines.isEmpty()) {
+                Log.w(TAG, "群聊回复解析失败或为空，raw=${raw.take(200)}")
+                _isGenerating.value = false
+                return
+            }
+
+            // 4. 构建 speaker 映射（显示名 → 参与者会话 id）
+            val speakerMap = blocks.associate { it.displayName to it.conversationId }
+
+            // 5. 逐条写入消息，带节奏延迟（模拟真人打字间隔）
+            scene.lines.forEachIndexed { index, line ->
+                val senderId = speakerMap[line.speaker]
+                if (senderId == null || line.content.isBlank()) return@forEachIndexed
+                repository.insertMessage(
+                    Message(
+                        conversationId = conversationId,
+                        role = Role.ASSISTANT,
+                        content = line.content,
+                        status = MessageStatus.DONE,
+                        senderConversationId = senderId,
+                    ),
+                )
+                // 节奏控制：条间延迟（首条 ~800ms，后续 ~1500ms，模拟真人阅读+打字）
+                if (index < scene.lines.size - 1) {
+                    val delayMs = if (index == 0) 800L else 1500L
+                    delay(delayMs)
+                }
+            }
+        } catch (e: CancellationException) {
+            Log.d(TAG, "群聊回复取消")
+        } catch (e: Exception) {
+            Log.e(TAG, "群聊回复异常: ${e.javaClass.simpleName}: ${e.message}")
+        } finally {
+            _isGenerating.value = false
         }
     }
 
@@ -1147,6 +1267,7 @@ class ChatViewModel(
                         conversationTraitsDao = app.conversationTraitsDao,
                         moodDao = app.moodDao,
                         worldInfoDao = app.worldInfoDao,
+                        conversationParticipantDao = app.conversationParticipantDao,
                     )
                 }
             }

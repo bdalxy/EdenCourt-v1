@@ -68,6 +68,8 @@ data class Conversation(
     val worldBookId: Long? = null,
     /** 是否开启关系图谱（B4：会话级图谱开关；true=该会话角色出现在「我」的下方关系图中，并与其它开启角色成两两行）。「我」本身恒开启无需此字段 */
     val graphEnabled: Boolean = false,
+    /** 是否为群聊会话（v2.0 A6-1：true=群聊，可挂多个参与者；false=普通 1v1 会话） */
+    val isGroup: Boolean = false,
 ) {
     /**
      * 该会话手动设置的自定义作息（T11.10 深化：会话级）。

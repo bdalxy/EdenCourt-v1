@@ -4,6 +4,7 @@ import android.app.Application
 import com.bdalxy.edencourt.data.local.AppDatabase
 import com.bdalxy.edencourt.data.local.dao.CharacterCardDao
 import com.bdalxy.edencourt.data.local.dao.ConversationDao
+import com.bdalxy.edencourt.data.local.dao.ConversationParticipantDao
 import com.bdalxy.edencourt.data.local.dao.ConversationTraitsDao
 import com.bdalxy.edencourt.data.local.dao.InteractionDao
 import com.bdalxy.edencourt.data.local.dao.MemoryDao
@@ -200,6 +201,11 @@ class EdenCourtApp : Application() {
     /** 世界书数据访问单例（v1.5-A3：背景设定动态词典，供注入检索与后续管理面板） */
     val worldInfoDao: WorldInfoDao by lazy {
         AppDatabase.getInstance(this).worldInfoDao()
+    }
+
+    /** 群聊参与者数据访问单例（v2.0 A6-1：群聊参与者关联，供群聊创建与回复使用） */
+    val conversationParticipantDao: ConversationParticipantDao by lazy {
+        AppDatabase.getInstance(this).conversationParticipantDao()
     }
 
     /** 角色间互动执行器单例（v1.2b，T8.9：双向多轮状态机，供手动触发入口调用） */
