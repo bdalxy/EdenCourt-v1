@@ -65,4 +65,59 @@ class UserAffinityTest {
             assertTrue(lower.isNotBlank())
         }
     }
+
+    /** ─── R2 浓度轴回落（v2.0 关系引擎）─── */
+
+    @Test
+    fun `2天内不回落 - 视为仍在热络期`() {
+        // 距上次互动 0/1/2 天：浓度应保持不变
+        assertEquals(50, UserAffinity.decay(50, 0))
+        assertEquals(50, UserAffinity.decay(50, 1))
+        assertEquals(50, UserAffinity.decay(50, 2))
+    }
+
+    @Test
+    fun `第3天起逐天回落 - 每天降给定步长`() {
+        // 从 50 起点，距上次 3 天、每天降 2 → 50-2=48
+        assertEquals(48, UserAffinity.decay(50, 3, stepRandom = { 2 }))
+        // 距上次 4 天、每天降 2 → 50 - 2*2 = 46
+        assertEquals(46, UserAffinity.decay(50, 4, stepRandom = { 2 }))
+        // 距上次 5 天、每天降 1 → 50 - 3 = 47
+        assertEquals(47, UserAffinity.decay(50, 5, stepRandom = { 1 }))
+    }
+
+    @Test
+    fun `回落步长限定在1到3 - 防越界随机源`() {
+        // 注入返回 100 的异常随机源，仍应被 clamp 到 3
+        assertEquals(47, UserAffinity.decay(50, 3, stepRandom = { 100 }))
+        // 注入返回 0/-1 的异常随机源，仍应被 clamp 到 1
+        assertEquals(49, UserAffinity.decay(50, 3, stepRandom = { 0 }))
+    }
+
+    @Test
+    fun `不破档 - 保底到当前档位起始值`() {
+        // 结识档位（20~39）：降到 20 即停，不会跌破 20
+        assertTrue(
+            "结识档不应跌破20，实际=" + UserAffinity.decay(21, 30, stepRandom = { 3 }),
+            UserAffinity.decay(21, 30, stepRandom = { 3 }) == 20,
+        )
+        // 友好档位（40~69）：保底 40
+        assertTrue(
+            "友好档不应跌破40，实际=" + UserAffinity.decay(45, 10, stepRandom = { 3 }),
+            UserAffinity.decay(45, 10, stepRandom = { 3 }) == 40,
+        )
+        // 亲密档位（>=70）：保底 70
+        assertTrue(
+            "亲密档不应跌破70，实际=" + UserAffinity.decay(72, 60, stepRandom = { 3 }),
+            UserAffinity.decay(72, 60, stepRandom = { 3 }) == 70,
+        )
+    }
+
+    @Test
+    fun `已在档位底部 - 不再回落`() {
+        // 陌生档起始 0，或已触底到档位起始值：保持原值
+        assertEquals(0, UserAffinity.decay(0, 99, stepRandom = { 3 }))
+        // 恰在友好档起始 40：回落到 40 原样返回
+        assertEquals(40, UserAffinity.decay(40, 99, stepRandom = { 3 }))
+    }
 }

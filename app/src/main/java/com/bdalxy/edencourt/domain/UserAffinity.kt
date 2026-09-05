@@ -44,4 +44,34 @@ object UserAffinity {
             "请按这个亲疏程度自然地调整你与用户说话的语气——" +
             "亲近就不用拘谨、可更温情自在；还生疏就保持礼貌与分寸，随对话逐渐拉近距离。"
     }
+
+    /**
+     * 浓度轴回落（v2.0 关系引擎 R2：给你"几天没聊会淡一点、但不会莫名消失"的真人感）。
+     * 规则（2026-09-04 初版定）：距上次互动 **>2 天**开始缓降，**每天降 1~3 点（本可注入随机源）**；
+     * **保底到当前档位起始值，不破档**——即降到所在档位（陌生/相识/友好/亲密）的起始分即停，不会跌出当前档位。
+     * 方向是慢变量，不因冷落骤变，故本函数只动浓度。
+     * @param prev        当前浓度（用户↔角色亲密度）
+     * @param daysSince   距上次互动天数（向下取整；<=2 天视为仍在热络期，不回落）
+     * @param stepRandom  单日回落值生成器，默认固定 2（可注入固定种子便于测试），范围 [1,3]
+     * @return 回落后的浓度；若不足回落或已在档位底部则原样返回
+     */
+    fun decay(prev: Int, daysSince: Long, stepRandom: () -> Int = { 2 }): Int {
+        if (prev <= MIN) return prev
+        if (daysSince <= 2) return prev                // 仍在热络期，不回落
+        val floor = tierFloor(prev)                    // 当前档位起始值 = 保底线
+        var cur = prev
+        (3..daysSince).forEach {                       // 第 3 天起逐天回落
+            cur -= stepRandom().coerceIn(1, 3)
+            if (cur <= floor) return floor             // 触底即停，不破档
+        }
+        return cur.coerceAtMost(prev)
+    }
+
+    /** 当前浓度所在档位的起始分（保底线）：陌生0 < 相识20 < 友好40 < 亲密70 */
+    private fun tierFloor(score: Int): Int = when {
+        score < ConversationRelationship.AFFINITY_ACQUAINTANCE -> 0
+        score < ConversationRelationship.AFFINITY_FRIENDLY -> ConversationRelationship.AFFINITY_ACQUAINTANCE
+        score < ConversationRelationship.AFFINITY_CLOSE -> ConversationRelationship.AFFINITY_FRIENDLY
+        else -> ConversationRelationship.AFFINITY_CLOSE
+    }
 }

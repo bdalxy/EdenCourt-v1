@@ -32,6 +32,7 @@ import com.bdalxy.edencourt.data.remote.ApiErrorKind
 import com.bdalxy.edencourt.data.remote.StreamPolicy
 import com.bdalxy.edencourt.data.remote.ApiException
 import com.bdalxy.edencourt.data.local.entity.Conversation
+import com.bdalxy.edencourt.data.local.entity.RelationDirection
 import com.bdalxy.edencourt.data.local.entity.ConversationTraits
 import com.bdalxy.edencourt.data.remote.ChatMessage
 import com.bdalxy.edencourt.data.repository.ChatRepository
@@ -50,6 +51,10 @@ import com.bdalxy.edencourt.domain.MoodRules
 import com.bdalxy.edencourt.domain.PromptBuilder
 import com.bdalxy.edencourt.domain.TokenEstimator
 import com.bdalxy.edencourt.domain.WorldInfoMatcher
+import com.bdalxy.edencourt.domain.DirectionState
+import com.bdalxy.edencourt.domain.RelationDirectionParser
+import com.bdalxy.edencourt.domain.adjudicateDirection
+import com.bdalxy.edencourt.domain.buildDirectionPrompt
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -62,6 +67,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
@@ -73,6 +79,7 @@ import kotlinx.coroutines.withContext
 import kotlin.coroutines.coroutineContext
 import java.io.IOException
 import java.time.LocalTime
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * 单条消息的错误提示（T6.1）。
@@ -916,6 +923,87 @@ class ChatViewModel(
         )
         // A1：AI 成功完成回复视为一次有效对话，自然推进用户↔角色亲密度
         repository.advanceAffinity(conversationId)
+        // R3：AI 回复完成后异步判断是否触发方向判断（后台执行，不阻塞本轮回复）
+        maybeJudgeDirectionAsync()
+    }
+
+    /** R3 方向判断并发锁：防止短时间内多轮触发并发判断、旧结果覆盖新结果 */
+    private val directionJudgeLock = AtomicBoolean(false)
+
+    /**
+     * R3：AI 回复完成后，判断是否满足方向判断触发条件，满足则后台异步执行。
+     * 触发条件（2026-09-05 定稿）：首次 或 距上次判断≥12h 或（距上次≥2min 且 新增≥5条用户消息）。
+     * 后台执行、全程吞错，失败不影响主对话（与记忆提取 extractMemoryAsync 同策略）。
+     */
+    private fun maybeJudgeDirectionAsync() {
+        viewModelScope.launch {
+            val conv = repository.getConversation(conversationId) ?: return@launch
+            val now = System.currentTimeMillis()
+            val lastSeen = conv.candidateLastSeen
+            val shouldJudge = when {
+                lastSeen == null -> true
+                now - lastSeen >= JUDGE_PERIOD_MS -> true
+                now - lastSeen >= MIN_JUDGE_INTERVAL_MS &&
+                    repository.countUserMessagesSince(conversationId, lastSeen) >= JUDGE_MSG_THRESHOLD -> true
+                else -> false
+            }
+            if (!shouldJudge) return@launch
+            runDirectionJudge(conv, now)
+        }
+    }
+
+    /**
+     * R3：执行一次方向判断并裁决回写（并发锁内运行）。
+     * 流程：取 config → 取最近 30 条消息拼上下文 → 组装方向提示词 → 非流式调 AI → 解析 JSON
+     *      → 候选裁决 → 回写候选状态/方向字段。任何失败仅记日志、不更状态、不抛错。
+     */
+    private suspend fun runDirectionJudge(conv: Conversation, now: Long) {
+        if (!directionJudgeLock.compareAndSet(false, true)) return
+        try {
+            val config = apiConfigStore.config.firstOrNull() ?: return
+            if (config.apiKey.isBlank()) return
+            val recent = repository.getRecentMessages(conversationId, JUDGE_CONTEXT_LIMIT)
+            if (recent.isEmpty()) return
+            val context = recent.joinToString("\n") { "${roleLabel(it.role)}：${it.content}" }
+            val current = runCatching { RelationDirection.valueOf(conv.relationDirection) }.getOrDefault(RelationDirection.NONE)
+            val prompt = buildDirectionPrompt(current, context)
+            val raw = aiChatService.completeChat(listOf(ChatMessage("user", prompt)), config)
+            val judgment = RelationDirectionParser.parse(raw) ?: return
+            val suggestion = judgment.direction ?: return
+            val candidate = runCatching { RelationDirection.valueOf(conv.candidateDirection) }.getOrDefault(RelationDirection.NONE)
+            val decision = adjudicateDirection(
+                state = DirectionState(current, candidate, conv.candidateCount, conv.lastDirectionSwitch),
+                suggestion = suggestion,
+                confidence = judgment.confidence,
+                affinity = conv.affinityScore,
+                now = now,
+            )
+            repository.updateConversation(
+                conv.copy(
+                    relationDirection = decision.newDirection.name,
+                    candidateDirection = decision.newCandidate.name,
+                    candidateCount = decision.newCandidateCount,
+                    candidateLastSeen = now,
+                    lastDirectionSwitch = decision.lastDirectionSwitchAt,
+                ),
+            )
+            if (decision.switched) {
+                Log.i(TAG, "R3 方向切换：${current.name} → ${decision.newDirection.name}（${judgment.reason}）")
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.w(TAG, "R3 方向判断失败（不影响主流程）：${e.message}")
+        } finally {
+            directionJudgeLock.set(false)
+        }
+    }
+
+    /** 消息角色 → 中文标签（R3 方向判断上下文拼接用） */
+    private fun roleLabel(role: Role): String = when (role) {
+        Role.USER -> "用户"
+        Role.ASSISTANT -> "AI"
+        Role.SYSTEM -> "系统"
     }
 
     /**
@@ -992,6 +1080,15 @@ class ChatViewModel(
         private const val TAG = "ChatViewModel"
         /** 拆条连发间隔（T5.9：模拟真人连续打字发送的节奏） */
         private const val CHUNK_SEND_DELAY_MS = 500L
+
+        /** R3 方向判断：输入上下文条数（专家建议 20~30，取 30） */
+        private const val JUDGE_CONTEXT_LIMIT = 30
+        /** R3 方向判断：自上次判断以来新增用户消息达此数即触发 */
+        private const val JUDGE_MSG_THRESHOLD = 5
+        /** R3 方向判断：距上次判断超过此时长必判一次（12h 低频兜底） */
+        private const val JUDGE_PERIOD_MS = 12L * 3600_000
+        /** R3 方向判断：最小判断间隔（2min 防高频） */
+        private const val MIN_JUDGE_INTERVAL_MS = 2L * 60_000
 
         /** 工厂：传入路由参数 conversationId，从 Application 取仓库/角色卡 DAO/配置/网络服务单例 */
         fun factory(conversationId: Long, application: Application): ViewModelProvider.Factory =

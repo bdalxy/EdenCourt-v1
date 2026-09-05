@@ -6,6 +6,21 @@ import androidx.room.PrimaryKey
 import com.bdalxy.edencourt.data.setting.ScheduleConfig
 
 /**
+ * 用户↔会话角色的关系「方向」轴（v2.0 关系引擎 R1）。
+ * 与 affinityScore（浓度/亲疏档位）正交：方向表达"这段关系偏什么性质"，浓度表达"有多亲近"。
+ * - NONE=初始未定；更亲密的方向（如文爱类）因「无限制基调」不硬编码，交 AI 自然表达、方向字段不设限。
+ * - 仅作内部状态，默认不在 UI 主动展示（用户 2026-09-04：现实里关系也多是默认、不需外显）。
+ */
+enum class RelationDirection {
+    NONE,        // 未定/初始
+    FRIEND,      // 朋友
+    COMRADE,     // 同好
+    AMBIGUOUS,   // 暧昧
+    LOVER,       // 恋人·网恋
+    INTIMATE,    // 深交
+}
+
+/**
  * 会话表（企划书 4.1.1 / 4.2.1）。
  * characterCardId 为空表示默认助手；lastMessageTime 为空表示尚无消息。
  * code 建会话随机短码（v1.2 会话唯一身份组成部分，T8.0）。
@@ -39,6 +54,16 @@ data class Conversation(
     val lastMessageTime: Long? = null,
     /** 用户与本会话角色的亲密度（A1，0~100，随对话自然非线性增长；用于反哺对话口吻） */
     val affinityScore: Int = 0,
+    /** 用户与本会话角色的关系「方向」轴（v2.0 关系引擎 R1，默认 NONE 未定；仅内部状态，不主动展示） */
+    val relationDirection: String = RelationDirection.NONE.name,
+    /** 候选方向（R3：AI 最近一次判断建议的方向，枚举名；未到切换阈值前仅是候选，不生效） */
+    val candidateDirection: String = RelationDirection.NONE.name,
+    /** 候选方向连续命中次数（R3：判到同候选 +1，判回当前方向 -1 且≥0，判到新方向重置为 1） */
+    val candidateCount: Int = 0,
+    /** 最近一次方向判断时间戳（R3：触发频率"距上次判断"判定用；null=尚未判断过） */
+    val candidateLastSeen: Long? = null,
+    /** 上次方向切换时间戳（R3：切换冷却期判定用；null=尚未切换过） */
+    val lastDirectionSwitch: Long? = null,
     /** 本会话挂载的世界书 id（A3，null=未挂载；第一版一个会话最多挂 1 本） */
     val worldBookId: Long? = null,
     /** 是否开启关系图谱（B4：会话级图谱开关；true=该会话角色出现在「我」的下方关系图中，并与其它开启角色成两两行）。「我」本身恒开启无需此字段 */

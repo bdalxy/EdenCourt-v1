@@ -6,6 +6,7 @@ import androidx.room.Insert
 import androidx.room.Query
 import androidx.room.Update
 import com.bdalxy.edencourt.data.local.entity.Message
+import com.bdalxy.edencourt.data.local.entity.Role
 import kotlinx.coroutines.flow.Flow
 
 /**
@@ -81,4 +82,11 @@ interface MessageDao {
         """
     )
     fun observePaged(conversationId: Long, limit: Int, offset: Int): Flow<List<Message>>
+
+    /**
+     * 统计某会话自给定时间戳之后（不含等于）指定角色的消息条数。
+     * R3 方向判断触发条件「满 5 条用户消息」用：以 candidateLastSeen 为界统计新增用户消息数。
+     */
+    @Query("SELECT COUNT(*) FROM messages WHERE conversationId = :conversationId AND role = :role AND createdAt > :since")
+    suspend fun countMessagesSince(conversationId: Long, role: Role, since: Long): Int
 }

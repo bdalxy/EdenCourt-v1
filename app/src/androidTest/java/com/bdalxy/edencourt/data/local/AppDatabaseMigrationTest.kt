@@ -144,6 +144,57 @@ class AppDatabaseMigrationTest {
     }
 
     /**
+     * 用例4：迁移 v31→v32（v2.0 关系引擎 R1，conversations 加 relationDirection 方向列）。
+     * 验证：存量会话默认方向为 'NONE'，且迁移前已设方向的会话保留其值（迁移只加列不覆盖）。
+     */
+    @Test
+    fun migrateFrom_v31_to_v32_addsRelationDirection() {
+        helper.createDatabase(TEST_DB4, 31).use { db ->
+            // 埋入 v31 形态的存量会话（无 relationDirection 列，顺应迁移前结构需按 v31 字段 INSERT）
+            db.execSQL(
+                "INSERT INTO conversations (title, remark, code, interactionEnabled, createdAt, updatedAt, " +
+                    "isPinned, lastMessagePreview, lastMessageTime) " +
+                    "VALUES ('存量会话', '', 'V-test32', 0, 1000, 2000, 0, '你好', 2000)",
+            )
+
+            migrateChain(db, from = 31, to = 32)
+
+            // 新列可读，存量数据默认方向 = 'NONE'（兼容旧数据）
+            val direction = queryString(db, "SELECT relationDirection FROM conversations WHERE code = 'V-test32' LIMIT 1")
+            check(direction == "NONE") { "relationDirection 默认值不对: $direction" }
+        }
+    }
+
+    /**
+     * 用例5：迁移 v32→v33（v2.0 关系引擎 R3，conversations 加候选状态 4 列）。
+     * 验证：存量会话候选方向默认 'NONE'、候选次数默认 0，两个时间戳列可空且默认 NULL（迁移只加列不覆盖）。
+     */
+    @Test
+    fun migrateFrom_v32_to_v33_addsRelationDirectionCandidates() {
+        helper.createDatabase(TEST_DB5, 32).use { db ->
+            // 埋入 v32 形态的存量会话（无候选状态 4 列，按 v32 已有字段 INSERT）
+            db.execSQL(
+                "INSERT INTO conversations (title, remark, code, interactionEnabled, createdAt, updatedAt, " +
+                    "isPinned, lastMessagePreview, lastMessageTime) " +
+                    "VALUES ('存量会话', '', 'V-test33', 0, 1000, 2000, 0, '你好', 2000)",
+            )
+
+            migrateChain(db, from = 32, to = 33)
+
+            // 候选方向默认 'NONE'、候选次数默认 0（兼容旧数据）
+            val candDir = queryString(db, "SELECT candidateDirection FROM conversations WHERE code = 'V-test33' LIMIT 1")
+            check(candDir == "NONE") { "candidateDirection 默认值不对: $candDir" }
+            val candCount = queryInt(db, "SELECT candidateCount FROM conversations WHERE code = 'V-test33' LIMIT 1")
+            check(candCount == 0) { "candidateCount 默认值不对: $candCount" }
+            // 两个时间戳列可空、默认 NULL
+            val seenNull = queryInt(db, "SELECT COUNT(*) FROM conversations WHERE code = 'V-test33' AND candidateLastSeen IS NULL")
+            check(seenNull == 1) { "candidateLastSeen 应为 NULL，实测非空对象数: $seenNull" }
+            val switchNull = queryInt(db, "SELECT COUNT(*) FROM conversations WHERE code = 'V-test33' AND lastDirectionSwitch IS NULL")
+            check(switchNull == 1) { "lastDirectionSwitch 应为 NULL，实测非空对象数: $switchNull" }
+        }
+    }
+
+    /**
      * 把 ALL_MIGRATIONS 当作纯函数按版本升序链式执行（与生产 builder.addMigrations 用的是同一批对象）。
      * 中途任一迁移抛异常即测试失败——从而捕获「某次迁移在真实数据形态下跑不通」的回归。
      */
@@ -163,5 +214,7 @@ class AppDatabaseMigrationTest {
         private const val TEST_DB = "migration-test-v12.db"
         private const val TEST_DB2 = "migration-test-v22.db"
         private const val TEST_DB3 = "migration-test-v24.db"
+        private const val TEST_DB4 = "migration-test-v31.db"
+        private const val TEST_DB5 = "migration-test-v32.db"
     }
 }

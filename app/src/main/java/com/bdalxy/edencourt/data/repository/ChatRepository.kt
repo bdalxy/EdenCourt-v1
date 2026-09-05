@@ -4,6 +4,7 @@ import com.bdalxy.edencourt.data.local.dao.ConversationDao
 import com.bdalxy.edencourt.data.local.dao.MessageDao
 import com.bdalxy.edencourt.data.local.entity.Conversation
 import com.bdalxy.edencourt.data.local.entity.Message
+import com.bdalxy.edencourt.data.local.entity.Role
 import com.bdalxy.edencourt.domain.UserAffinity
 import kotlinx.coroutines.flow.Flow
 
@@ -71,6 +72,10 @@ class ChatRepository(
     /** 定向取某会话「最近 limit 条」消息（时间正序，T12.6：数据库层 LIMIT，供旁路暗访/每日打听等只需最近上下文的场景） */
     suspend fun getRecentMessages(conversationId: Long, limit: Int): List<Message> =
         messageDao.getRecentByConversation(conversationId, limit)
+
+    /** 统计某会话自给定时间戳之后新增的用户消息条数（R3 方向判断触发条件「满5条用户消息」用） */
+    suspend fun countUserMessagesSince(conversationId: Long, since: Long): Int =
+        messageDao.countMessagesSince(conversationId, Role.USER, since)
 
     /** 观察分页（消息按时间正序第 offset 起的 limit 条，T12.6 基础设施） */
     fun observePagedMessages(conversationId: Long, limit: Int, offset: Int): Flow<List<Message>> =
