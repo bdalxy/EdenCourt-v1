@@ -79,9 +79,13 @@ internal fun ArtworkCropperDialog(
     var offset by remember { mutableStateOf(Offset.Zero) }
     // 裁剪可视区边长（px，由 onSizeChanged 填充）
     var drawPx by remember { mutableStateOf(0f) }
+    // P2-是否已发生拖动/缩放交互（首次交互后隐藏占位提示，改为显示实时缩放倍数）
+    var interacted by remember { mutableStateOf(false) }
     val state = rememberTransformableState { zoomChange, pan, _ ->
         scale = (scale * zoomChange).coerceIn(1f, 5f)
         offset = offset + pan
+        // P2-首次交互后切换为缩放反馈（提示文字自动让位）
+        interacted = true
     }
     // 完成态：防止重复裁剪
     var saving by remember { mutableStateOf(false) }
@@ -107,7 +111,12 @@ internal fun ArtworkCropperDialog(
                         )
                     }
                     Text(
-                        text = "拖动 / 捏合缩放，对齐头像框",
+                        // P2：交互前显示占位提示；首次拖动/缩放后切换为实时缩放倍数反馈
+                        text = if (interacted) {
+                            "缩放 ${"%.0f".format(scale * 100)}% · 拖动微调位置"
+                        } else {
+                            "拖动 / 捏合缩放，对齐头像框"
+                        },
                         style = MaterialTheme.typography.titleSmall,
                         color = Color.White.copy(alpha = 0.9f),
                         modifier = Modifier.weight(1f),
