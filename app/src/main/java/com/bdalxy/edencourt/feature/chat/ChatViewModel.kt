@@ -585,6 +585,8 @@ class ChatViewModel(
 
     init {
         viewModelScope.launch {
+            // R2：进入会话时应用浓度回落（>2天未聊缓降，保底不破档）
+            repository.decayAffinity(conversationId)
             // 空会话时插入欢迎语：绑定角色卡且有开场白则用角色开场白，否则用默认助手欢迎语（T4.6）
             val existing = repository.observeMessages(conversationId).first()
             if (existing.isEmpty()) {

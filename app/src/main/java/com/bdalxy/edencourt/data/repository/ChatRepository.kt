@@ -56,6 +56,22 @@ class ChatRepository(
         }
     }
 
+    /**
+     * R2：浓度回落——进入会话时根据距上次互动天数应用衰减。
+     * 读取 lastMessageTime 计算间隔天数，经 UserAffinity.decay 计算新值后写回；无变化不落库。
+     * 规则：>2 天开始缓降，每天 1~3 点，保底到当前档位起始值不破档。
+     */
+    suspend fun decayAffinity(conversationId: Long) {
+        val conv = conversationDao.getById(conversationId) ?: return
+        val lastTime = conv.lastMessageTime ?: return
+        val daysSince = (System.currentTimeMillis() - lastTime) / (24 * 3600_000L)
+        if (daysSince <= 2) return
+        val next = UserAffinity.decay(conv.affinityScore, daysSince)
+        if (next != conv.affinityScore) {
+            conversationDao.update(conv.copy(affinityScore = next))
+        }
+    }
+
     /** 删除会话（消息由外键级联删除） */
     suspend fun deleteConversation(conversation: Conversation) = conversationDao.delete(conversation)
 
