@@ -18,8 +18,8 @@ android {
         applicationId = "com.bdalxy.edencourt"
         minSdk = 29
         targetSdk = 36
-        versionCode = 2
-        versionName = "1.3.0"
+        versionCode = 3
+        versionName = "1.4.0"
 
         // androidTest 使用标准 runner（方案 G-③ Phase2：Room 迁移测试用）
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
