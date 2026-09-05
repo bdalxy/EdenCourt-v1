@@ -138,6 +138,7 @@ object PromptBuilder {
      * @param watchModeText 陪看模式注入片段（T11.16：用户主动分享内容时，角色以陪看口吻回应；为空则不注入）
      * @param traitsPrompt 会话独有人格注入片段（T13.5：印象摘要+反差对+自补充引导；为空则不注入）
      * @param affinityText 用户↔角色亲密度注入片段（A1：角色按亲疏自然调整口吻；为空则不注入）
+     * @param directionText 关系方向注入片段（R4：角色按关系方向自然调整口吻，方向隐式不宣告；为空则不注入）
      * @param moodText 角色此刻情绪注入片段（A2：自主/交互双源合成，反哺语气；为空则不注入）
      * @param worldInfoText 世界书命中条目注入片段（A3：聊到相关关键词才注入对应条目；为空则不注入）
      * @param constantWorldInfoText 世界书恒定条目（constant=true）注入片段（v1.5 上下文注入层③恒久世界规则；
@@ -156,6 +157,7 @@ object PromptBuilder {
         watchModeText: String = "",
         traitsPrompt: String = "",
         affinityText: String = "",
+        directionText: String = "",
         moodText: String = "",
         worldInfoText: String = "",
         constantWorldInfoText: String = "",
@@ -187,6 +189,9 @@ object PromptBuilder {
             }
             if (affinityText.isNotBlank()) {
                 append("\n\n").append(affinityText)
+            }
+            if (directionText.isNotBlank()) {
+                append("\n\n").append(directionText)
             }
             if (moodText.isNotBlank()) {
                 append("\n\n").append(moodText)

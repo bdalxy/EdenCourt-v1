@@ -203,3 +203,34 @@ fun adjudicateDirection(
         )
     }
 }
+
+/**
+ * 构建「关系方向」注入片段（v2.0 关系引擎 R4：方向反哺口吻）。
+ * 方向是慢变量、隐式状态（不主动外显）：注入引导 AI「自然流露、不刻意宣告」，符合用户「隐式关系」设定。
+ * NONE（尚未明确）返回空串不注入，让 AI 保持自由发挥。
+ */
+fun buildDirectionFragment(direction: RelationDirection): String {
+    if (direction == RelationDirection.NONE) return ""
+    val desc = when (direction) {
+        RelationDirection.FRIEND -> "朋友（轻松平等、像熟人般闲聊的友谊）"
+        RelationDirection.COMRADE -> "同好（因共同兴趣亲近，围绕共同话题/爱好交流）"
+        RelationDirection.AMBIGUOUS -> "暧昧（互有好感却未挑明，带着试探和若有似无的靠近）"
+        RelationDirection.INTIMATE -> "深交（交心、信任、无话不谈的知己）"
+        RelationDirection.LOVER -> "恋人·网恋（亲密、依恋、排他的恋人关系）"
+        RelationDirection.NONE -> return ""
+    }
+    return "【你和用户的关系方向】你们的关系目前偏向「$desc」。请在称呼、话题、回应的亲疏里自然地带入这种关系状态，但不要刻意宣告关系本身，让它自然流露。"
+}
+
+/**
+ * 方向中文标签（R4 软性事件/日志用）。
+ * 与 [buildDirectionFragment] 区分：前者带详细口吻引导，这里只给一个简洁中文名（配合软性事件 prompt）。
+ */
+fun RelationDirection.label(): String = when (this) {
+    RelationDirection.NONE -> "尚未明确"
+    RelationDirection.FRIEND -> "朋友"
+    RelationDirection.COMRADE -> "同好"
+    RelationDirection.AMBIGUOUS -> "暧昧"
+    RelationDirection.INTIMATE -> "深交"
+    RelationDirection.LOVER -> "恋人·网恋"
+}

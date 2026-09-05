@@ -157,4 +157,21 @@ class RelationDirectionEngineTest {
         assertEquals(60, RelationDirection.INTIMATE.typicalAffinityFloor())
         assertEquals(70, RelationDirection.LOVER.typicalAffinityFloor())
     }
+
+    /** ─── 方向注入片段（R4 反哺口吻）─── */
+
+    @Test
+    fun `方向注入 - NONE 返回空串不注入`() {
+        assertEquals("", buildDirectionFragment(RelationDirection.NONE))
+    }
+
+    @Test
+    fun `方向注入 - 各方向非空且含方向描述与隐式引导`() {
+        val lover = buildDirectionFragment(RelationDirection.LOVER)
+        assertTrue(lover.isNotBlank())
+        assertTrue(lover.contains("恋人"))
+        assertTrue(lover.contains("不要刻意宣告")) // 隐式关系：不主动挑明，靠自然流露
+        listOf(RelationDirection.FRIEND, RelationDirection.COMRADE, RelationDirection.AMBIGUOUS, RelationDirection.INTIMATE)
+            .forEach { assertTrue(buildDirectionFragment(it).isNotBlank()) }
+    }
 }

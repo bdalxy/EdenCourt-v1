@@ -55,6 +55,7 @@ import com.bdalxy.edencourt.domain.DirectionState
 import com.bdalxy.edencourt.domain.RelationDirectionParser
 import com.bdalxy.edencourt.domain.adjudicateDirection
 import com.bdalxy.edencourt.domain.buildDirectionPrompt
+import com.bdalxy.edencourt.domain.label
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -989,6 +990,8 @@ class ChatViewModel(
             )
             if (decision.switched) {
                 Log.i(TAG, "R3 方向切换：${current.name} → ${decision.newDirection.name}（${judgment.reason}）")
+                // R4：方向切换触发软性事件——角色主动一句（轻量，失败不影响方向切换）
+                emitDirectionSwitchEvent(current, decision.newDirection)
             }
         } catch (e: CancellationException) {
             throw e
@@ -1004,6 +1007,37 @@ class ChatViewModel(
         Role.USER -> "用户"
         Role.ASSISTANT -> "AI"
         Role.SYSTEM -> "系统"
+    }
+
+    /**
+     * R4：方向切换软性事件——角色主动说一句符合新方向的话（弥补「隐式方向」无感，专家建议的行为反馈）。
+     * 轻量版：一段简短引导让 AI 以角色身份自然开场，结果作为 ASSISTANT 消息插入，UI 经 observeByConversation 自动刷新。
+     * 全程吞错：生成/插入失败不影响方向切换本身；无角色卡或未配 key 则跳过。
+     */
+    private suspend fun emitDirectionSwitchEvent(current: RelationDirection, newDirection: RelationDirection) {
+        try {
+            val card = promptAssembler.boundCard() ?: return
+            val config = apiConfigStore.config.firstOrNull() ?: return
+            if (config.apiKey.isBlank()) return
+            val prompt = "你是「${card.name}」。你们的关系现在从「${current.label()}」变成了「${newDirection.label()}」。" +
+                "请以你的身份，自然地说一句符合这种新关系的话（一句话、简短、20字以内）。" +
+                "不要提“关系升级”“方向变化”这类字眼，不要解释，直接说出那句话。"
+            val raw = aiChatService.completeChat(listOf(ChatMessage("user", prompt)), config)
+            val line = raw.trim().take(40)
+            if (line.isBlank()) return
+            repository.insertMessage(
+                Message(
+                    conversationId = conversationId,
+                    role = Role.ASSISTANT,
+                    content = line,
+                ),
+            )
+            Log.i(TAG, "R4 软性事件：${current.name} → ${newDirection.name}，角色说：「$line」")
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.w(TAG, "R4 软性事件失败（不影响方向切换）：${e.message}")
+        }
     }
 
     /**

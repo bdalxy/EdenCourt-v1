@@ -7,6 +7,7 @@ import com.bdalxy.edencourt.data.local.dao.RelationshipDao
 import com.bdalxy.edencourt.data.local.dao.UserIdentityDao
 import com.bdalxy.edencourt.data.local.dao.WorldInfoDao
 import com.bdalxy.edencourt.data.local.entity.Conversation
+import com.bdalxy.edencourt.data.local.entity.RelationDirection
 import com.bdalxy.edencourt.data.local.entity.Message
 import com.bdalxy.edencourt.data.local.entity.WorldInfoEntry
 import com.bdalxy.edencourt.data.remote.ChatMessage
@@ -22,6 +23,7 @@ import com.bdalxy.edencourt.domain.PromptBuilder
 import com.bdalxy.edencourt.domain.UserAffinity
 import com.bdalxy.edencourt.domain.MoodRules
 import com.bdalxy.edencourt.domain.WorldInfoMatcher
+import com.bdalxy.edencourt.domain.buildDirectionFragment
 import java.time.LocalTime
 import kotlinx.coroutines.flow.first
 
@@ -81,6 +83,8 @@ class ChatPromptAssembler(
             traitsPrompt = buildTraitsFragment(),
             // A1：注入「用户↔角色亲密度」——角色按与用户的亲疏自然调整口吻（0=陌生/高=亲密）
             affinityText = buildAffinityFragment(),
+            // R4：注入「关系方向」——角色按关系方向自然调整口吻（方向隐式、不宣告；NONE 为空不注入）
+            directionText = directionFragment(),
             // A2：注入「角色此刻情绪」——自主/交互双源合成，反哺语气
             moodText = buildMoodFragment(scheduleEnabled),
             // A3：注入「世界书」——恒定条目(恒常规则) + 命中条目(关键词触发)，
@@ -139,6 +143,16 @@ class ChatPromptAssembler(
     private suspend fun buildAffinityFragment(): String {
         val conv = repository.getConversation(conversationId) ?: return ""
         return UserAffinity.buildAffinityFragment(conv.affinityScore)
+    }
+
+    /**
+     * R4：构建「关系方向」注入片段（v2.0 关系引擎：方向反哺口吻）。
+     * 读取 conversation.relationDirection 转成口吻引导；NONE（未明确）或解析失败返回空串不注入。
+     */
+    private suspend fun directionFragment(): String {
+        val conv = repository.getConversation(conversationId) ?: return ""
+        val direction = runCatching { RelationDirection.valueOf(conv.relationDirection) }.getOrNull()
+        return direction?.let { buildDirectionFragment(it) }.orEmpty()
     }
 
     /**

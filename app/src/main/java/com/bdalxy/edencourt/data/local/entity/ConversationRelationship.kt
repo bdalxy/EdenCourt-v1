@@ -4,8 +4,7 @@ import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
 
-/**
- * 角色间互动关系标签（v1.2b 互动系统，T8.8）。
+/** 会话间关系标签（v1.2b 互动系统，T8.8）。
  * 用关系标签而非 0-100 数值表达"熟不熟"，避免数值体系返工；affinityScore 预留但不参与核心逻辑。
  * 等级递进：陌生 < 相识 < 友好 < 亲密；RIFT（疏远）为关系分歧的负向态。
  */

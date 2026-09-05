@@ -1418,11 +1418,12 @@ app/src/main/
 - 验收：[x] 据 30 条上下文输出结构化方向+置信度+证据 · [x] JSON 解析正确、无效 JSON 忽略不落库 · [x] 候选/切换阈值正确 · [x] 按 5 条/12h 异步触发不阻塞 · [x] 并发锁有效
 - ⚠️ 初版预设（待确认）：`typicalAffinityFloor` 映射 FRIEND/COMRADE=20、AMBIGUOUS=40、INTIMATE=60、LOVER=70；冷却只按时间、未做消息数维度。
 
-#### R4 方向+浓度注入 prompt（反哺语气 + 软性事件）— 软性事件归此
+#### R4 方向+浓度注入 prompt（反哺语气 + 软性事件）✅（已完成）
 - 依赖：R1、R3
 - 操作：`ChatPromptAssembler` 注入当前「方向 + 浓度」，让 AI 按关系方向/浓度调整语气（复用现有 `buildAffinityFragment` 并扩展方向维度）；**方向切换时触发软性事件**（角色说一句符合新方向的话，弥补「隐式方向」无感）。（模型建议：**Pro**，提示词设计）
-- 文件：`feature/chat/ChatPromptAssembler.kt`
-- 验收：[ ] 方向/浓度变化后语气随之变化 · [ ] 不影响既有亲密度注入 · [ ] 方向切换有软性反馈
+- 文件：`domain/RelationDirectionEngine.kt`（buildDirectionFragment/label）· `domain/PromptBuilder.kt`（directionText 参数）· `feature/chat/ChatPromptAssembler.kt`（directionFragment 注入）· `feature/chat/ChatViewModel.kt`（emitDirectionSwitchEvent）· 单测 2 例
+- 验收：[x] 方向/浓度变化后语气随之变化（directionText 注入） · [x] 不影响既有亲密度注入（独立 directionText，affinityText 不动） · [x] 方向切换有软性反馈（emitDirectionSwitchEvent 插入角色主动消息）
+- ⚠️ 软性事件为轻量版：切换时 AI 生成一句 ≤40 字角色主动消息插入，失败静默；实际触发需真实长聊到方向切换（低频），端到端效果留待真实使用验证。
 
 #### R5 关系可视化（当前关系展示）— 已降级/基本取消
 - 依赖：R1、R3
