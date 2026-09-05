@@ -196,7 +196,6 @@ private fun SettingsTab(navController: NavHostController) {
             SettingsScreen(
                 onBack = null, // 设置 Tab 根页面，无返回箭头
                 onOpenInteraction = { navController.navigate(NavRoutes.INTERACTION_CENTER) },
-                onOpenWorldBook = { navController.navigate(NavRoutes.WORLD_BOOK) },
                 onOpenAbout = { navController.navigate(NavRoutes.ABOUT) },
             )
         }
