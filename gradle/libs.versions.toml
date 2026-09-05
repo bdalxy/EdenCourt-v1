@@ -19,6 +19,9 @@ junit = "4.13.2"
 mockk = "1.13.10"
 testRunner = "1.6.1"
 testExtJunit = "1.2.1"
+# —— UI 检查流水线（Roborazzi 截图测试）依赖版本：与 AGP 8.7.0 / Kotlin 2.0.20 同代（2024-10）对齐 ——
+robolectric = "4.14.1"
+roborazzi = "1.21.0"
 
 [libraries]
 # —— 骨架阶段已启用 ——
@@ -53,6 +56,9 @@ androidx-exifinterface = { group = "androidx.exifinterface", name = "exifinterfa
 # —— 单元测试（方案 G-③ 自动化回归集 Phase1：核心纯逻辑单测）——
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 mockk = { group = "io.mockk", name = "mockk", version.ref = "mockk" }
+# —— UI 检查流水线（Roborazzi 截图测试）：底层 Robolectric + 截图库 ——
+robolectric = { group = "org.robolectric", name = "robolectric", version.ref = "robolectric" }
+roborazzi = { group = "io.github.takahirom.roborazzi", name = "roborazzi", version.ref = "roborazzi" }
 
 # —— androidTest（方案 G-③ Phase2：Room 迁移升级测试）——
 androidx-room-testing = { group = "androidx.room", name = "room-testing", version.ref = "room" }

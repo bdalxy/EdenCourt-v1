@@ -78,6 +78,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.bdalxy.edencourt.EdenCourtApp
@@ -103,14 +104,17 @@ import kotlinx.coroutines.withContext
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
-fun CharacterScreen(onBack: () -> Unit, onOpenWorldBook: () -> Unit) {
+fun CharacterScreen(onBack: (() -> Unit)?, onOpenWorldBook: () -> Unit) {
     val context = LocalContext.current
     val app = context.applicationContext as EdenCourtApp
     val viewModel: CharacterViewModel = viewModel(factory = CharacterViewModel.factory(app))
     val cards by viewModel.cards.collectAsStateWithLifecycle()
     val importing by viewModel.importing.collectAsStateWithLifecycle()
-    // B3：待裁剪立绘路径（非空时显示头像框裁剪对话框）
+    // B3：待裁剪立绘路径（非空时显示头像框裁剪对话框）；此路径用于用户从立绘上框选头像
     var croppingArtwork by remember { mutableStateOf<String?>(null) }
+    // B3-新：待预览确认的立绘路径（非空时显示立绘预览对话框）；用于「更换立绘」时不直接落库，
+    // 先让用户预览大卡背景效果，确认无问题再写库。这解决了「换立绘到头像流程、大图没变」的混淆。
+    var previewingArtwork by remember { mutableStateOf<String?>(null) }
 
     // B3：世界书数量（顶部入口卡副标题）
     val worldBookCount by viewModel.worldBookCount.collectAsStateWithLifecycle()
@@ -159,20 +163,20 @@ fun CharacterScreen(onBack: () -> Unit, onOpenWorldBook: () -> Unit) {
     ) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
         scope.launch {
-            val path = saveAvatarFromUri(context, uri)
             val card = editingCard
             when {
                 card != null -> {
-                    // 编辑已有角色卡：选中后立即生效
+                    // 编辑已有角色卡：先存为立绘临时文件，再弹出裁剪器让用户框选
+                    val path = saveArtworkFromUri(context, uri)
                     if (path != null) {
-                        viewModel.updateAvatar(card, path)
-                        snackbarHostState.showSnackbar("头像已更新")
+                        croppingArtwork = path
                     } else {
-                        snackbarHostState.showSnackbar("头像处理失败，请重试")
+                        snackbarHostState.showSnackbar("图片处理失败，请重试")
                     }
                 }
                 else -> {
                     // 新建角色：暂存头像，保存卡片时一并入库
+                    val path = saveAvatarFromUri(context, uri)
                     newAvatarPath = path
                     if (path == null) snackbarHostState.showSnackbar("头像处理失败，请重试")
                 }
@@ -187,15 +191,13 @@ fun CharacterScreen(onBack: () -> Unit, onOpenWorldBook: () -> Unit) {
         if (uri == null) return@rememberLauncherForActivityResult
         scope.launch {
             val path = saveArtworkFromUri(context, uri)
-            val card = editingCard
-            if (card == null) return@launch
-            if (path != null) {
-                viewModel.setArtwork(card, path)
-                // B3-3b：保存立绘后弹出头像框裁剪器，让用户从立绘上框选头像
-                croppingArtwork = path
-            } else {
+            if (path == null) {
                 snackbarHostState.showSnackbar("立绘处理失败，请重试")
+                return@launch
             }
+            // 更换立绘流程：先保存新立绘为临时文件，弹出预览让用户确认大卡背景效果；
+            // 确认后再 setArtwork 写库，头像则由「更换头像」独立负责，二者不再混淆。
+            previewingArtwork = path
         }
     }
 
@@ -204,8 +206,11 @@ fun CharacterScreen(onBack: () -> Unit, onOpenWorldBook: () -> Unit) {
             TopAppBar(
                 title = { Text("角色卡") },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                    // 作为底部 Tab 根页面时 onBack 为 null，不显示返回箭头
+                    if (onBack != null) {
+                        IconButton(onClick = onBack) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                        }
                     }
                 },
             )
@@ -345,6 +350,19 @@ fun CharacterScreen(onBack: () -> Unit, onOpenWorldBook: () -> Unit) {
                 if (card != null) viewModel.updateAvatar(card, avatarPath)
                 croppingArtwork = null
                 scope.launch { snackbarHostState.showSnackbar("头像已从立绘裁剪生成") }
+            },
+        )
+    }
+
+    // B3-新：立绘预览确认对话框（更换立绘流程）——先预览大卡背景效果，确认后才写库
+    previewingArtwork?.let { path ->
+        ArtworkPreviewDialog(
+            artworkPath = path,
+            onCancel = { previewingArtwork = null },
+            onConfirm = {
+                val card = editingCard
+                if (card != null) viewModel.setArtwork(card, path)
+                previewingArtwork = null
             },
         )
     }
@@ -552,6 +570,7 @@ private fun PinnedCard(
     onTogglePin: () -> Unit,
 ) {
     // 异步加载立绘背景（IO 解码，采样压缩防内存）
+    // P2修复：key 绑定立绘路径，下次进入本卡时若路径有变则强制重载，保证换立绘后大图立刻跟随
     var artwork by remember(card.artwork) { mutableStateOf<ImageBitmap?>(null) }
     LaunchedEffect(card.artwork) {
         artwork = card.artwork?.let { path ->
@@ -583,12 +602,11 @@ private fun PinnedCard(
                         .fillMaxSize()
                         .background(
                             Brush.verticalGradient(
-                                colors = listOf(
-                                    Color.Transparent,
-                                    Color.Black.copy(alpha = 0.55f),
+                                colorStops = arrayOf(
+                                    0.0f to Color.Transparent,
+                                    0.75f to Color.Transparent,
+                                    1.0f to Color.Black.copy(alpha = 0.55f),
                                 ),
-                                startY = 0f,
-                                endY = 140f,
                             ),
                         ),
                 )
@@ -904,6 +922,86 @@ private fun WorldBookEntryCard(count: Int, onClick: () -> Unit, modifier: Modifi
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+        }
+    }
+}
+
+/**
+ * 立绘预览确认对话框（更换立绘流程）：
+ * 选完新立绘后先全屏预览大卡背景效果，用户确认后才把它写库（作为该卡立绘/大卡背景）；
+ * 若不满意可取消，不会改动现有立绘。头像的更换仍由「更换头像」流程独立负责。
+ */
+@Composable
+private fun ArtworkPreviewDialog(
+    artworkPath: String,
+    onCancel: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    val context = LocalContext.current
+    // 异步加载立绘原图（IO 采样压缩防内存），加载中显示进度
+    var image by remember(artworkPath) { mutableStateOf<ImageBitmap?>(null) }
+    LaunchedEffect(artworkPath) {
+        image = withContext(Dispatchers.IO) {
+            loadArtworkBitmap(artworkPath)
+        }?.asImageBitmap()
+    }
+
+    Dialog(onDismissRequest = onCancel) {
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(20.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        ) {
+            Column(modifier = Modifier.padding(20.dp)) {
+                Text(
+                    text = "立绘预览",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "确认后作为角色卡置顶大卡的背景立绘。头像不受影响，请到「更换头像」单独设置。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                // 预览图：等比适配显示新立绘效果
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 360.dp)
+                        .background(
+                            color = MaterialTheme.colorScheme.surfaceVariant,
+                            shape = RoundedCornerShape(12.dp),
+                        ),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    val img = image
+                    if (img != null) {
+                        Image(
+                            bitmap = img,
+                            contentDescription = null,
+                            contentScale = ContentScale.Fit,
+                            modifier = Modifier.fillMaxWidth().padding(8.dp),
+                        )
+                    } else {
+                        CircularProgressIndicator()
+                    }
+                }
+                Spacer(modifier = Modifier.height(12.dp))
+                // 底部操作：取消 / 确认使用（确认后才写库为大卡背景）
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                ) {
+                    TextButton(onClick = onCancel) { Text("取消") }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    TextButton(
+                        onClick = onConfirm,
+                        enabled = image != null,
+                    ) { Text("确认使用") }
+                }
+            }
         }
     }
 }

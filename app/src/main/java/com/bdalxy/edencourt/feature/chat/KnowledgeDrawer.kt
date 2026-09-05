@@ -76,6 +76,7 @@ import com.bdalxy.edencourt.domain.ContextBudget
  * @param budgetUsed     已用 token（预算条）
  * @param onOpenMemory   点击「记忆」行（触发原 SessionMemorySheet）
  * @param onOpenInteraction 点击「互动」行（触发原 InteractionSheet）
+ * @param onOpenCharacterDetail 点击「角色卡」行（跳转角色卡详情页）
  * @param onMountWorldBook 点击「世界书」行（弹出选书挂载）
  * @param onManageWorldBook 点击世界书行尾「管理」（跳设置页/管理页）
  * @param onDismiss      点击遮罩/关闭
@@ -92,12 +93,15 @@ fun KnowledgeDrawer(
     memoryLabel: String,
     memoryTokens: Int,
     affinityText: String,
+    /** 关系方向文案（如「朋友」/「暧昧」/「尚未明确」） */
+    directionText: String,
     lifeStateText: String,
     moodText: String,
     unreadInteractions: Int,
     budgetUsed: Int,
     onOpenMemory: () -> Unit,
     onOpenInteraction: () -> Unit,
+    onOpenCharacterDetail: () -> Unit,
     onMountWorldBook: () -> Unit,
     onManageWorldBook: () -> Unit,
     onDismiss: () -> Unit,
@@ -177,7 +181,7 @@ fun KnowledgeDrawer(
                             label = "角色卡",
                             sub = "名字 · 性格 · 背景 · 说话风格",
                             token = characterTokens,
-                            onClick = onMountWorldBook, // 点击暂复用挂载回调占位；后续接角色卡入口
+                            onClick = onOpenCharacterDetail, // 跳转角色卡详情页
                         )
                         // —— ③⑤ 世界书：挂载 + 命中 ——
                         SectionLabel("世界书")
@@ -213,6 +217,11 @@ fun KnowledgeDrawer(
                             icon = { Icon(Icons.Filled.List, contentDescription = "亲密度", tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(20.dp)) },
                             label = "亲密度",
                             value = affinityText,
+                        )
+                        DrawerStateRow(
+                            icon = { Icon(Icons.Filled.Star, contentDescription = "关系方向", tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(20.dp)) },
+                            label = "关系方向",
+                            value = directionText,
                         )
                         // —— 互动行：进入互动面板 ——
                         SectionLabel("互动")

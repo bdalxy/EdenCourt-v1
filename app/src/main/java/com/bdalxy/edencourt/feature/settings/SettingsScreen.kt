@@ -23,6 +23,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.AutoStories
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -82,11 +83,13 @@ private val MODEL_PRESETS = listOf(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
-    onBack: () -> Unit,
+    onBack: (() -> Unit)?,
     // T11.13：互动中心入口（从设置页也能进入）
     onOpenInteraction: () -> Unit,
     // C：世界书管理入口（从设置页也能进入）
     onOpenWorldBook: () -> Unit,
+    // v2.0：关于页入口（底部 Tab 改造后从三点菜单迁到设置页）
+    onOpenAbout: () -> Unit,
 ) {
     val context = LocalContext.current.applicationContext as Application
     val viewModel: SettingsViewModel = viewModel(factory = SettingsViewModel.factory(context))
@@ -96,8 +99,11 @@ fun SettingsScreen(
             TopAppBar(
                 title = { Text("设置") },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                    // 作为底部 Tab 根页面时 onBack 为 null，不显示返回箭头
+                    if (onBack != null) {
+                        IconButton(onClick = onBack) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                        }
                     }
                 },
             )
@@ -130,6 +136,8 @@ fun SettingsScreen(
             item { InteractionCenterSection(onOpenInteraction = onOpenInteraction) }
             // 第 5 区：世界书入口（C，从设置页也能进入：管理书籍与条目）
             item { WorldBookSection(onOpenWorldBook = onOpenWorldBook) }
+            // 第 6 区：关于（v2.0：底部 Tab 改造后从三点菜单迁到设置页）
+            item { AboutSection(onOpenAbout = onOpenAbout) }
             // 开发者工具区：仅 debug 构建可见（性能压测种子数据，M3 验收前提）
             if (isDebugBuild(context)) {
                 item { DebugSection(viewModel = viewModel) }
@@ -741,6 +749,55 @@ private fun WorldBookSection(onOpenWorldBook: () -> Unit) {
                 )
                 Text(
                     text = "管理世界观书籍与条目，聊到关键词时注入对应设定",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Text(
+                text = "›",
+                style = MaterialTheme.typography.titleLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+/**
+ * 关于页入口（v2.0：底部 Tab 改造后，从原会话列表三点菜单迁到设置页，保证 About 页可达）。
+ */
+@Composable
+private fun AboutSection(onOpenAbout: () -> Unit) {
+    Card(
+        onClick = onOpenAbout,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+        ),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                imageVector = Icons.Filled.Info,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(20.dp),
+            )
+            Spacer(modifier = Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "关于",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                )
+                Text(
+                    text = "版本信息与应用说明",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

@@ -18,8 +18,8 @@ android {
         applicationId = "com.bdalxy.edencourt"
         minSdk = 29
         targetSdk = 36
-        versionCode = 3
-        versionName = "1.4.0"
+        versionCode = 4
+        versionName = "2.0.0"
 
         // androidTest 使用标准 runner（方案 G-③ Phase2：Room 迁移测试用）
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -108,6 +108,9 @@ dependencies {
     // 方案 G-③ 自动化回归集 Phase1：核心纯逻辑 JVM 单元测试（好感度分档/记忆排序/冲突判定等）
     testImplementation(libs.junit)
     testImplementation(libs.mockk)
+    // UI 检查流水线（版本兼容验证）：Robolectric 是 Roborazzi 底层；Roborazzi 截图库（暂不引 gradle-plugin 以绕开 AGP 匹配）
+    testImplementation(libs.robolectric)
+    testImplementation(libs.roborazzi)
 
     // 方案 G-③ Phase2：Room 迁移升级测试（MigrationTestHelper + runner）
     androidTestImplementation(libs.androidx.room.testing)

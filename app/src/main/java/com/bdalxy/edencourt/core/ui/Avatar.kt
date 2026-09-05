@@ -84,7 +84,7 @@ fun CharacterAvatar(
     }
 }
 
-/** 从本地路径加载头像 Bitmap：按目标尺寸 256px 采样压缩，防止大图内存过大（T6.3 关注内存） */
+/** 从本地路径加载头像 Bitmap：按目标尺寸 512px 采样压缩，防止大图内存过大（T6.3 关注内存） */
 fun loadAvatarBitmap(path: String): Bitmap? = runCatching {
     val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
     BitmapFactory.decodeFile(path, bounds)
@@ -136,7 +136,7 @@ suspend fun saveAvatarFromUri(context: Context, uri: Uri): String? = withContext
 }
 
 /** 头像目标尺寸（像素），保存/加载统一按此压缩 */
-private const val AVATAR_SIZE_PX = 256
+private const val AVATAR_SIZE_PX = 512
 /** 头像 JPEG 压缩质量 */
 private const val AVATAR_JPEG_QUALITY = 90
 /** 立绘大图最大边（像素），防止超大图内存过高；超限等比缩放到此尺寸内（B3） */
@@ -144,7 +144,7 @@ private const val ARTWORK_MAX_EDGE_PX = 2048
 /** 立绘 JPEG 压缩质量 */
 private const val ARTWORK_JPEG_QUALITY = 85
 /** 立绘背景显示采样上限（像素，加载压缩用） */
-private const val ARTWORK_DISPLAY_MAX_PX = 1024
+private const val ARTWORK_DISPLAY_MAX_PX = 2048
 /** 裁剪头像框占可视区边长比例（B3-3b；框固定中央，用户拖动/缩放立绘定位头像） */
 private const val FRAME_FRAC = 0.72f
 
@@ -245,7 +245,8 @@ suspend fun saveAvatarFromCrop(
     drawSizePx: Float,
 ): String? = withContext(Dispatchers.IO) {
     runCatching {
-        val bmp = loadArtworkBitmap(artworkPath) ?: return@runCatching null
+        // 全分辨率解码立绘：裁剪头像需要最高精度，避免头像模糊
+        val bmp = BitmapFactory.decodeFile(artworkPath) ?: return@runCatching null
         val bmpW = bmp.width.toFloat()
         val bmpH = bmp.height.toFloat()
         // 初始 contain 缩放基准：位图适配到可视区

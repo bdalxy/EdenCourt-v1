@@ -98,7 +98,7 @@ import java.util.Locale
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
-fun MemoryScreen(onBack: () -> Unit) {
+fun MemoryScreen(onBack: (() -> Unit)?) {
     val context = LocalContext.current
     val app = context.applicationContext as EdenCourtApp
     val viewModel: MemoryViewModel = viewModel(factory = MemoryViewModel.factory(app))
@@ -280,8 +280,11 @@ fun MemoryScreen(onBack: () -> Unit) {
                 TopAppBar(
                     title = { Text("记忆") },
                     navigationIcon = {
-                        IconButton(onClick = onBack) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                        // 作为底部 Tab 根页面时 onBack 为 null，不显示返回箭头
+                        if (onBack != null) {
+                            IconButton(onClick = onBack) {
+                                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                            }
                         }
                     },
                     // T11.4 备份/恢复：导出记忆为 JSON、从 JSON 导入记忆

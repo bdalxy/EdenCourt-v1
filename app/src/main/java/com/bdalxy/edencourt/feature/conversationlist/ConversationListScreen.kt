@@ -103,7 +103,6 @@ fun ConversationListScreen(
     // T13.6：各会话「独有人格」标签（同一张卡的不同会话一眼区分）
     val traitsByConversation by viewModel.traitsByConversation.collectAsStateWithLifecycle()
 
-    var menuExpanded by remember { mutableStateOf(false) }
     var pendingDelete by remember { mutableStateOf<Conversation?>(null) }
     // 长按操作目标会话（T6.10：弹「置顶/取消置顶 + 删除」操作菜单）
     var actionTarget by remember { mutableStateOf<Conversation?>(null) }
@@ -121,40 +120,13 @@ fun ConversationListScreen(
             TopAppBar(
                 title = { Text("对话") },
                 actions = {
-                    // T11.15 入口提级：记忆/互动中心顶栏直达（一屏可见，不再藏二级菜单）
-                    IconButton(onClick = onOpenMemory) {
-                        Icon(Icons.Filled.Star, contentDescription = "记忆管理")
+                    // 创建群聊入口（v2.0 A6-5：从菜单移到顶栏）
+                    TextButton(onClick = { showGroupCreator = true }) {
+                        Text("群聊", style = MaterialTheme.typography.labelMedium)
                     }
+                    // T11.15：互动中心直达入口
                     IconButton(onClick = onOpenInteraction) {
                         Icon(Icons.Filled.Favorite, contentDescription = "互动中心")
-                    }
-                    IconButton(onClick = { menuExpanded = true }) {
-                        Icon(Icons.Filled.MoreVert, contentDescription = "菜单")
-                    }
-                    DropdownMenu(
-                        expanded = menuExpanded,
-                        onDismissRequest = { menuExpanded = false },
-                    ) {
-                        DropdownMenuItem(
-                            text = { Text("角色卡管理") },
-                            onClick = { menuExpanded = false; onOpenCharacter() },
-                        )
-                        DropdownMenuItem(
-                            text = { Text("记忆管理") },
-                            onClick = { menuExpanded = false; onOpenMemory() },
-                        )
-                        DropdownMenuItem(
-                            text = { Text("设置") },
-                            onClick = { menuExpanded = false; onOpenSettings() },
-                        )
-                        DropdownMenuItem(
-                            text = { Text("关于") },
-                            onClick = { menuExpanded = false; onOpenAbout() },
-                        )
-                        DropdownMenuItem(
-                            text = { Text("创建群聊") },
-                            onClick = { menuExpanded = false; showGroupCreator = true },
-                        )
                     }
                 },
             )

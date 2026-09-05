@@ -135,6 +135,8 @@ data class KnowledgeDrawerState(
     val lifeStateText: String,
     /** 当前情绪文案：如「欢喜 · 72」（自主/交互双源合成） */
     val moodText: String,
+    /** 关系方向文案：如「朋友」/「暧昧」/「尚未明确」 */
+    val directionText: String,
     /** 本次注入预算已用估算（恒久身份 + 世界书 + 记忆 合计，用于底部分配条） */
     val budgetUsed: Int,
 )
@@ -511,6 +513,9 @@ class ChatViewModel(
         val moodText = "${MoodRules.tagName(resolved.tag)} · ${resolved.intensity}"
         // —— 预算已用估算（恒久身份 + 世界书 + 记忆） ——
         val budgetUsed = characterTokens + worldTokens + memoryTokens
+        // —— 关系方向：从 relationDirection 字段读取并转换为中文标签 ——
+        val directionText = runCatching { RelationDirection.valueOf(conv?.relationDirection ?: "NONE") }
+            .getOrDefault(RelationDirection.NONE).label()
         return KnowledgeDrawerState(
             characterTokens = characterTokens,
             worldBookLabel = worldBookLabel,
@@ -521,6 +526,7 @@ class ChatViewModel(
             affinityText = affinityText,
             lifeStateText = lifeStateText,
             moodText = moodText,
+            directionText = directionText,
             budgetUsed = budgetUsed,
         )
     }

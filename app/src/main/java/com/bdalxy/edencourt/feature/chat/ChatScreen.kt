@@ -57,6 +57,7 @@ fun ChatScreen(
     onOpenMemoryManagement: () -> Unit,
     // C：聊天页内「世界书」管理入口（知识库抽屉「管理」/ 挂载弹层空态引导）
     onOpenWorldBook: () -> Unit,
+    onOpenCharacterDetail: () -> Unit,
 ) {
     val app = LocalContext.current.applicationContext as EdenCourtApp
     val viewModel: ChatViewModel = viewModel(
@@ -284,6 +285,7 @@ fun ChatScreen(
         memoryLabel = knowledgeDrawerState?.memoryLabel ?: "",
         memoryTokens = knowledgeDrawerState?.memoryTokens ?: 0,
         affinityText = knowledgeDrawerState?.affinityText ?: "0 / 100",
+        directionText = knowledgeDrawerState?.directionText ?: "尚未明确",
         lifeStateText = knowledgeDrawerState?.lifeStateText ?: "未开启",
         moodText = knowledgeDrawerState?.moodText ?: "—",
         unreadInteractions = unreadInteractions,
@@ -296,6 +298,10 @@ fun ChatScreen(
         onOpenInteraction = {
             showKnowledgeDrawer = false
             showInteractionSheet = true
+        },
+        onOpenCharacterDetail = {
+            showKnowledgeDrawer = false
+            onOpenCharacterDetail()
         },
         onMountWorldBook = {
             // B1：世界书挂载弹层——关闭抽屉后打开选书弹层

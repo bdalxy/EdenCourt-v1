@@ -3,15 +3,14 @@ package com.bdalxy.edencourt.feature.character
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.rememberTransformableState
 import androidx.compose.foundation.gestures.transformable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Icon
@@ -22,6 +21,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -88,12 +88,15 @@ internal fun ArtworkCropperDialog(
 
     Dialog(onDismissRequest = onCancel, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(modifier = Modifier.fillMaxSize(), color = Color.Black) {
-            Column {
+            Column(
+                modifier = Modifier
+                    .padding(bottom = 48.dp) // 底部留白，防止按钮被导航栏/手势条遮挡
+            ) {
                 // —— 顶部栏 ——
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 4.dp, vertical = 4.dp),
+                        .padding(top = 48.dp, start = 4.dp, end = 4.dp, bottom = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     IconButton(onClick = onCancel) {
@@ -107,65 +110,102 @@ internal fun ArtworkCropperDialog(
                         text = "拖动 / 捏合缩放，对齐头像框",
                         style = MaterialTheme.typography.titleSmall,
                         color = Color.White.copy(alpha = 0.9f),
+                        modifier = Modifier.weight(1f),
                     )
-                }
-                // —— 中部：正方形立绘裁剪区 ——
-                BoxWithConstraints(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f)
-                        .aspectRatio(1f)
-                        .onSizeChanged { drawPx = it.width.toFloat() },
-                    contentAlignment = Alignment.Center,
-                ) {
-                    val bmp = image
-                    Canvas(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .transformable(state),
+                    // P1-重置：一键把缩放/位移归位到初始 contain 居中态，便于重新对齐
+                    IconButton(
+                        onClick = {
+                            scale = 1f
+                            offset = Offset.Zero
+                        },
                     ) {
-                        bmp?.let { img ->
-                            val bw = img.width.toFloat()
-                            val bh = img.height.toFloat()
-                            // 初始 contain：位图适配到可视区
-                            val base = drawPx / maxOf(bw, bh)
-                            val dstW = bw * base * scale
-                            val dstH = bh * base * scale
-                            val left = drawPx / 2f + offset.x - dstW / 2f
-                            val top = drawPx / 2f + offset.y - dstH / 2f
-                            drawImage(
-                                image = img,
-                                dstOffset = IntOffset(left.roundToInt(), top.roundToInt()),
-                                dstSize = IntSize(dstW.roundToInt(), dstH.roundToInt()),
-                            )
-                        }
-                        // —— 圆形头像框 + 圆外灰遮罩（固定中央，不随图片变换）——
-                        val radius = drawPx * 0.36f // 圆形框半径（直径约可视区 72%）
-                        val cx = drawPx / 2f
-                        val cy = drawPx / 2f
-                        val overlay = Color.Black.copy(alpha = 0.55f)
-                        // 路径：整个可视区减去中央圆，圆内为透明（保留立绘），圆外盖灰遮罩
-                        val mask = Path().apply {
-                            fillType = PathFillType.EvenOdd
-                            addRect(Rect(0f, 0f, drawPx, drawPx))
-                            addOval(Rect(cx - radius, cy - radius, cx + radius, cy + radius))
-                        }
-                        drawPath(path = mask, color = overlay)
-                        // 白色圆环描边，标示头像裁剪边界
-                        drawCircle(
-                            color = Color.White,
-                            radius = radius,
-                            center = Offset(cx, cy),
-                            style = Stroke(width = 3f),
+                        Icon(
+                            Icons.Filled.Refresh,
+                            contentDescription = "重置",
+                            tint = Color.White,
                         )
                     }
                 }
+                // —— 中部：居中正方形立绘裁剪区 ——
+                // P0 修复：弃用 weight(1f)+aspectRatio(1f) 组合（会把裁剪区撑高、挤掉底部按钮、且圆心随高度偏移），
+                // 改为 weight 占满剩余空间 + 内部取 min(宽,高) 的居中正方形，确保裁剪框真正居中、底部按钮始终可见。
+                BoxWithConstraints(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    // 可容纳的最大居中正方形边长（Dp），保证宽高一致、圆心 = 边长一半
+                    val side = minOf(maxWidth, maxHeight)
+                    val bmp = image
+                    Box(
+                        modifier = Modifier
+                            .size(side)
+                            .onSizeChanged { drawPx = it.width.toFloat() },
+                    ) {
+                        Canvas(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .transformable(state),
+                        ) {
+                            bmp?.let { img ->
+                                val bw = img.width.toFloat()
+                                val bh = img.height.toFloat()
+                                // 初始 contain：位图适配到可视区
+                                val base = drawPx / maxOf(bw, bh)
+                                val dstW = bw * base * scale
+                                val dstH = bh * base * scale
+                                val left = drawPx / 2f + offset.x - dstW / 2f
+                                val top = drawPx / 2f + offset.y - dstH / 2f
+                                drawImage(
+                                    image = img,
+                                    dstOffset = IntOffset(left.roundToInt(), top.roundToInt()),
+                                    dstSize = IntSize(dstW.roundToInt(), dstH.roundToInt()),
+                                )
+                            }
+                            // —— 圆形头像框 + 圆外灰遮罩（固定中央，不随图片变换）——
+                            val radius = drawPx * 0.36f // 圆形框半径（直径约可视区 72%）
+                            val cx = drawPx / 2f
+                            val cy = drawPx / 2f
+                            val overlay = Color.Black.copy(alpha = 0.55f)
+                            // 路径：整个可视区减去中央圆，圆内为透明（保留立绘），圆外盖灰遮罩
+                            val mask = Path().apply {
+                                fillType = PathFillType.EvenOdd
+                                addRect(Rect(0f, 0f, drawPx, drawPx))
+                                addOval(Rect(cx - radius, cy - radius, cx + radius, cy + radius))
+                            }
+                            drawPath(path = mask, color = overlay)
+                            // 白色圆环描边，标示头像裁剪边界
+                            drawCircle(
+                                color = Color.White,
+                                radius = radius,
+                                center = Offset(cx, cy),
+                                style = Stroke(width = 3f),
+                            )
+                            // P1-辅助参考线：圆内十字（水平+垂直淡线），帮助把主体物对齐到中心
+                            val guideColor = Color.White.copy(alpha = 0.35f)
+                            // 水平参考线
+                            drawLine(
+                                color = guideColor,
+                                start = Offset(cx - radius, cy),
+                                end = Offset(cx + radius, cy),
+                                strokeWidth = 1.5f,
+                            )
+                            // 垂直参考线
+                            drawLine(
+                                color = guideColor,
+                                start = Offset(cx, cy - radius),
+                                end = Offset(cx, cy + radius),
+                                strokeWidth = 1.5f,
+                            )
+                        }
+                    }
+                }
                 Spacer(modifier = Modifier.height(8.dp))
-                // —— 底部按钮（加导航栏内边距，避免被手势条/虚拟键遮挡）——
+                // —— 底部按钮 ——
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .navigationBarsPadding()
                         .padding(horizontal = 16.dp, vertical = 12.dp),
                     horizontalArrangement = androidx.compose.foundation.layout.Arrangement.End,
                     verticalAlignment = Alignment.CenterVertically,
