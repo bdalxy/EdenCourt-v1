@@ -106,9 +106,9 @@ class AppDatabaseMigrationTest {
     fun migrateFrom_v24_to_v25_addsConversationTraitsTable() {
         helper.createDatabase(TEST_DB3, 24).use { db ->
             db.execSQL(
-                "INSERT INTO conversations (title, remark, code, interactionEnabled, createdAt, updatedAt, " +
+                "INSERT INTO conversations (title, remark, code, interactionEnabled, lifeEnabled, createdAt, updatedAt, " +
                     "isPinned, lastMessagePreview, lastMessageTime) " +
-                    "VALUES ('小夏会话', '', 'V-test25', 0, 1000, 2000, 0, '你好', 2000)",
+                    "VALUES ('小夏会话', '', 'V-test25', 0, 0, 1000, 2000, 0, '你好', 2000)",
             )
 
             migrateChain(db, from = 24, to = 25)
@@ -152,9 +152,9 @@ class AppDatabaseMigrationTest {
         helper.createDatabase(TEST_DB4, 31).use { db ->
             // 埋入 v31 形态的存量会话（无 relationDirection 列，顺应迁移前结构需按 v31 字段 INSERT）
             db.execSQL(
-                "INSERT INTO conversations (title, remark, code, interactionEnabled, createdAt, updatedAt, " +
+                "INSERT INTO conversations (title, remark, code, interactionEnabled, lifeEnabled, createdAt, updatedAt, " +
                     "isPinned, lastMessagePreview, lastMessageTime) " +
-                    "VALUES ('存量会话', '', 'V-test32', 0, 1000, 2000, 0, '你好', 2000)",
+                    "VALUES ('存量会话', '', 'V-test32', 0, 0, 1000, 2000, 0, '你好', 2000)",
             )
 
             migrateChain(db, from = 31, to = 32)
@@ -174,9 +174,9 @@ class AppDatabaseMigrationTest {
         helper.createDatabase(TEST_DB5, 32).use { db ->
             // 埋入 v32 形态的存量会话（无候选状态 4 列，按 v32 已有字段 INSERT）
             db.execSQL(
-                "INSERT INTO conversations (title, remark, code, interactionEnabled, createdAt, updatedAt, " +
+                "INSERT INTO conversations (title, remark, code, interactionEnabled, lifeEnabled, createdAt, updatedAt, " +
                     "isPinned, lastMessagePreview, lastMessageTime) " +
-                    "VALUES ('存量会话', '', 'V-test33', 0, 1000, 2000, 0, '你好', 2000)",
+                    "VALUES ('存量会话', '', 'V-test33', 0, 0, 1000, 2000, 0, '你好', 2000)",
             )
 
             migrateChain(db, from = 32, to = 33)
@@ -203,10 +203,10 @@ class AppDatabaseMigrationTest {
         helper.createDatabase(TEST_DB6, 33).use { db ->
             // 埋入 v33 形态的存量会话和消息
             db.execSQL(
-                "INSERT INTO conversations (title, remark, code, interactionEnabled, createdAt, updatedAt, " +
+                "INSERT INTO conversations (title, remark, code, interactionEnabled, lifeEnabled, createdAt, updatedAt, " +
                     "isPinned, lastMessagePreview, lastMessageTime, affinityScore, relationDirection, " +
                     "candidateDirection, candidateCount) " +
-                    "VALUES ('存量会话', '', 'V-test34', 0, 1000, 2000, 0, '你好', 2000, 30, 'NONE', 'NONE', 0)",
+                    "VALUES ('存量会话', '', 'V-test34', 0, 0, 1000, 2000, 0, '你好', 2000, 30, 'NONE', 'NONE', 0)",
             )
             db.execSQL(
                 "INSERT INTO messages (conversationId, role, content, createdAt, status) " +
@@ -284,9 +284,9 @@ class AppDatabaseMigrationTest {
         helper.createDatabase(TEST_DB8, 25).use { db ->
             // 埋入 v25 形态的存量会话（无 affinityScore/worldBookId/graphEnabled 等后续列，按 v25 字段集 INSERT）
             db.execSQL(
-                "INSERT INTO conversations (title, remark, code, interactionEnabled, createdAt, updatedAt, " +
+                "INSERT INTO conversations (title, remark, code, interactionEnabled, lifeEnabled, createdAt, updatedAt, " +
                     "isPinned, lastMessagePreview, lastMessageTime) " +
-                    "VALUES ('存量会话', '', 'V-test31', 0, 1000, 2000, 0, '你好', 2000)",
+                    "VALUES ('存量会话', '', 'V-test31', 0, 0, 1000, 2000, 0, '你好', 2000)",
             )
 
             migrateChain(db, from = 25, to = 31)
