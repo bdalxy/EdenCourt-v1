@@ -37,8 +37,8 @@ class ConsultParserTest {
 
     @Test
     fun `命中触发词_未点名目标_返回请求且目标为空`() {
-        val result = ConsultParser.identify("去问问她在干嘛", conversations, conversationId = 1L, cardNameById = names)
-        // 剥离触发词「去问问」；未点名任何角色，目标为空
+        val result = ConsultParser.identify("去打听她在干嘛", conversations, conversationId = 1L, cardNameById = names)
+        // 剥离触发词「去打听」；未点名任何角色，目标为空
         assertEquals(ConsultRequest(targetConversationId = null, question = "她在干嘛"), result)
     }
 
@@ -54,22 +54,22 @@ class ConsultParserTest {
     @Test
     fun `点名其他角色_定位到其会话并剥离主题`() {
         // 点名「阿杰」，应定位到会话2（cardId=20），主题去掉触发词与角色名
-        val result = ConsultParser.identify("去问问阿杰在忙什么", conversations, conversationId = 1L, cardNameById = names)
+        val result = ConsultParser.identify("去打听阿杰在忙什么", conversations, conversationId = 1L, cardNameById = names)
         assertEquals(ConsultRequest(targetConversationId = 2L, question = "在忙什么"), result)
     }
 
     @Test
     fun `点名自己会话角色_不作为打听目标`() {
         // 「小夏」是当前会话(1)的角色，循环跳过自己 → 目标为空；且当前角色名也已从主题剥离
-        val result = ConsultParser.identify("去问问小夏吃饭没", conversations, conversationId = 1L, cardNameById = names)
+        val result = ConsultParser.identify("去打听小夏吃饭没", conversations, conversationId = 1L, cardNameById = names)
         assertEquals(ConsultRequest(targetConversationId = null, question = "吃饭没"), result)
     }
 
     @Test
     fun `点名目标但主题剥空_回退用原文`() {
         // 主题去掉触发词+角色名后为空 → question 兜底用原文
-        val result = ConsultParser.identify("去问问阿杰", conversations, conversationId = 1L, cardNameById = names)
-        assertEquals(ConsultRequest(targetConversationId = 2L, question = "去问问阿杰"), result)
+        val result = ConsultParser.identify("去打听阿杰", conversations, conversationId = 1L, cardNameById = names)
+        assertEquals(ConsultRequest(targetConversationId = 2L, question = "去打听阿杰"), result)
     }
 
     // ---------- splitTerms 分词 ----------

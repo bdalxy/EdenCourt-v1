@@ -4,7 +4,8 @@ package com.bdalxy.edencourt.core
 object AppConfig {
     const val APP_NAME = "EdenCourt"
     const val APP_NAME_CN = "永恒庭院"
-    const val VERSION = "1.0.0"
+    // T12.x P1 修复：与 app/build.gradle.kts versionName=2.0.0 对齐（此前 1.0.0 致「关于页版本与安装包不符」）
+    const val VERSION = "2.0.0"
 
     // 远程 API 默认配置（阶段 3 接入 DeepSeek 时使用）
     const val DEFAULT_BASE_URL = "https://api.deepseek.com"

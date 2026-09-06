@@ -20,6 +20,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -33,7 +34,7 @@ internal const val MANUAL_CARD_ID = -1L
  * 记忆管理页 ViewModel（T5.5 + 阶段一升级 T9.3/9.4/9.5）。
  * - 数据源：不再全量 observeAll 进内存，改由统一检索接口按「搜索词+角色+分类」分页查询（T9.5）
  * - 分类 Tab：7 类 + 全部，带各自数量（T9.4）
- * - 搜索：实时检索（T9.3），300ms 防抖由表 Flow 驱动
+ * - 搜索：实时检索（T9.3），300ms 防抖在 combine 驱动链上（避免每敲一键触发 8+N 次 SQL）
  * - 自动刷新：表数据（新增/删除/编辑）变化或筛选条件变化时，重置到第一页重查
  */
 class MemoryViewModel(
@@ -104,6 +105,7 @@ class MemoryViewModel(
                 _selectedCardId,
                 _selectedType,
             ) { _, query, cardId, type -> Filter(query, cardId, type) }
+                .debounce(300) // T12.x P1 修复：搜索词连续输入时 300ms 防抖，避免每敲一键触发 8+N 次 SQL
                 .collect { reloadFirstPage() }
         }
         // 概览统计（T10.6）：随表增删改自动刷新，跨全库不受当前筛选影响

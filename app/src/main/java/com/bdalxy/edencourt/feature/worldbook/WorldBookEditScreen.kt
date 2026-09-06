@@ -33,11 +33,14 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -202,14 +205,11 @@ class WorldBookEditViewModel(
         }
     }
 
-    /** 删除整本世界书（仅管理页提供） */
+    /** 删除整本世界书（仅管理页提供）。走 DAO 事务级联：清条目 + 清会话引用 + 删书，任一步失败整体回滚 */
     fun deleteBook() {
         val current = _book.value ?: return
         viewModelScope.launch {
-            withContext(Dispatchers.IO) {
-                _entries.value.forEach { dao.deleteEntry(it) }
-                dao.deleteBook(current)
-            }
+            withContext(Dispatchers.IO) { dao.deleteBookCascade(current) }
             toast.value = "已删除"
         }
     }
@@ -249,14 +249,39 @@ fun WorldBookEditScreen(
 
     val isNew = bookId <= 0
     // 书名/简介输入（编辑态以既有值预填）
-    var name by remember(bookId) { mutableStateOf(book?.name.orEmpty()) }
-    var description by remember(bookId) { mutableStateOf(book?.description.orEmpty()) }
+    var name by remember(bookId) { mutableStateOf("") }
+    var description by remember(bookId) { mutableStateOf("") }
+    // T12.x P1 修复：book 是 init 里异步加载的，remember 初值取到 null → 编辑既有书时输入框空白。
+    // 这里在 book 首次加载完成后预填一次（prefilled 防重入覆盖用户后续输入）。
+    var prefilled by remember(bookId) { mutableStateOf(false) }
+    LaunchedEffect(book) {
+        val b = book
+        if (b != null && b.id == bookId && !prefilled) {
+            name = b.name.orEmpty()
+            description = b.description.orEmpty()
+            prefilled = true
+        }
+    }
     // 条目编辑对话框
     var editingEntry by remember { mutableStateOf<WorldInfoEntry?>(null) }          // 非 null = 编辑
     var showAddEntry by remember { mutableStateOf(false) }                          // true = 新增
 
     // 删除键
     val hasUnsavedName = bookId > 0 && (name.trim() != book?.name || description.trim() != book?.description)
+
+    // 一次性操作反馈（T12.x P1 修复：此前 toast 收集但从未展示）
+    val snackbarHostState = remember { SnackbarHostState() }
+    LaunchedEffect(toast) {
+        toast?.let {
+            snackbarHostState.showSnackbar(it)
+            viewModel.clearToast()
+        }
+    }
+
+    // 删除整本世界书二次确认（T12.x P1 修复：此前点「删除这本世界书」直接删，误触即删且连同条目一起没了）
+    var showDeleteConfirm by remember { mutableStateOf(false) }
+    // 单个条目删除二次确认（T12.x P1 修复：此前点条目行垃圾桶直接删，误触即删）
+    var pendingEntryDelete by remember { mutableStateOf<WorldInfoEntry?>(null) }
 
     Scaffold(
         topBar = {
@@ -269,6 +294,7 @@ fun WorldBookEditScreen(
                 },
             )
         },
+        snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { innerPadding ->
         Column(
             modifier = Modifier.fillMaxSize().padding(innerPadding),
@@ -348,7 +374,7 @@ fun WorldBookEditScreen(
                             EntryRow(
                                 entry = entry,
                                 onEdit = { editingEntry = entry },
-                                onDelete = { viewModel.deleteEntry(entry) },
+                                onDelete = { pendingEntryDelete = entry },
                             )
                         }
                     }
@@ -359,10 +385,7 @@ fun WorldBookEditScreen(
             // 底部操作：删除整本书（仅既有书）
             if (!isNew) {
                 TextButton(
-                    onClick = {
-                        viewModel.deleteBook()
-                        onDone()
-                    },
+                    onClick = { showDeleteConfirm = true },
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp, vertical = 8.dp),
@@ -373,6 +396,47 @@ fun WorldBookEditScreen(
                 }
             }
         }
+    }
+
+    // 删除整本世界书二次确认
+    if (showDeleteConfirm) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirm = false },
+            title = { Text("删除这本世界书？") },
+            text = { Text("将同时删除其中 ${entries.size} 条条目，此操作不可恢复。") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showDeleteConfirm = false
+                        viewModel.deleteBook()
+                        onDone()
+                    },
+                ) { Text("删除", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConfirm = false }) { Text("取消") }
+            },
+        )
+    }
+
+    // 单个条目删除二次确认
+    pendingEntryDelete?.let { entry ->
+        AlertDialog(
+            onDismissRequest = { pendingEntryDelete = null },
+            title = { Text("删除这条条目？") },
+            text = { Text("「${entry.title.ifBlank { "未命名条目" }}」将被删除，此操作不可恢复。") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        pendingEntryDelete = null
+                        viewModel.deleteEntry(entry)
+                    },
+                ) { Text("删除", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingEntryDelete = null }) { Text("取消") }
+            },
+        )
     }
 
     // 新增条目对话框

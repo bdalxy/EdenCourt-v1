@@ -7,7 +7,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.bdalxy.edencourt.EdenCourtApp
-import com.bdalxy.edencourt.data.debug.SeedDataTool
+import com.bdalxy.edencourt.data.debug.SeedDataGenerator
 import com.bdalxy.edencourt.data.local.dao.CharacterCardDao
 import com.bdalxy.edencourt.data.local.dao.UserIdentityDao
 import com.bdalxy.edencourt.data.local.entity.CharacterCardEntity
@@ -83,7 +83,7 @@ class SettingsViewModel(
     private val userIdentityDao: UserIdentityDao,
     private val scheduleConfigStore: ScheduleConfigStore,
     private val characterCardDao: CharacterCardDao,
-    private val seedDataTool: SeedDataTool,
+    private val seedDataGenerator: SeedDataGenerator?,
 ) : ViewModel() {
 
     /** 日志 TAG（S4 校验日志用） */
@@ -246,11 +246,12 @@ class SettingsViewModel(
 
     /** 生成千条压测种子数据（M3 性能压测工具，仅 debug 构建设置页「开发者工具」区调用） */
     fun generateSeedData(tag: Int) {
+        val generator = seedDataGenerator ?: return
         if (_seedState.value == SeedState.Running) return
         _seedState.value = SeedState.Running
         viewModelScope.launch {
             try {
-                val convId = seedDataTool.generate(tag = tag)
+                val convId = generator.generate(tag = tag)
                 _seedState.value = SeedState.Done(convId)
             } catch (e: Exception) {
                 _seedState.value = SeedState.Error("生成失败：${e.message}")
@@ -269,7 +270,7 @@ class SettingsViewModel(
                     userIdentityDao = app.userIdentityDao,
                     scheduleConfigStore = app.scheduleConfigStore,
                     characterCardDao = app.characterCardDao,
-                    seedDataTool = app.seedDataTool,
+                    seedDataGenerator = app.seedDataGenerator,
                 )
             }
         }

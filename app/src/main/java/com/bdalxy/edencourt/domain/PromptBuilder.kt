@@ -170,15 +170,32 @@ object PromptBuilder {
         val finalSystem = buildString {
             // ① 环境·当前现实时间（T6.11：每次发送时刷新，让 AI 感知三次元时间）
             append("【当前现实时间】").append(currentTimeText()).append("\n\n")
-            // ② 恒久身份：角色卡核心 + 用户自设身份
-            append(systemPrompt)
-            // ② 恒久身份：会话独有人格——印象摘要+反差对+自补充引导（T13.5 角色差异化）
-            if (traitsPrompt.isNotBlank()) {
-                append("\n\n").append(traitsPrompt)
-            }
-            // ③ 恒久世界规则：世界书 constant=true 条目——核心世界规则每次必注入，不随关键词命中浮动
-            if (constantWorldInfoText.isNotBlank()) {
-                append("\n\n").append(constantWorldInfoText)
+            // ② 恒久身份 + ③ 恒久世界规则：有预算时按硬配额截断（T12.x P1 修复——此前无条件 append，
+            // 角色卡数千字时总注入远超 totalBudget 兜底）；未传 budget 维持旧行为完全不变
+            if (budget != null) {
+                // ② 恒久身份硬配额：角色卡核心 systemPrompt + 会话独有人格 traitsPrompt 按序累计、超 identityBudget 即停
+                budget.truncate(
+                    listOf(systemPrompt, traitsPrompt).filter { it.isNotBlank() },
+                    maxToken = budget.identityBudget,
+                ).forEachIndexed { idx, part ->
+                    if (idx > 0) append("\n\n")
+                    append(part)
+                }
+                // ③ 恒久世界规则硬配额：constant 条目按 constantWorldBudget 截断（首条超限截到预算内）
+                if (constantWorldInfoText.isNotBlank()) {
+                    budget.truncate(listOf(constantWorldInfoText), maxToken = budget.constantWorldBudget)
+                        .forEach { append("\n\n").append(it) }
+                }
+            } else {
+                append(systemPrompt)
+                // ② 恒久身份：会话独有人格——印象摘要+反差对+自补充引导（T13.5 角色差异化）
+                if (traitsPrompt.isNotBlank()) {
+                    append("\n\n").append(traitsPrompt)
+                }
+                // ③ 恒久世界规则：世界书 constant=true 条目——核心世界规则每次必注入，不随关键词命中浮动
+                if (constantWorldInfoText.isNotBlank()) {
+                    append("\n\n").append(constantWorldInfoText)
+                }
             }
             // ④ 当下状态（固定短句，开销自负）：生活状态（T11.11）+ 陪看（T11.16）+ 亲密度（A1）+ 情绪（A2）
             if (lifeStateText.isNotBlank()) {

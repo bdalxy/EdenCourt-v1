@@ -37,6 +37,8 @@ import com.bdalxy.edencourt.data.local.entity.WorldInfoEntry
 /**
  * 本地数据库单例（企划书 3.3.2 / T2.4）。
  * - 挂载：Conversation、Message、CharacterCardEntity、MemoryItem 四个实体与对应 DAO
+ * - version=35：v34→v35 统一群聊参与者表索引名为 Room 默认名（v2.0 审查修复：此前迁移用自定义短名，与实体/schema 不一致）
+ * - version=34：v33→v34 conversations 加 isGroup + messages 加 senderConversationId + 新增 conversation_participants 群参与者表（v2.0 A6-1 群聊数据层）
  * - version=33：v32→v33 conversations 加候选状态 4 列 candidateDirection/candidateCount/candidateLastSeen/lastDirectionSwitch（v2.0 关系引擎 R3 方向候选裁决）
  * - version=32：v31→v32 conversations 加 relationDirection 方向列（v2.0 关系引擎 R1）
  * - version=30：v28→v29 character_cards 加 isPinned 置顶列；v29→v30 character_cards 加 artwork 立绘列（B3 立绘大卡）
@@ -45,7 +47,7 @@ import com.bdalxy.edencourt.data.local.entity.WorldInfoEntry
  */
 @Database(
     entities = [Conversation::class, Message::class, CharacterCardEntity::class, MemoryItem::class, ConversationRelationship::class, RelationshipEvent::class, Interaction::class, InteractionParticipant::class, InteractionTurn::class, UserIdentity::class, ConversationTraits::class, ConversationMood::class, WorldInfoBook::class, WorldInfoEntry::class, ConversationParticipant::class],
-    version = 34,
+    version = 35,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -507,8 +509,20 @@ abstract class AppDatabase : RoomDatabase() {
                         FOREIGN KEY(`participantConversationId`) REFERENCES `conversations`(`id`) ON DELETE CASCADE
                     )
                 """.trimIndent())
-                db.execSQL("CREATE INDEX IF NOT EXISTS `index_cp_conversationId` ON `conversation_participants` (`conversationId`)")
-                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_cp_unique` ON `conversation_participants` (`conversationId`, `participantConversationId`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_conversation_participants_conversationId` ON `conversation_participants` (`conversationId`)")
+                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_conversation_participants_conversationId_participantConversationId` ON `conversation_participants` (`conversationId`, `participantConversationId`)")
+            }
+        }
+
+        /** v34→v35：修正 v33→v34 迁移的群聊参与者表索引名（此前用自定义短名 index_cp_*，与 Room 按实体生成的默认索引名不一致）。
+         * 新装机用户库由 Room 按实体直接建默认索引名、不跑本迁移；本迁移只把「已升级到 v34 的存量库」的旧索引名
+         * 统一为默认名（DROP 旧名 + 重建默认名），使迁移结果与实体/schema 导出完全对齐，为将来启用标准 schema 校验扫除隐患。 */
+        private val MIGRATION_34_35 = object : Migration(34, 35) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("DROP INDEX IF EXISTS `index_cp_conversationId`")
+                db.execSQL("DROP INDEX IF EXISTS `index_cp_unique`")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_conversation_participants_conversationId` ON `conversation_participants` (`conversationId`)")
+                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_conversation_participants_conversationId_participantConversationId` ON `conversation_participants` (`conversationId`, `participantConversationId`)")
             }
         }
 
@@ -608,7 +622,7 @@ abstract class AppDatabase : RoomDatabase() {
             MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18, MIGRATION_18_19,
             MIGRATION_19_20, MIGRATION_20_21, MIGRATION_21_22, MIGRATION_22_23, MIGRATION_23_24, MIGRATION_24_25,
             MIGRATION_25_26, MIGRATION_26_27, MIGRATION_27_28, MIGRATION_28_29, MIGRATION_29_30, MIGRATION_30_31,
-            MIGRATION_31_32, MIGRATION_32_33, MIGRATION_33_34,
+            MIGRATION_31_32, MIGRATION_32_33, MIGRATION_33_34, MIGRATION_34_35,
         )
 
         /** 获取单例（双重检查锁，避免并发重复建库） */

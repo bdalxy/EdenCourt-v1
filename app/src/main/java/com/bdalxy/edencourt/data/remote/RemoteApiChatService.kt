@@ -1,7 +1,10 @@
 package com.bdalxy.edencourt.data.remote
 
 import com.bdalxy.edencourt.data.setting.ApiConfig
+import kotlin.coroutines.coroutineContext
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
@@ -70,9 +73,14 @@ class RemoteApiChatService(
             .post(requestBody.toRequestBody("application/json".toMediaType()))
             .build()
 
+        // 3. 保存 Call 引用并注册取消联动（T12.x P1 修复）：协程被取消时立即 call.cancel()，
+        //    中断阻塞读（此前最长等 60s 超时），避免关闭聊天页/切换会话后连接与 IO 线程被长期占用
+        val call = okHttpClient.newCall(request)
+        coroutineContext[Job]?.invokeOnCompletion { cause -> if (cause != null) call.cancel() }
+
         try {
-            // 3. 同步执行（在 IO 线程），逐行读取 SSE 并逐段 emit
-            okHttpClient.newCall(request).execute().use { response ->
+            // 4. 同步执行（在 IO 线程），逐行读取 SSE 并逐段 emit
+            call.execute().use { response ->
                 if (!response.isSuccessful) {
                     // 按状态码归类错误类型（T3.8 错误分支）
                     throw when (response.code) {
@@ -92,6 +100,9 @@ class RemoteApiChatService(
                     emit(ChatDelta(content = content ?: "", reasoning = reasoning ?: ""))
                 }
             }
+        } catch (e: CancellationException) {
+            call.cancel()
+            throw e
         } catch (e: SocketTimeoutException) {
             throw ApiException(ApiErrorKind.TIMEOUT, "请求或读取超时")
         } catch (e: ApiException) {
@@ -121,8 +132,12 @@ class RemoteApiChatService(
             .post(requestBody.toRequestBody("application/json".toMediaType()))
             .build()
 
+        // 取消联动（T12.x P1 修复）：协程取消时立即断开，不空等 IO 超时
+        val call = okHttpClient.newCall(request)
+        coroutineContext[Job]?.invokeOnCompletion { cause -> if (cause != null) call.cancel() }
+
         try {
-            okHttpClient.newCall(request).execute().use { response ->
+            call.execute().use { response ->
                 if (!response.isSuccessful) {
                     // 与流式一致的错误归类
                     throw when (response.code) {
@@ -133,6 +148,9 @@ class RemoteApiChatService(
                 }
                 true
             }
+        } catch (e: CancellationException) {
+            call.cancel()
+            throw e
         } catch (e: SocketTimeoutException) {
             throw ApiException(ApiErrorKind.TIMEOUT, "连接超时")
         } catch (e: ApiException) {
@@ -163,8 +181,12 @@ class RemoteApiChatService(
                 .post(requestBody.toRequestBody("application/json".toMediaType()))
                 .build()
 
+            // 取消联动（T12.x P1 修复）：协程取消时立即断开，不空等 IO 超时
+            val call = okHttpClient.newCall(request)
+            coroutineContext[Job]?.invokeOnCompletion { cause -> if (cause != null) call.cancel() }
+
             try {
-                okHttpClient.newCall(request).execute().use { response ->
+                call.execute().use { response ->
                     if (!response.isSuccessful) {
                         throw when (response.code) {
                             401, 403 -> ApiException(ApiErrorKind.AUTH, "HTTP ${response.code}")
@@ -181,6 +203,9 @@ class RemoteApiChatService(
                         throw ApiException(ApiErrorKind.SERVER, "响应解析失败：${e.message}")
                     }
                 }
+            } catch (e: CancellationException) {
+                call.cancel()
+                throw e
             } catch (e: SocketTimeoutException) {
                 throw ApiException(ApiErrorKind.TIMEOUT, "连接超时")
             } catch (e: ApiException) {

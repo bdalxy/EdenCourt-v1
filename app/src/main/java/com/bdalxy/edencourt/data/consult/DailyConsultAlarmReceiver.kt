@@ -28,6 +28,9 @@ class DailyConsultAlarmReceiver : BroadcastReceiver() {
                     // 已关闭：取消闹钟
                     app.dailyConsultScheduler.cancel(app)
                 } else {
+                    // 先重排次日闹钟（几 ms 级快速完成），再执行分钟级 LLM——
+                    // 若 goAsync 超时（约 10s）进程被回收，次日排钟已落地，不会永久失效
+                    app.dailyConsultScheduler.schedule(app)
                     // force=true 为调试通道（adb 显示广播触发）：跳过窗口判断、强制覆盖概率 100%，用于真机验收链路
                     val force = intent.getBooleanExtra(EXTRA_FORCE, false)
                     if (force || app.dailyConsultScheduler.isWithinWindow(cfg)) {
@@ -37,8 +40,6 @@ class DailyConsultAlarmReceiver : BroadcastReceiver() {
                             topicOverride = if (force) topic else null,
                         )
                     }
-                    // 无论结果，重排次日
-                    app.dailyConsultScheduler.schedule(app)
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "每日打听执行异常：${e.javaClass.simpleName}: ${e.message}")

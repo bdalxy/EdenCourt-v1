@@ -20,6 +20,9 @@ class InteractionAutoBootReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action != Intent.ACTION_BOOT_COMPLETED) return
+        // T12.x P1 修复：goAsync + finish 保住广播生命周期（同 DailyConsultBootReceiver，
+        // 避免 config 首次初始化未完成、进程被回收导致开机重排丢失）
+        val pendingResult = goAsync()
         val app = context.applicationContext as EdenCourtApp
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
         scope.launch {
@@ -28,6 +31,8 @@ class InteractionAutoBootReceiver : BroadcastReceiver() {
                 app.interactionAutoScheduler.schedule(app)
             } catch (e: Exception) {
                 Log.w(TAG, "开机重排互动失败：${e.javaClass.simpleName}: ${e.message}")
+            } finally {
+                pendingResult.finish()
             }
         }
     }

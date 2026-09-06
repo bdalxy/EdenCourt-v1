@@ -12,8 +12,10 @@ private val LightColorScheme = lightColorScheme(
     secondary = SakuraPink,
     background = LightBackground,
     surface = LightSurface,
-    onPrimary = Color.White,
-    onSecondary = Color.White,
+    // T12.x P1 修复：浅色主/次色（淡粉蓝 0xFFA8C6F5 / 淡樱粉 0xFFFFC9D4）上白字对比度仅约 1.5~1.75:1，
+    // 远低于 WCAG AA 4.5:1——主按钮/FAB/chip 文字几乎不可读；改深色字（0xFF1A1A1A，对比度约 7~9:1 达标）
+    onPrimary = TextPrimary,
+    onSecondary = TextPrimary,
     onBackground = LightOnBackground,
     onSurface = LightOnSurface,
 )

@@ -18,7 +18,7 @@ import com.bdalxy.edencourt.data.remote.RemoteApiChatService
 import com.bdalxy.edencourt.data.search.MemorySearchService
 import com.bdalxy.edencourt.data.consult.DailyConsultExecutor
 import com.bdalxy.edencourt.data.consult.DailyConsultScheduler
-import com.bdalxy.edencourt.data.debug.SeedDataTool
+import com.bdalxy.edencourt.data.debug.SeedDataGenerator
 import com.bdalxy.edencourt.data.interaction.InteractionAutoExecutor
 import com.bdalxy.edencourt.data.interaction.InteractionAutoScheduler
 import com.bdalxy.edencourt.data.interaction.InteractionExecutor
@@ -41,7 +41,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
-class EdenCourtApp : Application() {
+/** 应用入口 Application。open 供 debug 源集 DebugEdenCourtApp 继承以注入压测工具（seedDataGenerator）。 */
+open class EdenCourtApp : Application() {
 
     /** 应用级协程作用域：执行启动期后台任务（如播种内置角色卡） */
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -57,6 +58,12 @@ class EdenCourtApp : Application() {
         // T11.7 互动自动驱动：App 启动即安排当日自动窗口闹钟（总开关/自动开关任一关闭时自动取消）
         applicationScope.launch {
             interactionAutoScheduler.schedule(this@EdenCourtApp)
+        }
+        // v1.2 P2（T8.5）每日打听：App 启动即安排下次窗口闹钟。
+        // 修复 P0：此前首次安装后从不排钟，导致默认开启的「每日打听」全新安装后永不执行（仅设备重启才补排）。
+        // 未启用时 schedule 内部会 cancel，无副作用。
+        applicationScope.launch {
+            dailyConsultScheduler.schedule(this@EdenCourtApp)
         }
     }
 
@@ -259,12 +266,9 @@ class EdenCourtApp : Application() {
         ReplyCursorStore(this)
     }
 
-    /** 性能压测种子数据工具单例（M3「千条数据 60fps」验收前提；仅 debug 构建设置页「开发者工具」区触发） */
-    val seedDataTool: SeedDataTool by lazy {
-        SeedDataTool(
-            chatRepository = chatRepository,
-            messageDao = messageDao,
-            memoryDao = memoryDao,
-        )
-    }
+    /**
+     * 性能压测种子数据生成器（M3「千条数据 60fps」验收前提）。
+     * 接口化 + 默认 null：release 构建不含压测实现；debug 构建由 DebugEdenCourtApp（debug 源集）注入 SeedDataTool。
+     */
+    open val seedDataGenerator: SeedDataGenerator? = null
 }

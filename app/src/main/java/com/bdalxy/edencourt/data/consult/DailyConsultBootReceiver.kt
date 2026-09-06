@@ -19,6 +19,9 @@ class DailyConsultBootReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action != Intent.ACTION_BOOT_COMPLETED) return
+        // T12.x P1 修复：goAsync + finish 保住广播生命周期。
+        // 此前直接 launch 后返回，进程在 config.first()（DataStore 首次初始化可达数百 ms）完成前可能被回收 → 开机重排丢失。
+        val pendingResult = goAsync()
         val app = context.applicationContext as EdenCourtApp
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
         scope.launch {
@@ -27,6 +30,8 @@ class DailyConsultBootReceiver : BroadcastReceiver() {
                 if (enabled) app.dailyConsultScheduler.schedule(app) else app.dailyConsultScheduler.cancel(app)
             } catch (e: Exception) {
                 Log.w(TAG, "开机重排失败：${e.javaClass.simpleName}: ${e.message}")
+            } finally {
+                pendingResult.finish()
             }
         }
     }

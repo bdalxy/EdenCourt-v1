@@ -229,6 +229,91 @@ class AppDatabaseMigrationTest {
     }
 
     /**
+     * 用例7：迁移 v34→v35（v2.0 审查修复：群聊参与者表索引名统一为 Room 默认名）。
+     * 模拟「由 v33→v34 迁移而来」的存量库（索引为旧自定义名 index_cp_*）：
+     * 验证旧索引名被清理、默认索引名建齐、数据保留、唯一约束仍生效。
+     */
+    @Test
+    fun migrateFrom_v34_to_v35_unifiesParticipantIndexes() {
+        helper.createDatabase(TEST_DB7, 34).use { db ->
+            // 模拟存量 v34 库（真实来源是 MIGRATION_33_34，索引名为旧自定义短名 index_cp_*）：
+            // 先删掉 schema 默认索引，重建为旧名，以贴近真实迁移库形态
+            db.execSQL("DROP INDEX IF EXISTS `index_conversation_participants_conversationId`")
+            db.execSQL("DROP INDEX IF EXISTS `index_conversation_participants_conversationId_participantConversationId`")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_cp_conversationId` ON `conversation_participants` (`conversationId`)")
+            db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_cp_unique` ON `conversation_participants` (`conversationId`, `participantConversationId`)")
+            // 埋一条参与者数据
+            db.execSQL("INSERT INTO conversation_participants (conversationId, participantConversationId) VALUES (1, 2)")
+
+            migrateChain(db, from = 34, to = 35)
+
+            // 旧自定义索引名已清理
+            val oldIdx = queryInt(
+                db,
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='index' " +
+                    "AND name IN ('index_cp_conversationId','index_cp_unique')",
+            )
+            check(oldIdx == 0) { "旧索引名未清理: count=$oldIdx" }
+            // 默认索引名已建齐（与实体/schema 导出一致）
+            val newIdx = queryInt(
+                db,
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='index' " +
+                    "AND name IN ('index_conversation_participants_conversationId'," +
+                    "'index_conversation_participants_conversationId_participantConversationId')",
+            )
+            check(newIdx == 2) { "默认索引名未建齐: count=$newIdx" }
+            // 数据保留
+            val count = queryInt(db, "SELECT COUNT(*) FROM conversation_participants")
+            check(count == 1) { "参与者数据丢失: count=$count" }
+            // 唯一约束仍生效：同参与者二次插入应被拒绝
+            val dupRejected = runCatching {
+                db.execSQL("INSERT INTO conversation_participants (conversationId, participantConversationId) VALUES (1, 2)")
+            }.isFailure
+            check(dupRejected) { "唯一索引未生效，同参与者可重复插入" }
+        }
+    }
+
+    /**
+     * 用例8：迁移 v25→v31（补齐审查点名的覆盖缺口区间）。
+     * 覆盖：v27→v28 新增世界书两表 world_info_book/world_info_entry + conversations 加 worldBookId（A3），
+     * v30→v31 conversations 加 graphEnabled 图谱开关（B4）。
+     * 验证：世界书两表可建可写、存量会话 worldBookId 默认 NULL、graphEnabled 默认 0。
+     */
+    @Test
+    fun migrateFrom_v25_to_v31_addsWorldBookAndGraphFields() {
+        helper.createDatabase(TEST_DB8, 25).use { db ->
+            // 埋入 v25 形态的存量会话（无 affinityScore/worldBookId/graphEnabled 等后续列，按 v25 字段集 INSERT）
+            db.execSQL(
+                "INSERT INTO conversations (title, remark, code, interactionEnabled, createdAt, updatedAt, " +
+                    "isPinned, lastMessagePreview, lastMessageTime) " +
+                    "VALUES ('存量会话', '', 'V-test31', 0, 1000, 2000, 0, '你好', 2000)",
+            )
+
+            migrateChain(db, from = 25, to = 31)
+
+            // world_info_book 表已建且可写（v27→v28 新增）
+            db.execSQL(
+                "INSERT INTO world_info_book (name, description, createdAt) VALUES ('幻想大陆设定集', '测试简介', 1000)",
+            )
+            val bookCount = queryInt(db, "SELECT COUNT(*) FROM world_info_book")
+            check(bookCount == 1) { "world_info_book 表不可用: count=$bookCount" }
+            // world_info_entry 表已建且可写（v27→v28 新增，bookId 关联书）
+            db.execSQL(
+                "INSERT INTO world_info_entry (bookId, title, keys, content, priority, constant, enabled) " +
+                    "VALUES (1, '大陆', '大陆,世界', '这里是一片广袤大陆', 10, 0, 1)",
+            )
+            val entryCount = queryInt(db, "SELECT COUNT(*) FROM world_info_entry")
+            check(entryCount == 1) { "world_info_entry 表不可用: count=$entryCount" }
+            // 存量会话 worldBookId 默认 NULL（v27→v28 加列不覆盖存量）
+            val wbNull = queryInt(db, "SELECT COUNT(*) FROM conversations WHERE code = 'V-test31' AND worldBookId IS NULL")
+            check(wbNull == 1) { "worldBookId 应为 NULL，实测非空数: $wbNull" }
+            // graphEnabled 默认 0（v30→v31 加列，存量会话图谱未开启）
+            val graph = queryInt(db, "SELECT graphEnabled FROM conversations WHERE code = 'V-test31' LIMIT 1")
+            check(graph == 0) { "graphEnabled 默认值不对: $graph" }
+        }
+    }
+
+    /**
      * 中途任一迁移抛异常即测试失败——从而捕获「某次迁移在真实数据形态下跑不通」的回归。
      */
     private fun migrateChain(db: SupportSQLiteDatabase, from: Int, to: Int) {
@@ -250,5 +335,7 @@ class AppDatabaseMigrationTest {
         private const val TEST_DB4 = "migration-test-v31.db"
         private const val TEST_DB5 = "migration-test-v32.db"
         private const val TEST_DB6 = "migration-test-v33.db"
+        private const val TEST_DB7 = "migration-test-v34.db"
+        private const val TEST_DB8 = "migration-test-v25.db"
     }
 }

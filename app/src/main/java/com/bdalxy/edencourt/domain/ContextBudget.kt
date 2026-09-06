@@ -47,19 +47,28 @@ data class ContextBudget(
         get() = (totalBudget - identityBudget - constantWorldBudget).coerceAtLeast(0)
 
     /**
-     * 把一个文本按 token 预算截断：累计超出 maxToken 后不再追加更多条目（整条保留/丢弃，
-     * 不做字符级切断，保证条目语义完整）。返回被保留的条目顺序不变。
+     * 把一个文本按 token 预算截断：按传入顺序逐条累计，累计超出 maxToken 后立即停止，
+     * 不再检查后续条目（顺序截断，保证高优先级条目优先注入）。整条保留/丢弃，不做字符级切断
+     * ——仅当「首条即超预算」时特例截断该条到预算内，保证恒久身份核心至少注入，避免整组饿死。
      * @param texts 待注入文本（已按优先级排好序）
      * @param maxToken 该等级预算；若为 0，则整组跳过
      * @return 预算内可注入的文本列表
      */
     fun truncate(texts: List<String>, maxToken: Int): List<String> {
         if (maxToken <= 0) return emptyList()
+        val result = mutableListOf<String>()
         var used = 0
-        return texts.filter { t ->
+        for (t in texts) {
             val cost = TokenEstimator.count(t)
-            if (used + cost > maxToken) false else { used += cost; true }
+            if (used + cost > maxToken) {
+                // 首条即超预算：特例截断到预算内再注入（否则恒久身份核心被整组丢弃）
+                if (result.isEmpty() && cost > maxToken) result.add(t.substring(0, maxToken))
+                break // 顺序截断：累计超限即停，不再放行后续低优先级条目
+            }
+            result.add(t)
+            used += cost
         }
+        return result
     }
 
     companion object {

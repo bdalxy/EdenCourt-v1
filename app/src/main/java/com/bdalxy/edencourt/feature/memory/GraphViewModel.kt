@@ -134,7 +134,8 @@ class GraphViewModel(
         val freq = HashMap<String, Int>()          // 词 → 提及条数
         val co = HashMap<String, Int>()            // "a\u0001b"（a<b 排序保证唯一）→ 共现次数
         for (item in items) {
-            val words = item.keywords.split(',').map { it.trim() }.filter { it.isNotEmpty() }
+            // T12.x P1 修复：keywords 按中英文逗号拆分（与检索侧口径对齐，避免中文逗号整串算一词）
+            val words = item.keywords.split(",", "，").map { it.trim() }.filter { it.isNotEmpty() }
             if (words.isEmpty()) continue
             for (w in words) freq[w] = (freq[w] ?: 0) + 1
             // 同一条记忆内两两配对，累加共现

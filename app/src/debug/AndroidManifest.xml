@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- debug 专用清单：把 Application 换成 DebugEdenCourtApp（注入压测工具）。
+     manifest merge 时以本文件 android:name 覆盖 main 清单的 .EdenCourtApp，需 tools:replace 声明。 -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <application
+        android:name=".DebugEdenCourtApp"
+        tools:replace="android:name" />
+
+</manifest>

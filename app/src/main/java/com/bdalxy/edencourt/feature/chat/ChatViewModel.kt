@@ -689,36 +689,46 @@ class ChatViewModel(
         if (replyPumpJob?.isActive == true) return
         replyPumpJob = viewModelScope.launch {
             while (true) {
-                // T12.4：进程重启后首次运行，从持久化游标恢复已处理位置，
-                // 避免把历史用户消息全部「当新来信」重复洗澡成一次回复（B1 修复）。
-                // 仅在游标为空（首轮）才读库，之后每轮沿用内存值，避免重复 IO。
-                if (lastProcessedUserMessageId == null) {
-                    lastProcessedUserMessageId = replyCursorStore.get(conversationId)
-                }
-                // 取当前历史（含刚发送/攒批的用户消息）
-                val history = repository.observeMessages(conversationId).first()
-                // 本轮待回复：位于上次处理点之后的所有用户消息（连发会一次性取到，实现攒批）
-                // T6.9 攒批决策抽离为纯函数（ReplyPumpCalculator），逻辑此处直接复用，行为不变
-                val newUserMessages = ReplyPumpCalculator.selectNewUserMessages(history, lastProcessedUserMessageId)
-                // 没有新消息，泵退出等待下次发送
-                if (newUserMessages.isEmpty()) break
-                lastProcessedUserMessageId = newUserMessages.last().id
-                // T12.4：游标推进后立即落库，进程重启后可从中断位置续扫（不重复、不丢失）
-                replyCursorStore.save(conversationId, lastProcessedUserMessageId!!)
-                // 合并为一次「来信」：多条以换行分隔，AI 按性格决定怎么回（T6.9）
-                val mergedInput = ReplyPumpCalculator.buildBatchInput(newUserMessages)
-                // 推进代际号
-                generationCounter = GenerationGate.next(generationCounter)
+                try {
+                    // T12.4：进程重启后首次运行，从持久化游标恢复已处理位置，
+                    // 避免把历史用户消息全部「当新来信」重复洗澡成一次回复（B1 修复）。
+                    // 仅在游标为空（首轮）才读库，之后每轮沿用内存值，避免重复 IO。
+                    if (lastProcessedUserMessageId == null) {
+                        lastProcessedUserMessageId = replyCursorStore.get(conversationId)
+                    }
+                    // 取当前历史（含刚发送/攒批的用户消息）
+                    val history = repository.observeMessages(conversationId).first()
+                    // 本轮待回复：位于上次处理点之后的所有用户消息（连发会一次性取到，实现攒批）
+                    // T6.9 攒批决策抽离为纯函数（ReplyPumpCalculator），逻辑此处直接复用，行为不变
+                    val newUserMessages = ReplyPumpCalculator.selectNewUserMessages(history, lastProcessedUserMessageId)
+                    // 没有新消息，泵退出等待下次发送
+                    if (newUserMessages.isEmpty()) break
+                    lastProcessedUserMessageId = newUserMessages.last().id
+                    // T12.4：游标推进后立即落库，进程重启后可从中断位置续扫（不重复、不丢失）
+                    replyCursorStore.save(conversationId, lastProcessedUserMessageId!!)
+                    // 合并为一次「来信」：多条以换行分隔，AI 按性格决定怎么回（T6.9）
+                    val mergedInput = ReplyPumpCalculator.buildBatchInput(newUserMessages)
+                    // 推进代际号
+                    generationCounter = GenerationGate.next(generationCounter)
 
-                // v2.0 A6-4：群聊分支——非流式调用群聊引擎，解析多角色一幕并逐条写入
-                val conv = repository.getConversation(conversationId)
-                if (conv?.isGroup == true) {
-                    generateGroupReply(history, mergedInput, generationCounter)
-                } else {
-                    streamReply(
-                        promptMessages = buildPrompt(history, mergedInput, newUserMessages.size),
-                        generation = generationCounter,
-                    )
+                    // v2.0 A6-4：群聊分支——非流式调用群聊引擎，解析多角色一幕并逐条写入
+                    val conv = repository.getConversation(conversationId)
+                    if (conv?.isGroup == true) {
+                        generateGroupReply(history, mergedInput, generationCounter)
+                    } else {
+                        streamReply(
+                            promptMessages = buildPrompt(history, mergedInput, newUserMessages.size),
+                            generation = generationCounter,
+                        )
+                    }
+                } catch (e: CancellationException) {
+                    // 主动停止/打断（stopGenerating）：照常向上取消，让泵随之退出
+                    throw e
+                } catch (e: Exception) {
+                    // T12.x P1 修复「泵异常」：生成链路（建 prompt/流式/群聊）抛出的非预期异常
+                    // 不能杀死整个回复泵——否则泵协程崩溃退出，之后所有消息都不再被自动回复。
+                    // 记录日志、放弃本批，等下一批新消息再触发（游标已在异常前推进，不会卡同一条导致死循环）。
+                    Log.e(TAG, "回复泵处理本批消息异常：${e.javaClass.simpleName}: ${e.message}")
                 }
             }
         }

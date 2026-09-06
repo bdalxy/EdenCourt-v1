@@ -107,12 +107,13 @@ class WorldInfoMatcherTest {
     }
 
     @Test
-    fun `单条超预算则整条剔除仍继续判定后续`() {
+    fun `单条超预算则顺序截断不再放行后续`() {
         val big = entry("大", "魔法", content = "字".repeat(3000)) // 单条超默认预算
         val small = entry("小", "魔法", content = "短")
         val injected = WorldInfoMatcher.budget(listOf(big, small), maxToken = 2000)
-        // 大条超预算被剔除，小条仍可注入（filter-style 一直判定，不因单条超限而中断）
-        assertEquals(listOf("短"), injected.map { it.content })
+        // T12.x P1 修复（优先级倒置）：顺序截断——大条超限即停（break），
+        // 不再「跳过超限条、放行后续低优先级条」（旧 filter 语义会让 low-priority 小条插队）
+        assertEquals(emptyList<String>(), injected.map { it.content })
     }
 
     @Test

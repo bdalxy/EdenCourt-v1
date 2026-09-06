@@ -324,7 +324,7 @@ class MemoryRepository(
             val content = bm.content.trim()
             if (content.isBlank()) return@forEach
             val type = runCatching { MemoryType.valueOf(bm.type.uppercase()) }.getOrDefault(MemoryType.OTHER)
-            val visibility = runCatching { MemoryVisibility.valueOf(bm.visibility.uppercase()) }.getOrDefault(MemoryVisibility.SHARED)
+            val visibility = runCatching { MemoryVisibility.valueOf(bm.visibility.trim().uppercase()) }.getOrDefault(MemoryVisibility.SHARED)
             val timeScope = runCatching { TimeScope.valueOf(bm.timeScope.uppercase()) }.getOrDefault(TimeScope.LONG_TERM)
             val importance = runCatching { MemoryImportance.valueOf(bm.importance.uppercase()) }.getOrDefault(MemoryImportance.NORMAL)
             dao.insert(
@@ -377,8 +377,11 @@ class MemoryRepository(
 
         // 1. 组装提取 prompt：要求输出 JSON 数组，只提取明确信息、不编造；
         //    并带上本角色已有记忆，让 AI 识别「用户更正覆盖了哪条旧记忆」(T6.13.2)
-        // 取该角色已有的未删除记忆（含旧记忆原文，供覆盖判定）
-        val existingMemories = cardId?.let { dao.getActiveByCard(it, DEFAULT_MEMORY_INJECT_LIMIT) } ?: emptyList()
+        // 取该角色已有的未删除记忆（含旧记忆原文，供覆盖判定）；
+        // 安全：绝密记忆（topSecret）原文不进入发送给外部 API 的请求体（T8.2 硬性兜底——绝密仅归属角色可见）
+        val existingMemories = cardId
+            ?.let { dao.getActiveByCard(it, DEFAULT_MEMORY_INJECT_LIMIT).filter { m -> !m.isTopSecret } }
+            ?: emptyList()
         val prompt = buildString {
             append("你是记忆提取助手。请从下面的对话中，提取关于用户的值得长期记住的信息。\n")
             append("规则：只提取对话中明确出现的个人信息、偏好或重要事件；不要编造；不要提取一次性寒暄。\n")
@@ -422,7 +425,7 @@ class MemoryRepository(
         val extracted = runCatching {
             json.decodeFromString<List<ExtractedMemory>>(cleaned)
         }.getOrElse { e ->
-            Log.w(TAG, "记忆提取失败：JSON 解析异常，原文=[${raw.take(200)}], err=${e.message}")
+            Log.w(TAG, "记忆提取失败：JSON 解析异常，err=${e.message}（AI 返回原文已脱敏，不落日志）")
             return
         }
         Log.d(TAG, "记忆提取成功：共 ${extracted.size} 条")
@@ -484,7 +487,7 @@ class MemoryRepository(
         val cleaned = raw.trim().removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
         val facts = runCatching { json.decodeFromString<List<InteractionFact>>(cleaned) }
             .getOrElse { e ->
-                Log.w(TAG, "互动事实解析失败：原文=[${raw.take(200)}], err=${e.message}")
+                Log.w(TAG, "互动事实解析失败：err=${e.message}（AI 返回原文已脱敏，不落日志）")
                 return
             }
         if (facts.isEmpty()) return
@@ -518,16 +521,31 @@ class MemoryRepository(
         existingMemories: List<MemoryItem>,
     ) {
         val type = runCatching { MemoryType.valueOf(item.type.uppercase()) }.getOrDefault(MemoryType.OTHER)
-        // 可见性解析（T7.2）：非法值兜底为共享；绝密标记透传（T8.2）
-        val visibility = runCatching { MemoryVisibility.valueOf(item.visibility.uppercase()) }.getOrDefault(MemoryVisibility.SHARED)
+        // 可见性解析（T7.2）：trim 后再解析，避免 LLM 输出带空白（如 "private "）被静默兜底为 SHARED、
+        // 击穿「私密记忆仅归属角色可见、不可被套话」安全分层；非法值仍兜底共享
+        val visibility = runCatching { MemoryVisibility.valueOf(item.visibility.trim().uppercase()) }.getOrDefault(MemoryVisibility.SHARED)
         val topSecret = item.topSecret
         val now = System.currentTimeMillis()
 
         // 0. 显式覆盖：用户更正的条目带了 replace_content → 找到对应旧记忆并改为新内容（T6.13.2 修「记忆还是紫色」）
         val replaceContent = item.replaceContent?.trim()
+
+        // T12.x P1 修复：定位/冲突池从「仅本卡前 30 条」扩为「前 30 条 ∪ 本条关键词与更正原文的检索命中」，
+        // 消除角色卡记忆超 30 条后「更正定位不到旧记忆→新增而非覆盖」「同事实不合并」的复发缺陷。
+        val broadPool: List<MemoryItem> = run {
+            val terms = buildList {
+                addAll(item.keywords.split(",", "，").map { it.trim() }.filter { it.isNotEmpty() })
+                if (!replaceContent.isNullOrBlank()) {
+                    addAll(replaceContent.split(",", "，").map { it.trim() }.filter { it.isNotEmpty() })
+                }
+            }
+            val extra = terms.flatMap { runCatching { dao.searchByKeyword(it) }.getOrElse { emptyList() } }
+            (existingMemories + extra).distinctBy { it.id }
+        }
+
         if (!replaceContent.isNullOrBlank()) {
             // T15.7：定位逻辑抽为纯函数 MemoryConflictResolver.findReplaceTarget（与内联逐字等价，便于单测固化）
-            val target = MemoryConflictResolver.findReplaceTarget(existingMemories, replaceContent)
+            val target = MemoryConflictResolver.findReplaceTarget(broadPool, replaceContent)
             if (target != null && !target.isDeleted) {
                 dao.update(
                     target.copy(
@@ -546,11 +564,11 @@ class MemoryRepository(
         }
 
         // 1. 冲突判定（T11.8b 修复）：判定「同一条事实」必须满足更强证据，避免宽泛关键词误覆盖无关旧记忆。
-        //    - 范围收紧：优先在本角色卡现有记忆内判定（调用方已传入该卡现有记忆；为空则回退关键词搜索）；
+        //    - 范围：broadPool（本卡前 30 ∪ 关键词/更正原文检索命中），扩到全量避免 30 条外同事实不合并；
         //    - 判定三态逻辑抽为纯函数 MemoryConflictResolver（T12.5，便于 JVM 单测固化事故回归用例）；
         //    - 均不满足 → 视为不同事实 → 新增（保住旧记忆，T11.8b 事故「羽的阅读记忆被互动事实覆盖」修复）。
-        val pool: List<MemoryItem> = if (existingMemories.isNotEmpty()) {
-            existingMemories
+        val pool: List<MemoryItem> = if (broadPool.isNotEmpty()) {
+            broadPool
         } else {
             item.keywords.split(",").map { it.trim() }.filter { it.isNotEmpty() }
                 .flatMap { dao.searchByKeyword(it) }.distinctBy { it.id }

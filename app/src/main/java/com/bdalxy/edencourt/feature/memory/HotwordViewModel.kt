@@ -82,11 +82,11 @@ class HotwordViewModel(
     private fun MemoryItem.matches(word: String): Boolean =
         content.contains(word, ignoreCase = true) || keywords.contains(word, ignoreCase = true)
 
-    /** 统计词频：keywords 按逗号拆分，忽略空串，按出现记忆条数降序 */
+    /** 统计词频：keywords 按中英文逗号拆分（T12.x P1 修复：与检索侧口径对齐，避免中文逗号整串算一词），忽略空串，按出现记忆条数降序 */
     private fun computeHotwords(items: List<MemoryItem>): List<WordCount> {
         val map = HashMap<String, Int>()
         for (item in items) {
-            for (raw in item.keywords.split(',')) {
+            for (raw in item.keywords.split(",", "，")) {
                 val word = raw.trim()
                 if (word.isNotEmpty()) map[word] = (map[word] ?: 0) + 1
             }

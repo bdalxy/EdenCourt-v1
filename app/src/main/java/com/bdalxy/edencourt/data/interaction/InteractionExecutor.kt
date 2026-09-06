@@ -30,6 +30,7 @@ import com.bdalxy.edencourt.data.setting.InteractionConfigStore
 import com.bdalxy.edencourt.domain.CharacterCardParser
 import com.bdalxy.edencourt.domain.PromptBuilder
 import kotlinx.coroutines.flow.firstOrNull
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * 角色间互动执行器（v1.2b 互动系统，T8.9）。
@@ -61,9 +62,8 @@ class InteractionExecutor(
     /** 每轮注入说话者的可互动记忆条数上限 */
     private val memoryInjectLimit = 5
 
-    /** 互动输出的应用级互斥：同一时间只允许一场互动执行 */
-    @Volatile
-    private var running = false
+    /** 互动输出的应用级互斥：同一时间只允许一场互动执行（T12.x P1 修复：AtomicBoolean 保证「检查-占位」原子，杜绝手动与自动并发） */
+    private val running = AtomicBoolean(false)
 
     /** 互动执行结果 */
     data class InteractionOutcome(
@@ -97,9 +97,10 @@ class InteractionExecutor(
         if (!a.interactionEnabled || !b.interactionEnabled) {
             return InteractionOutcome(false, message = "存在未开放互动的会话（需在会话设置打开「可互动开关」）")
         }
-        if (running) return InteractionOutcome(false, message = "已有互动正在执行，请稍等")
-
-        running = true
+        // 互斥占位：原子 CAS，失败说明已有互动在跑（手动 UI 与自动驱动并发安全）
+        if (!running.compareAndSet(false, true)) {
+            return InteractionOutcome(false, message = "已有互动正在执行，请稍等")
+        }
         try {
             // 互动身份名（区分双方 + 对白历史标签，同卡多会话无备注时附短码）+ 摘要名（进用户会话消息，用自然角色名）
             val aIdentity = resolveIdentityName(a)
@@ -216,7 +217,7 @@ class InteractionExecutor(
             Log.d(TAG, "互动完成 #$interactionId：A(${a.id}) × B(${b.id}) 共 ${turns.size} 句，话题=${topicSeed.take(20)}")
             return InteractionOutcome(true, interactionId, "互动完成")
         } finally {
-            running = false
+            running.set(false)
         }
     }
 

@@ -63,9 +63,13 @@ class GroupPromptAssembler(
      */
     suspend fun assemble(): List<ParticipantBlock> {
         val participants = participantDao.getByConversation(groupConversationId)
-        return participants.map { participant ->
+        val blocks = participants.map { participant ->
             buildBlock(participant.participantConversationId)
         }
+        // T12.x P1 修复「群聊同名 speaker」：同卡多实例 / 多张无备注角色卡时 displayName 可能重复，
+        // 而下游 speakerMap = associate { displayName -> conversationId } 遇重名只保留最后一个，
+        // 导致同名者发言全被算到一人、其余实例消息丢失。这里消除群内重名，保证映射一一对应。
+        return disambiguateNames(blocks)
     }
 
     /** 为一个参与者会话构建身份状态块 */
@@ -142,5 +146,34 @@ class GroupPromptAssembler(
             if (b.lifeStateText.isNotBlank()) append("，${b.lifeStateText}")
             append("\n")
         }
+    }
+}
+
+/**
+ * 保证群内参与者显示名唯一（T12.x P1「群聊同名 speaker」修复）。
+ * 作用：同卡多实例 / 多张无备注角色卡时 displayName 可能重复，而下游
+ * speakerMap = associate { displayName -> conversationId } 遇重名只保留最后一个，
+ * 导致同名者发言全被算到一人、其余实例消息丢失。此处消除群内重名，保证映射一一对应。
+ * 规则：重名者优先追加「（角色卡名）」区分；若显示名已含卡名（仍冲突），再追加序号 2/3… 兜底。
+ * 抽为顶层纯函数以便 JVM 单测固化回归用例。
+ */
+internal fun disambiguateNames(blocks: List<GroupPromptAssembler.ParticipantBlock>): List<GroupPromptAssembler.ParticipantBlock> {
+    val count = HashMap<String, Int>()
+    for (b in blocks) count[b.displayName] = (count[b.displayName] ?: 0) + 1
+    // 无重名：直接返回，不做任何改写（避免给正常群聊注入多余后缀）
+    if (count.values.all { it == 1 }) return blocks
+    val used = HashMap<String, Int>()
+    return blocks.map { b ->
+        var name = b.displayName
+        if (count[b.displayName]!! > 1) {
+            // 重名：优先用「角色卡名」区分（若 displayName 已含卡名则退化用序号）
+            val suffix = if (name.contains(b.cardName)) "" else b.cardName
+            name = if (suffix.isNotBlank()) "$b.displayName（$suffix）" else b.displayName
+            // 加了卡名仍可能重（同一卡名多实例）：用群内序号彻底保证唯一
+            val idx = used[name] ?: 0
+            used[name] = idx + 1
+            if (idx > 0) name = "$name${idx + 1}"
+        }
+        b.copy(displayName = name)
     }
 }

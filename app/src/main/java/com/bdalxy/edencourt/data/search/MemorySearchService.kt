@@ -75,13 +75,16 @@ class MemorySearchService(
      * 结果 JOIN 主表过滤 isDeleted=0，并按「置顶/重要/更新时间」排序截断 top-K。
      * 转义说明（T12.7）：查询词整体以双引号包裹成 **短语**（`content:"..."`），短语内
      *   `*` `(` `)` `-` `OR` `AND` 等 FTS 语法字符均按字面文本参与匹配、不做操作符解析；
-     *   唯一需翻倍转义的是引号自身（见 escaped），避免提前闭合短语引发语法错误。
+     *   需翻倍转义的是双引号与单引号自身（见 escaped）：
+     *   - 双引号：避免提前闭合短语引发语法错误；
+     *   - 单引号：本查询以单引号包裹 SQL 字符串字面量，未转义时用户输入可提前闭合字面量，
+     *     构成 SQL 注入面（泄露含 PRIVATE/绝密记忆）；翻倍转义后按字面匹配。
      * 失败静默返回空（FTS 为增强检索，不影响主链路）。
      */
     suspend fun searchFts(keyword: String, topK: Int = DEFAULT_TOP_K): List<MemoryItem> {
         if (keyword.isBlank()) return emptyList()
-        // 转义：FTS 查询串中双引号需翻倍转义，避免语法错误
-        val escaped = keyword.trim().replace("\"", "\"\"")
+        // 转义：FTS 查询串中双引号/单引号均翻倍转义，避免语法错误与 SQL 注入
+        val escaped = keyword.trim().replace("\"", "\"\"").replace("'", "''")
         val sql = buildString {
             append("SELECT m.* FROM memory_items m ")
             append("JOIN memory_items_fts f ON m.id = f.rowid ")

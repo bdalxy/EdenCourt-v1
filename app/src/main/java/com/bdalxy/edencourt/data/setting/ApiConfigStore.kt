@@ -79,7 +79,8 @@ class ApiConfigStore(
     /** 把 DataStore Preference 映射为对外配置对象 */
     private fun buildConfig(prefs: androidx.datastore.preferences.core.Preferences, apiKey: String): ApiConfig =
         ApiConfig(
-            baseUrl = prefs[Keys.BASE_URL] ?: ApiConfig.DEFAULT_BASE_URL,
+            // 兜底：空串/空白 baseUrl 一律回退默认地址，避免后续请求拼出非法 URL 崩溃（T12.x P1 修复）
+            baseUrl = prefs[Keys.BASE_URL]?.takeIf { it.isNotBlank() }?.trim() ?: ApiConfig.DEFAULT_BASE_URL,
             apiKey = apiKey,
             model = prefs[Keys.MODEL] ?: ApiConfig.DEFAULT_MODEL,
             temperature = prefs[Keys.TEMPERATURE] ?: 0.7,

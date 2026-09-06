@@ -11,6 +11,8 @@ import kotlinx.coroutines.delay
 
 /**
  * 性能压测种子数据生成器（M3「千条数据 60fps」验收前提，仅 debug 构建由设置页「开发者工具」区调用）。
+ * 本实现只存在于 debug 源集（release 构建不含本类）；main 侧通过 SeedDataGenerator 接口解耦，
+ * 由 DebugEdenCourtApp 注入到 EdenCourtApp.seedDataGenerator。
  * - 只新建独立测试会话【压测·N】，生成千条消息/记忆，不触碰任何正式会话数据。
  * - 消息/记忆均分批落库 + 每批让出一帧，避免长事务期间主线程卡顿。
  * 用途：真机实测 聊天页长会话滚动（G-① 窗口分页）与 记忆页分页 在千条规模下的流畅度。
@@ -19,7 +21,7 @@ class SeedDataTool(
     private val chatRepository: ChatRepository,
     private val messageDao: MessageDao,
     private val memoryDao: MemoryDao,
-) {
+) : SeedDataGenerator {
 
     /** 批大小：每次入库条数（一次性事务，控制单次时长与内存峰值） */
     private val batchSize = 200
@@ -30,10 +32,10 @@ class SeedDataTool(
      * - 额外插入 memoryCount 条记忆（归属该测试会话，便于后续识别/清理）
      * @return 生成的会话 id（失败抛异常由调用方提示）
      */
-    suspend fun generate(
-        tag: Int = 1,
-        messageCount: Int = 1000,
-        memoryCount: Int = 1000,
+    override suspend fun generate(
+        tag: Int,
+        messageCount: Int,
+        memoryCount: Int,
     ): Long {
         // 1. 新建一次性测试会话（标题【压测】便于识别与清理）
         val convId = chatRepository.createConversation(characterCardId = null)

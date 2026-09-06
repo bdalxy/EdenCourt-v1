@@ -54,16 +54,21 @@ object WorldInfoMatcher {
     }
 
     /**
-     * token 预算截断：按已排序注入序，逐条累计、超过上限则不再追加。
+     * token 预算截断：按已排序注入序逐条累计，累计超出 maxToken 后立即停止（顺序截断，
+     * 保证高优先级条目优先注入；而非「跳过超限条目、放行后续低优先级条目」）。
      * @param maxEntries 最多条数
      * @param maxToken 最多 token
      */
     fun budget(sorted: List<WorldInfoEntry>, maxEntries: Int = DEFAULT_MAX_ENTRIES, maxToken: Int = DEFAULT_MAX_TOKEN): List<WorldInfoEntry> {
         var used = 0
-        return sorted.take(maxEntries).filter { e ->
+        val result = mutableListOf<WorldInfoEntry>()
+        for (e in sorted.take(maxEntries)) {
             val t = TokenEstimator.count(e.content)
-            if (used + t > maxToken) false else { used += t; true }
+            if (used + t > maxToken) break // 顺序截断：超限即停
+            result.add(e)
+            used += t
         }
+        return result
     }
 
     /**
