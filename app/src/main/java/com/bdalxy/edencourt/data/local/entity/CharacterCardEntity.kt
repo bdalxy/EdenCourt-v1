@@ -1,5 +1,6 @@
 package com.bdalxy.edencourt.data.local.entity
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
@@ -30,6 +31,7 @@ data class CharacterCardEntity(
     /** 角色名（内置卡索引名） */
     val name: String,
     /** 备注别名（T6.14 用户自定义显示名；空=用 name，类微信备注） */
+    @ColumnInfo(defaultValue = "''")
     val remark: String = "",
     /** 简介（列表页展示用一句话描述） */
     val description: String = "",
@@ -40,6 +42,7 @@ data class CharacterCardEntity(
     /** 立绘大图本地文件路径（B3：置顶大卡背景用；null=暂无立绘，用主题色+头像占位） */
     val artwork: String? = null,
     /** 是否置顶（B3：置顶卡独占顶部横滑大卡区，取消置顶回落普通网格；0=否） */
+    @ColumnInfo(defaultValue = "0")
     val isPinned: Boolean = false,
     /** 是否内置卡（内置卡不可删除） */
     val isBuiltIn: Boolean = false,

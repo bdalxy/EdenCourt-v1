@@ -2,11 +2,11 @@
   "formatVersion": 1,
   "database": {
     "version": 35,
-    "identityHash": "b307144612ec7f8a8a1449f4b92f4c0f",
+    "identityHash": "1a57f262c1697fcdc925496ff1467754",
     "entities": [
       {
         "tableName": "conversations",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `title` TEXT NOT NULL, `remark` TEXT NOT NULL, `characterCardId` INTEGER, `code` TEXT NOT NULL, `interactionEnabled` INTEGER NOT NULL, `lifeEnabled` INTEGER NOT NULL, `scheduleWakeUpMinute` INTEGER, `scheduleSleepMinute` INTEGER, `createdAt` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL, `isPinned` INTEGER NOT NULL, `lastMessagePreview` TEXT NOT NULL, `lastMessageTime` INTEGER, `affinityScore` INTEGER NOT NULL, `relationDirection` TEXT NOT NULL, `candidateDirection` TEXT NOT NULL, `candidateCount` INTEGER NOT NULL, `candidateLastSeen` INTEGER, `lastDirectionSwitch` INTEGER, `worldBookId` INTEGER, `graphEnabled` INTEGER NOT NULL, `isGroup` INTEGER NOT NULL)",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `title` TEXT NOT NULL, `remark` TEXT NOT NULL DEFAULT '', `characterCardId` INTEGER, `code` TEXT NOT NULL, `interactionEnabled` INTEGER NOT NULL DEFAULT 0, `lifeEnabled` INTEGER NOT NULL DEFAULT 0, `scheduleWakeUpMinute` INTEGER, `scheduleSleepMinute` INTEGER, `createdAt` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL, `isPinned` INTEGER NOT NULL, `lastMessagePreview` TEXT NOT NULL, `lastMessageTime` INTEGER, `affinityScore` INTEGER NOT NULL DEFAULT 0, `relationDirection` TEXT NOT NULL DEFAULT 'NONE', `candidateDirection` TEXT NOT NULL DEFAULT 'NONE', `candidateCount` INTEGER NOT NULL DEFAULT 0, `candidateLastSeen` INTEGER, `lastDirectionSwitch` INTEGER, `worldBookId` INTEGER, `graphEnabled` INTEGER NOT NULL DEFAULT 0, `isGroup` INTEGER NOT NULL DEFAULT 0)",
         "fields": [
           {
             "fieldPath": "id",
@@ -24,7 +24,8 @@
             "fieldPath": "remark",
             "columnName": "remark",
             "affinity": "TEXT",
-            "notNull": true
+            "notNull": true,
+            "defaultValue": "''"
           },
           {
             "fieldPath": "characterCardId",
@@ -41,13 +42,15 @@
             "fieldPath": "interactionEnabled",
             "columnName": "interactionEnabled",
             "affinity": "INTEGER",
-            "notNull": true
+            "notNull": true,
+            "defaultValue": "0"
           },
           {
             "fieldPath": "lifeEnabled",
             "columnName": "lifeEnabled",
             "affinity": "INTEGER",
-            "notNull": true
+            "notNull": true,
+            "defaultValue": "0"
           },
           {
             "fieldPath": "scheduleWakeUpMinute",
@@ -92,25 +95,29 @@
             "fieldPath": "affinityScore",
             "columnName": "affinityScore",
             "affinity": "INTEGER",
-            "notNull": true
+            "notNull": true,
+            "defaultValue": "0"
           },
           {
             "fieldPath": "relationDirection",
             "columnName": "relationDirection",
             "affinity": "TEXT",
-            "notNull": true
+            "notNull": true,
+            "defaultValue": "'NONE'"
           },
           {
             "fieldPath": "candidateDirection",
             "columnName": "candidateDirection",
             "affinity": "TEXT",
-            "notNull": true
+            "notNull": true,
+            "defaultValue": "'NONE'"
           },
           {
             "fieldPath": "candidateCount",
             "columnName": "candidateCount",
             "affinity": "INTEGER",
-            "notNull": true
+            "notNull": true,
+            "defaultValue": "0"
           },
           {
             "fieldPath": "candidateLastSeen",
@@ -131,13 +138,15 @@
             "fieldPath": "graphEnabled",
             "columnName": "graphEnabled",
             "affinity": "INTEGER",
-            "notNull": true
+            "notNull": true,
+            "defaultValue": "0"
           },
           {
             "fieldPath": "isGroup",
             "columnName": "isGroup",
             "affinity": "INTEGER",
-            "notNull": true
+            "notNull": true,
+            "defaultValue": "0"
           }
         ],
         "primaryKey": {
@@ -162,7 +171,7 @@
       },
       {
         "tableName": "messages",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `conversationId` INTEGER NOT NULL, `role` TEXT NOT NULL, `type` TEXT NOT NULL, `content` TEXT NOT NULL, `reasoning` TEXT NOT NULL, `createdAt` INTEGER NOT NULL, `status` TEXT NOT NULL, `tokenCount` INTEGER NOT NULL, `modelUsed` TEXT NOT NULL, `senderConversationId` INTEGER, FOREIGN KEY(`conversationId`) REFERENCES `conversations`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `conversationId` INTEGER NOT NULL, `role` TEXT NOT NULL, `type` TEXT NOT NULL DEFAULT 'TEXT', `content` TEXT NOT NULL, `reasoning` TEXT NOT NULL DEFAULT '', `createdAt` INTEGER NOT NULL, `status` TEXT NOT NULL, `tokenCount` INTEGER NOT NULL, `modelUsed` TEXT NOT NULL, `senderConversationId` INTEGER, FOREIGN KEY(`conversationId`) REFERENCES `conversations`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
         "fields": [
           {
             "fieldPath": "id",
@@ -186,7 +195,8 @@
             "fieldPath": "type",
             "columnName": "type",
             "affinity": "TEXT",
-            "notNull": true
+            "notNull": true,
+            "defaultValue": "'TEXT'"
           },
           {
             "fieldPath": "content",
@@ -198,7 +208,8 @@
             "fieldPath": "reasoning",
             "columnName": "reasoning",
             "affinity": "TEXT",
-            "notNull": true
+            "notNull": true,
+            "defaultValue": "''"
           },
           {
             "fieldPath": "createdAt",
@@ -264,7 +275,7 @@
       },
       {
         "tableName": "character_cards",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `name` TEXT NOT NULL, `remark` TEXT NOT NULL, `description` TEXT NOT NULL, `jsonContent` TEXT NOT NULL, `avatar` TEXT, `artwork` TEXT, `isPinned` INTEGER NOT NULL, `isBuiltIn` INTEGER NOT NULL, `code` TEXT NOT NULL, `createdAt` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL, `scheduleWakeUpMinute` INTEGER, `scheduleSleepMinute` INTEGER, `scheduleWorkStartMinute` INTEGER, `scheduleWorkEndMinute` INTEGER, `scheduleBreakStartMinute` INTEGER, `scheduleBreakEndMinute` INTEGER)",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `name` TEXT NOT NULL, `remark` TEXT NOT NULL DEFAULT '', `description` TEXT NOT NULL, `jsonContent` TEXT NOT NULL, `avatar` TEXT, `artwork` TEXT, `isPinned` INTEGER NOT NULL DEFAULT 0, `isBuiltIn` INTEGER NOT NULL, `code` TEXT NOT NULL, `createdAt` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL, `scheduleWakeUpMinute` INTEGER, `scheduleSleepMinute` INTEGER, `scheduleWorkStartMinute` INTEGER, `scheduleWorkEndMinute` INTEGER, `scheduleBreakStartMinute` INTEGER, `scheduleBreakEndMinute` INTEGER)",
         "fields": [
           {
             "fieldPath": "id",
@@ -282,7 +293,8 @@
             "fieldPath": "remark",
             "columnName": "remark",
             "affinity": "TEXT",
-            "notNull": true
+            "notNull": true,
+            "defaultValue": "''"
           },
           {
             "fieldPath": "description",
@@ -310,7 +322,8 @@
             "fieldPath": "isPinned",
             "columnName": "isPinned",
             "affinity": "INTEGER",
-            "notNull": true
+            "notNull": true,
+            "defaultValue": "0"
           },
           {
             "fieldPath": "isBuiltIn",
@@ -387,7 +400,7 @@
       },
       {
         "tableName": "memory_items",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `type` TEXT NOT NULL, `content` TEXT NOT NULL, `keywords` TEXT NOT NULL, `confidence` REAL NOT NULL, `characterCardId` INTEGER, `visibility` TEXT NOT NULL, `isTopSecret` INTEGER NOT NULL, `sourceConversationId` INTEGER, `sourceMessageId` INTEGER, `timeScope` TEXT NOT NULL DEFAULT 'LONG_TERM', `expiresAt` INTEGER, `isPinned` INTEGER NOT NULL DEFAULT 0, `importance` TEXT NOT NULL DEFAULT 'NORMAL', `locked` INTEGER NOT NULL DEFAULT 0, `sourceType` TEXT NOT NULL DEFAULT 'CHAT', `createdAt` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL, `isDeleted` INTEGER NOT NULL)",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `type` TEXT NOT NULL, `content` TEXT NOT NULL, `keywords` TEXT NOT NULL, `confidence` REAL NOT NULL, `characterCardId` INTEGER, `visibility` TEXT NOT NULL DEFAULT 'SHARED', `isTopSecret` INTEGER NOT NULL DEFAULT 0, `sourceConversationId` INTEGER, `sourceMessageId` INTEGER, `timeScope` TEXT NOT NULL DEFAULT 'LONG_TERM', `expiresAt` INTEGER, `isPinned` INTEGER NOT NULL DEFAULT 0, `importance` TEXT NOT NULL DEFAULT 'NORMAL', `locked` INTEGER NOT NULL DEFAULT 0, `sourceType` TEXT NOT NULL DEFAULT 'CHAT', `createdAt` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL, `isDeleted` INTEGER NOT NULL)",
         "fields": [
           {
             "fieldPath": "id",
@@ -428,13 +441,15 @@
             "fieldPath": "visibility",
             "columnName": "visibility",
             "affinity": "TEXT",
-            "notNull": true
+            "notNull": true,
+            "defaultValue": "'SHARED'"
           },
           {
             "fieldPath": "isTopSecret",
             "columnName": "isTopSecret",
             "affinity": "INTEGER",
-            "notNull": true
+            "notNull": true,
+            "defaultValue": "0"
           },
           {
             "fieldPath": "sourceConversationId",
@@ -634,7 +649,7 @@
       },
       {
         "tableName": "relationship_event",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `convAId` INTEGER NOT NULL, `convBId` INTEGER, `scene` TEXT NOT NULL, `topic` TEXT NOT NULL, `mood` TEXT NOT NULL, `points` TEXT NOT NULL, `source` TEXT NOT NULL, `type` TEXT NOT NULL, `happenedAt` INTEGER NOT NULL)",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `convAId` INTEGER NOT NULL, `convBId` INTEGER, `scene` TEXT NOT NULL, `topic` TEXT NOT NULL, `mood` TEXT NOT NULL, `points` TEXT NOT NULL, `source` TEXT NOT NULL, `type` TEXT NOT NULL DEFAULT 'INTERACTION', `happenedAt` INTEGER NOT NULL)",
         "fields": [
           {
             "fieldPath": "id",
@@ -687,7 +702,8 @@
             "fieldPath": "type",
             "columnName": "type",
             "affinity": "TEXT",
-            "notNull": true
+            "notNull": true,
+            "defaultValue": "'INTERACTION'"
           },
           {
             "fieldPath": "happenedAt",
@@ -718,7 +734,7 @@
       },
       {
         "tableName": "interaction",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `initiatorConvId` INTEGER NOT NULL, `targetConvId` INTEGER NOT NULL, `status` TEXT NOT NULL, `topicSeed` TEXT NOT NULL, `source` TEXT NOT NULL, `motive` TEXT, `startedAt` INTEGER, `endedAt` INTEGER, `turnCount` INTEGER NOT NULL, `createdAt` INTEGER NOT NULL)",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `initiatorConvId` INTEGER NOT NULL, `targetConvId` INTEGER NOT NULL, `status` TEXT NOT NULL, `topicSeed` TEXT NOT NULL, `source` TEXT NOT NULL DEFAULT 'MANUAL', `motive` TEXT, `startedAt` INTEGER, `endedAt` INTEGER, `turnCount` INTEGER NOT NULL, `createdAt` INTEGER NOT NULL)",
         "fields": [
           {
             "fieldPath": "id",
@@ -754,7 +770,8 @@
             "fieldPath": "source",
             "columnName": "source",
             "affinity": "TEXT",
-            "notNull": true
+            "notNull": true,
+            "defaultValue": "'MANUAL'"
           },
           {
             "fieldPath": "motive",
@@ -1371,7 +1388,7 @@
     ],
     "setupQueries": [
       "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
-      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'b307144612ec7f8a8a1449f4b92f4c0f')"
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '1a57f262c1697fcdc925496ff1467754')"
     ]
   }
 }

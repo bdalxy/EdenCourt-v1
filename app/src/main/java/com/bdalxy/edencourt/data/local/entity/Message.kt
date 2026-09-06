@@ -1,5 +1,6 @@
 package com.bdalxy.edencourt.data.local.entity
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.Index
@@ -53,6 +54,7 @@ data class Message(
     /** 消息角色（用户/助手/系统） */
     val role: Role = Role.USER,
     /** 消息类型（T5.7：TEXT/ACTION/RESULT，默认 TEXT 兼容存量） */
+    @ColumnInfo(defaultValue = "'TEXT'")
     val type: MessageType = MessageType.TEXT,
     /** 消息正文 */
     val content: String = "",
@@ -60,6 +62,7 @@ data class Message(
      * 思考过程（推理模型 reasoning_content；T3.4 修正，v2 新增列）。
      * 仅 AI 消息使用，普通模型/无思考时为空串；UI 层默认折叠展示。
      */
+    @ColumnInfo(defaultValue = "''")
     val reasoning: String = "",
     /** 创建时间（毫秒时间戳） */
     val createdAt: Long = System.currentTimeMillis(),

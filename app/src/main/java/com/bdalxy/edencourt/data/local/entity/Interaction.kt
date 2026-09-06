@@ -1,5 +1,6 @@
 package com.bdalxy.edencourt.data.local.entity
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
@@ -35,6 +36,7 @@ data class Interaction(
     /** 本次互动话题锚点（A 的开场抛题，每轮携带防跑偏） */
     val topicSeed: String = "",
     /** 互动来源（T11.7：InteractionSource.name，MANUAL=手动 / AUTO=自动驱动，默认手动） */
+    @ColumnInfo(defaultValue = "'MANUAL'")
     val source: String = InteractionSource.MANUAL.name,
     /** 本次互动的「因由」（T11.12 事件驱动）：角色因哪件事/主题而起意来找对方；用于开场白注入与去重（同一件事冷却期内不重复驱动） */
     val motive: String? = null,

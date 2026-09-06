@@ -1,5 +1,6 @@
 package com.bdalxy.edencourt.data.local.entity
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
@@ -35,6 +36,7 @@ data class RelationshipEvent(
     /** 互动来源（InteractionSource.name：MANUAL=手动 / AUTO=自动驱动） */
     val source: String = InteractionSource.MANUAL.name,
     /** 事件类型（T11.16）：INTERACTION=角色间互动共同经历 / WATCH=用户共同观看（你主动分享内容后一起看） */
+    @ColumnInfo(defaultValue = "'INTERACTION'")
     val type: String = TYPE_INTERACTION,
     /** 发生时间 */
     val happenedAt: Long = System.currentTimeMillis(),
