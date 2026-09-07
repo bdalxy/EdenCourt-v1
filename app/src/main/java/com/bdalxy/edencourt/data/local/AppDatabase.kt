@@ -37,6 +37,7 @@ import com.bdalxy.edencourt.data.local.entity.WorldInfoEntry
 /**
  * 本地数据库单例（企划书 3.3.2 / T2.4）。
  * - 挂载：Conversation、Message、CharacterCardEntity、MemoryItem 四个实体与对应 DAO
+ * - version=36：v35→v36 no-op 迁移（修复 71847ce 在同一版本号内改 defaultValue 注解导致 identity hash 漂移而崩溃：真机存量 v35 库 hash 为旧值 b3071446，新版实体 expected 为 1a57f262。所有改动列的 DEFAULT 约束在迁移 SQL 里早已存在，物理表结构无变化，仅需 bump 版本号触发 Room 重算 identity_hash）
  * - version=35：v34→v35 统一群聊参与者表索引名为 Room 默认名（v2.0 审查修复：此前迁移用自定义短名，与实体/schema 不一致）
  * - version=34：v33→v34 conversations 加 isGroup + messages 加 senderConversationId + 新增 conversation_participants 群参与者表（v2.0 A6-1 群聊数据层）
  * - version=33：v32→v33 conversations 加候选状态 4 列 candidateDirection/candidateCount/candidateLastSeen/lastDirectionSwitch（v2.0 关系引擎 R3 方向候选裁决）
@@ -47,7 +48,7 @@ import com.bdalxy.edencourt.data.local.entity.WorldInfoEntry
  */
 @Database(
     entities = [Conversation::class, Message::class, CharacterCardEntity::class, MemoryItem::class, ConversationRelationship::class, RelationshipEvent::class, Interaction::class, InteractionParticipant::class, InteractionTurn::class, UserIdentity::class, ConversationTraits::class, ConversationMood::class, WorldInfoBook::class, WorldInfoEntry::class, ConversationParticipant::class],
-    version = 35,
+    version = 36,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -526,6 +527,23 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /** v35→v36：no-op 迁移（修复 71847ce 在同一版本号内改 defaultValue 注解导致 identity hash 漂移而崩溃）。
+         *  71847ce 给实体补 @ColumnInfo(defaultValue) 注解（对齐迁移 SQL 的 DEFAULT），改变了 Room 的 identity hash，
+         *  但版本号仍停留在 35，导致真机存量 v35 库（room_master_table.identity_hash = 旧值 b3071446）与
+         *  新版实体期望（1a57f262）不一致，打开时校验失败崩溃。
+         *  经逐列回溯真机库 PRAGMA table_info：这些改动列中，除 messages.reasoning 外（其历史迁移无 DEFAULT 约束，
+         *  已在 2026-09-07 移除该错误注解）其余 16 列（conversations 的 remark/interactionEnabled/lifeEnabled/affinityScore/
+         *  relationDirection/candidateDirection/candidateCount/graphEnabled/isGroup、character_cards 的 remark/isPinned、
+         *  messages 的 type、memory_items 的 visibility/isTopSecret、interaction 的 source、relationship_event 的 type）
+         *  在其原始迁移 SQL（ALTER TABLE ... ADD COLUMN ... DEFAULT ...）里均已带 DEFAULT 约束，
+         *  物理表结构无任何变化，仅 Room 元数据（identity_hash）需随版本号重算更新。
+         *  故本迁移为空（no-op），不重建任何表、不动任何数据；Room 在迁移结束后会自动写回新的 identity_hash。 */
+        private val MIGRATION_35_36 = object : Migration(35, 36) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // no-op：物理结构无变化，仅触发 Room 更新 identity_hash
+            }
+        }
+
         /** v28→v29：character_cards 加 isPinned 置顶列（B3 置顶大卡，默认 0=不置顶） */
         private val MIGRATION_28_29 = object : Migration(28, 29) {
             override fun migrate(db: SupportSQLiteDatabase) {
@@ -622,7 +640,7 @@ abstract class AppDatabase : RoomDatabase() {
             MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18, MIGRATION_18_19,
             MIGRATION_19_20, MIGRATION_20_21, MIGRATION_21_22, MIGRATION_22_23, MIGRATION_23_24, MIGRATION_24_25,
             MIGRATION_25_26, MIGRATION_26_27, MIGRATION_27_28, MIGRATION_28_29, MIGRATION_29_30, MIGRATION_30_31,
-            MIGRATION_31_32, MIGRATION_32_33, MIGRATION_33_34, MIGRATION_34_35,
+            MIGRATION_31_32, MIGRATION_32_33, MIGRATION_33_34, MIGRATION_34_35, MIGRATION_35_36,
         )
 
         /** 获取单例（双重检查锁，避免并发重复建库） */

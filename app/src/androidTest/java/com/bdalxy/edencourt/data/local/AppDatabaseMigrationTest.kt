@@ -274,6 +274,34 @@ class AppDatabaseMigrationTest {
     }
 
     /**
+     * 用例9：迁移 v35→v36（no-op，修复 71847ce 在同一版本号内改 defaultValue 注解导致 identity hash 漂移而崩溃）。
+     * 验证：no-op 迁移能跑通、数据无损、关键列值（关系方向/浓度）在穿越迁移后原样保留。
+     */
+    @Test
+    fun migrateFrom_v35_to_v36_noopKeepsData() {
+        helper.createDatabase(TEST_DB9, 35).use { db ->
+            // 埋入 v35 形态的存量会话（含 v2.0 关系引擎 + 群聊全部字段）
+            db.execSQL(
+                "INSERT INTO conversations (title, remark, code, interactionEnabled, lifeEnabled, createdAt, updatedAt, " +
+                    "isPinned, lastMessagePreview, lastMessageTime, affinityScore, relationDirection, " +
+                    "candidateDirection, candidateCount, worldBookId, graphEnabled, isGroup) " +
+                    "VALUES ('存量会话', '', 'V-test36', 0, 0, 1000, 2000, 0, '你好', 2000, 30, 'FRIEND', 'AMBIGUOUS', 2, NULL, 0, 0)",
+            )
+
+            migrateChain(db, from = 35, to = 36)
+
+            // no-op：数据无损
+            val count = queryInt(db, "SELECT COUNT(*) FROM conversations WHERE code = 'V-test36'")
+            check(count == 1) { "迁移后会话数据丢失: count=$count" }
+            // 关键列值保留（关系方向 / 浓度未被动）
+            val direction = queryString(db, "SELECT relationDirection FROM conversations WHERE code = 'V-test36' LIMIT 1")
+            check(direction == "FRIEND") { "relationDirection 应保留 FRIEND，实测: $direction" }
+            val affinity = queryInt(db, "SELECT affinityScore FROM conversations WHERE code = 'V-test36' LIMIT 1")
+            check(affinity == 30) { "affinityScore 应保留 30，实测: $affinity" }
+        }
+    }
+
+    /**
      * 用例8：迁移 v25→v31（补齐审查点名的覆盖缺口区间）。
      * 覆盖：v27→v28 新增世界书两表 world_info_book/world_info_entry + conversations 加 worldBookId（A3），
      * v30→v31 conversations 加 graphEnabled 图谱开关（B4）。
@@ -337,5 +365,6 @@ class AppDatabaseMigrationTest {
         private const val TEST_DB6 = "migration-test-v33.db"
         private const val TEST_DB7 = "migration-test-v34.db"
         private const val TEST_DB8 = "migration-test-v25.db"
+        private const val TEST_DB9 = "migration-test-v35.db"
     }
 }
