@@ -19,7 +19,7 @@ android {
         minSdk = 29
         targetSdk = 36
         versionCode = 4
-        versionName = "2.0.0"
+        versionName = "2.0.0-beta"
 
         // androidTest 使用标准 runner（方案 G-③ Phase2：Room 迁移测试用）
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
