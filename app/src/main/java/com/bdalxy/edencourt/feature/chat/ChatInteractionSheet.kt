@@ -131,29 +131,12 @@ internal fun InteractionSheet(
                 relationships.forEach { r ->
                     Column(modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
+                            // 关系为内部状态，浓度数值不外显（2026-09-07 R5 拍板），仅保留角色名
                             Text(
                                 text = "与 ${r.peerName}",
                                 style = MaterialTheme.typography.bodyMedium,
                                 modifier = Modifier.weight(1f),
                             )
-                            // 好感度档位色：亲密=暖色系 / 友好 / 相识 / 陌生 逐级递减
-                            val tierColor = when (r.tierLabel) {
-                                "亲密" -> MaterialTheme.colorScheme.error
-                                "友好" -> MaterialTheme.colorScheme.tertiary
-                                "相识" -> MaterialTheme.colorScheme.primary
-                                else -> MaterialTheme.colorScheme.outline
-                            }
-                            Surface(
-                                shape = RoundedCornerShape(8.dp),
-                                color = tierColor.copy(alpha = 0.15f),
-                            ) {
-                                Text(
-                                    text = "${r.affinityScore} · ${r.tierLabel}",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = tierColor,
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
-                                )
-                            }
                         }
                         Text(
                             text = "已互动 ${r.interactionCount} 次",

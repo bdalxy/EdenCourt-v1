@@ -213,16 +213,7 @@ fun KnowledgeDrawer(
                             label = "生活状态",
                             value = lifeStateText,
                         )
-                        DrawerStateRow(
-                            icon = { Icon(Icons.Filled.List, contentDescription = "亲密度", tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(20.dp)) },
-                            label = "亲密度",
-                            value = affinityText,
-                        )
-                        DrawerStateRow(
-                            icon = { Icon(Icons.Filled.Star, contentDescription = "关系方向", tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(20.dp)) },
-                            label = "关系方向",
-                            value = directionText,
-                        )
+                        // 注意：关系为内部状态，亲密度/关系方向数值不外显（2026-09-07 R5 拍板）
                         // —— 互动行：进入互动面板 ——
                         SectionLabel("互动")
                         Row(
