@@ -16,11 +16,16 @@ local.properties
 .vscode/
 
 # 验证截图与报告（仅本地保留，不推送）
-.trae/
+# 例外：.trae/skills/ 为项目专属 AI 技能目录（edencourt-dev），随仓库分发
+.trae/*
+!.trae/skills/
 
 # 本地测试临时目录与本地数据库（含测试/隐私数据，不推送）
 ec_tmp/
 *.db
+
+# 整理临时区（人工审核文件夹，检查后可删，不推送）
+待检查处理_*/
 
 # 历史设计文档/调研报告（思路库，仅本地保留，不推送）
 .planning/
